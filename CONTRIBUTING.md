@@ -43,3 +43,14 @@ Mensagens de commit curtas e no imperativo (ex.: "Resolve chamadas via super"). 
 ## Reportando um problema de análise
 
 Inclua, se possível, um trecho mínimo de código que reproduz o problema, o que o Rastro mostrou e o que você esperava. Não compartilhe código privado que você não pode divulgar.
+
+## Publicando uma versão (mantenedores)
+
+O pacote publicado é só `apps/cli` (nome `rastro`), com os pacotes internos embutidos em `dist/rastro.mjs`.
+
+```bash
+npm run build                    # inclui o bundle da CLI e a interface
+npm test
+npm version <patch|minor|major> -w apps/cli
+npm publish -w apps/cli          # o prepack copia README e LICENSE com links absolutos
+```

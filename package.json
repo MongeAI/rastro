@@ -16,7 +16,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run build -w @rastro/web && node scripts/copy-web.mjs",
+    "build": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run build -w @rastro/web && node scripts/copy-web.mjs && node scripts/bundle-cli.mjs",
     "dev:web": "npm run dev -w @rastro/web",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -35,6 +35,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
+    "rolldown": "^1.2.14",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.2",
     "vitest": "^5.0.5"

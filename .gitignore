@@ -17,3 +17,8 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# gerados no prepack do pacote npm
+/apps/cli/README.md
+/apps/cli/LICENSE
+*.tgz

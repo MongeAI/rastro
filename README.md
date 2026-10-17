@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/MongeAI/rastro/actions/workflows/ci.yml"><img src="https://github.com/MongeAI/rastro/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/rastro"><img src="https://img.shields.io/npm/v/rastro?color=black&label=npm" alt="Versão no npm" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-black" alt="Licença MIT" /></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2022.12-black" alt="Node 22.12 ou mais novo" />
   <img src="https://img.shields.io/badge/status-v0.1%20(inicial)-black" alt="Status: v0.1, fase inicial" />
@@ -23,7 +24,7 @@
   <img src="docs/assets/demo.gif" alt="Demonstração: do mapa de pastas até uma função e suas chamadas" width="900" />
 </p>
 
-<sub>🇬🇧 <b>English:</b> Rastro is a local-first, open source tool by MongeAI that statically analyzes JS/TS repositories and opens an interactive, evidence-backed code map in your browser. Every relation links to the file and line that proves it; unresolved references are shown as such, never guessed. Docs are in Portuguese for now. Quick start: <code>npm install && npm run build && npx rastro ./your-project</code>.</sub>
+<sub>🇬🇧 <b>English:</b> Rastro is a local-first, open source tool by MongeAI that statically analyzes JS/TS repositories and opens an interactive, evidence-backed code map in your browser. Every relation links to the file and line that proves it; unresolved references are shown as such, never guessed. Docs are in Portuguese for now. Quick start: <code>npx rastro ./your-project</code>.</sub>
 
 ---
 
@@ -44,16 +45,13 @@ O Rastro responde tudo isso num mapa navegável, e com uma regra de ouro:
 
 ## Comece em um minuto
 
-Pré-requisitos: **Node.js 22.12+** e **git**.
+Pré-requisito: **Node.js 22.12+**. Na pasta de qualquer projeto JS/TS:
 
 ```bash
-git clone https://github.com/MongeAI/rastro.git
-cd rastro
-npm install
-npm run build
-
-npx rastro ./caminho/do/seu-projeto
+npx rastro .
 ```
+
+Ou instale o comando de vez com `npm install -g rastro` e use `rastro ./caminho/do/projeto`.
 
 O terminal mostra um resumo e o navegador abre sozinho:
 
@@ -67,9 +65,20 @@ rastro-monorepo ~/rastro
 Rastro pronto em http://127.0.0.1:4321/?token=…  (Ctrl+C para encerrar)
 ```
 
-Quer testar antes com os exemplos que vêm no repositório? `npx rastro fixtures/ts-basic` ou `npx rastro fixtures/express-api`.
+<details>
+<summary><b>Rodar a partir do código-fonte</b></summary>
 
-> Para ter o comando `rastro` em qualquer pasta: `npm link -w apps/cli` (desfazer: `npm unlink -g rastro`).
+```bash
+git clone https://github.com/MongeAI/rastro.git
+cd rastro
+npm install
+npm run build
+npx rastro fixtures/ts-basic        # ou fixtures/express-api, ou o caminho de qualquer projeto
+```
+
+Para ter esse build como comando global: `npm link -w apps/cli` (desfazer: `npm unlink -g rastro`).
+
+</details>
 
 ## Um passeio pela interface
 
