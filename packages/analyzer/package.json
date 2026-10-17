@@ -1,0 +1,24 @@
+{
+  "name": "@teia/analyzer",
+  "version": "0.1.0",
+  "description": "Analisador estático de projetos JavaScript/TypeScript do Teia (ts-morph).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@teia/core": "0.1.0",
+    "@teia/graph": "0.1.0",
+    "ignore": "^7.0.12",
+    "ts-morph": "^28.0.0"
+  }
+}

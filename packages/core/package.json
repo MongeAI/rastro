@@ -1,0 +1,21 @@
+{
+  "name": "@teia/core",
+  "version": "0.1.0",
+  "description": "Modelo de dados do Teia: nós, relações, evidências e validação do grafo.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema.json": "./schema/teia-graph.schema.json"
+  },
+  "files": [
+    "dist",
+    "schema"
+  ],
+  "sideEffects": false
+}

@@ -1,0 +1,7 @@
+Fontes incluídas na interface do Teia (servidas localmente, sem acesso à internet):
+
+- Inter — Copyright (c) The Inter Project Authors (https://github.com/rsms/inter)
+- JetBrains Mono — Copyright (c) The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+
+Ambas são distribuídas sob a SIL Open Font License, Version 1.1:
+https://openfontlicense.org

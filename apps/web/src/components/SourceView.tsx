@@ -1,0 +1,99 @@
+import { useEffect, useState } from 'react';
+import { highlightLine } from '../lib/highlight';
+
+interface Props {
+  file: string;
+  startLine: number;
+  endLine: number;
+  /** A interface foi aberta pela CLI (há servidor para ler o código). */
+  available: boolean;
+}
+
+type State =
+  { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; lines: string[] };
+
+const cache = new Map<string, Promise<string[]>>();
+
+function fetchSource(file: string): Promise<string[]> {
+  let p = cache.get(file);
+  if (!p) {
+    p = fetch(`/api/source?file=${encodeURIComponent(file)}`).then(async (res) => {
+      const body = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
+      if (!res.ok || typeof body.content !== 'string')
+        throw new Error(body.error ?? `Erro ${res.status}`);
+      return body.content.split(/\r?\n/);
+    });
+    p.catch(() => cache.delete(file));
+    cache.set(file, p);
+  }
+  return p;
+}
+
+const CONTEXT = 3;
+const MAX_LINES = 80;
+
+export function SourceView({ file, startLine, endLine, available }: Props) {
+  const [state, setState] = useState<State>({ status: 'loading' });
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    setShowAll(false);
+    if (!available) return;
+    let alive = true;
+    setState({ status: 'loading' });
+    fetchSource(file).then(
+      (lines) => alive && setState({ status: 'ok', lines }),
+      (err: Error) => alive && setState({ status: 'error', message: err.message }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [file, available]);
+
+  if (!available) {
+    return (
+      <p className="muted small">
+        O código não está disponível neste modo (grafo aberto a partir de um arquivo JSON). Use o
+        caminho e as linhas acima para localizar o trecho no editor.
+      </p>
+    );
+  }
+  if (state.status === 'loading') return <div className="source skeleton" aria-busy="true" />;
+  if (state.status === 'error')
+    return <p className="muted small">Não foi possível carregar o código: {state.message}</p>;
+
+  const total = state.lines.length;
+  const from = showAll ? 1 : Math.max(1, startLine - CONTEXT);
+  const to = showAll ? total : Math.min(total, endLine + CONTEXT, from + MAX_LINES - 1);
+  const truncated = !showAll && (to < Math.min(total, endLine + CONTEXT) || from > 1 || to < total);
+  const width = String(to).length;
+
+  return (
+    <div className="source-wrap">
+      <pre className="source" tabIndex={0} aria-label={`Código de ${file}, linhas ${from} a ${to}`}>
+        {state.lines.slice(from - 1, to).map((line, i) => {
+          const n = from + i;
+          const inRange = n >= startLine && n <= endLine;
+          return (
+            <div key={n} className={`src-line${inRange ? ' hl' : ''}`}>
+              <span className="src-num">{String(n).padStart(width, ' ')}</span>
+              <code>
+                {highlightLine(line).map((t, j) => (
+                  <span key={j} className={t.cls ? `t-${t.cls}` : undefined}>
+                    {t.text}
+                  </span>
+                ))}
+                {line.length === 0 ? ' ' : ''}
+              </code>
+            </div>
+          );
+        })}
+      </pre>
+      {truncated && (
+        <button type="button" className="link-button" onClick={() => setShowAll(true)}>
+          Ver arquivo inteiro ({total} linhas)
+        </button>
+      )}
+    </div>
+  );
+}

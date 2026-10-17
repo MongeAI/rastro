@@ -1,0 +1,11 @@
+{
+  "name": "ts-basic",
+  "private": true,
+  "scripts": {
+    "postinstall": "node -e \"require('fs').writeFileSync('POSTINSTALL_RAN','')\""
+  },
+  "dependencies": {
+    "fake-lib": "1.0.0",
+    "lodash": "^4.17.21"
+  }
+}

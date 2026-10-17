@@ -1,0 +1,19 @@
+# dependências e builds do próprio Teia
+node_modules/
+!fixtures/**/node_modules/
+/packages/*/dist/
+/apps/*/dist/
+*.tsbuildinfo
+coverage/
+
+# saídas de análise geradas localmente
+.teia/
+*.graph.json
+!docs/examples/*.graph.json
+
+# sistema / editores
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

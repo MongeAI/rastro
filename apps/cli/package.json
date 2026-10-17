@@ -1,0 +1,22 @@
+{
+  "name": "teia",
+  "version": "0.1.0",
+  "description": "Teia — CLI que analisa um repositório JS/TS e abre o mapa navegável do código.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "teia": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@teia/analyzer": "0.1.0",
+    "@teia/core": "0.1.0",
+    "@teia/graph": "0.1.0"
+  }
+}

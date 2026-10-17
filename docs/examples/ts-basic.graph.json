@@ -1,0 +1,2503 @@
+{
+  "schemaVersion": "0.1.0",
+  "generatedAt": "2026-10-17T00:00:00.000Z",
+  "tool": {
+    "name": "teia",
+    "version": "0.1.0"
+  },
+  "project": {
+    "name": "ts-basic",
+    "root": "/caminho/para/teia/fixtures/ts-basic",
+    "languages": [
+      "ts"
+    ],
+    "tsconfig": "tsconfig.json"
+  },
+  "analyzer": {
+    "name": "@teia/analyzer (ts-morph)",
+    "version": "0.1.0",
+    "typescriptVersion": "6.0.2",
+    "options": {
+      "exclude": [],
+      "respectGitignore": true,
+      "maxFiles": 10000,
+      "maxFileSizeBytes": 1000000
+    }
+  },
+  "nodes": [
+    {
+      "id": "class:src/models/user.ts#BaseModel",
+      "kind": "class",
+      "name": "BaseModel",
+      "qualifiedName": "BaseModel",
+      "location": {
+        "file": "src/models/user.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 5,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false
+      },
+      "parent": "file:src/models/user.ts"
+    },
+    {
+      "id": "class:src/models/user.ts#User",
+      "kind": "class",
+      "name": "User",
+      "qualifiedName": "User",
+      "location": {
+        "file": "src/models/user.ts",
+        "startLine": 7,
+        "startColumn": 1,
+        "endLine": 18,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false
+      },
+      "parent": "file:src/models/user.ts"
+    },
+    {
+      "id": "class:src/services/user-service.ts#UserService",
+      "kind": "class",
+      "name": "UserService",
+      "qualifiedName": "UserService",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 4,
+        "startColumn": 1,
+        "endLine": 34,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false
+      },
+      "parent": "file:src/services/user-service.ts"
+    },
+    {
+      "id": "file:src/cycle/a.ts",
+      "kind": "file",
+      "name": "a.ts",
+      "qualifiedName": "src/cycle/a.ts",
+      "parent": "module:src/cycle",
+      "location": {
+        "file": "src/cycle/a.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 6,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 6,
+        "exportNames": [
+          "ping"
+        ],
+        "inCycle": true
+      }
+    },
+    {
+      "id": "file:src/cycle/b.ts",
+      "kind": "file",
+      "name": "b.ts",
+      "qualifiedName": "src/cycle/b.ts",
+      "parent": "module:src/cycle",
+      "location": {
+        "file": "src/cycle/b.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 6,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 6,
+        "exportNames": [
+          "pong"
+        ],
+        "inCycle": true
+      }
+    },
+    {
+      "id": "file:src/index.ts",
+      "kind": "file",
+      "name": "index.ts",
+      "qualifiedName": "src/index.ts",
+      "parent": "module:src",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 29,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 29,
+        "exportNames": [
+          "main"
+        ]
+      }
+    },
+    {
+      "id": "file:src/lib/index.ts",
+      "kind": "file",
+      "name": "index.ts",
+      "qualifiedName": "src/lib/index.ts",
+      "parent": "module:src/lib",
+      "location": {
+        "file": "src/lib/index.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 3,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 3,
+        "exportNames": [
+          "add",
+          "slugify"
+        ]
+      }
+    },
+    {
+      "id": "file:src/lib/strings.ts",
+      "kind": "file",
+      "name": "strings.ts",
+      "qualifiedName": "src/lib/strings.ts",
+      "parent": "module:src/lib",
+      "location": {
+        "file": "src/lib/strings.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 8,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 8,
+        "exportNames": [
+          "slugify"
+        ]
+      }
+    },
+    {
+      "id": "file:src/math.ts",
+      "kind": "file",
+      "name": "math.ts",
+      "qualifiedName": "src/math.ts",
+      "parent": "module:src",
+      "location": {
+        "file": "src/math.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 15,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 15,
+        "exportNames": [
+          "average",
+          "double",
+          "sum"
+        ]
+      }
+    },
+    {
+      "id": "file:src/models/user.ts",
+      "kind": "file",
+      "name": "user.ts",
+      "qualifiedName": "src/models/user.ts",
+      "parent": "module:src/models",
+      "location": {
+        "file": "src/models/user.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 19,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 19,
+        "exportNames": [
+          "BaseModel",
+          "User"
+        ]
+      }
+    },
+    {
+      "id": "file:src/services/user-service.ts",
+      "kind": "file",
+      "name": "user-service.ts",
+      "qualifiedName": "src/services/user-service.ts",
+      "parent": "module:src/services",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 35,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 35,
+        "exportNames": [
+          "UserService"
+        ]
+      }
+    },
+    {
+      "id": "file:src/side-effect.ts",
+      "kind": "file",
+      "name": "side-effect.ts",
+      "qualifiedName": "src/side-effect.ts",
+      "parent": "module:src",
+      "location": {
+        "file": "src/side-effect.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 5,
+        "endColumn": 1
+      },
+      "meta": {
+        "language": "ts",
+        "lines": 5
+      }
+    },
+    {
+      "id": "fn:src/cycle/a.ts#ping",
+      "kind": "function",
+      "name": "ping",
+      "qualifiedName": "ping",
+      "location": {
+        "file": "src/cycle/a.ts",
+        "startLine": 3,
+        "startColumn": 1,
+        "endLine": 5,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/cycle/a.ts"
+    },
+    {
+      "id": "fn:src/cycle/b.ts#pong",
+      "kind": "function",
+      "name": "pong",
+      "qualifiedName": "pong",
+      "location": {
+        "file": "src/cycle/b.ts",
+        "startLine": 3,
+        "startColumn": 1,
+        "endLine": 5,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/cycle/b.ts"
+    },
+    {
+      "id": "fn:src/index.ts#main",
+      "kind": "function",
+      "name": "main",
+      "qualifiedName": "main",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 11,
+        "startColumn": 1,
+        "endLine": 22,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/index.ts"
+    },
+    {
+      "id": "fn:src/index.ts#runCallback",
+      "kind": "function",
+      "name": "runCallback",
+      "qualifiedName": "runCallback",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 24,
+        "startColumn": 1,
+        "endLine": 26,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": false,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/index.ts"
+    },
+    {
+      "id": "fn:src/lib/strings.ts#normalize",
+      "kind": "function",
+      "name": "normalize",
+      "qualifiedName": "normalize",
+      "location": {
+        "file": "src/lib/strings.ts",
+        "startLine": 5,
+        "startColumn": 1,
+        "endLine": 7,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": false,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/lib/strings.ts"
+    },
+    {
+      "id": "fn:src/lib/strings.ts#slugify",
+      "kind": "function",
+      "name": "slugify",
+      "qualifiedName": "slugify",
+      "location": {
+        "file": "src/lib/strings.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 3,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/lib/strings.ts"
+    },
+    {
+      "id": "fn:src/math.ts#average",
+      "kind": "function",
+      "name": "average",
+      "qualifiedName": "average",
+      "location": {
+        "file": "src/math.ts",
+        "startLine": 5,
+        "startColumn": 1,
+        "endLine": 8,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/math.ts"
+    },
+    {
+      "id": "fn:src/math.ts#double",
+      "kind": "function",
+      "name": "double",
+      "qualifiedName": "double",
+      "location": {
+        "file": "src/math.ts",
+        "startLine": 10,
+        "startColumn": 14,
+        "endLine": 10,
+        "endColumn": 60
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "async": false
+      },
+      "parent": "file:src/math.ts"
+    },
+    {
+      "id": "fn:src/math.ts#multiply",
+      "kind": "function",
+      "name": "multiply",
+      "qualifiedName": "multiply",
+      "location": {
+        "file": "src/math.ts",
+        "startLine": 12,
+        "startColumn": 1,
+        "endLine": 14,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": false,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/math.ts"
+    },
+    {
+      "id": "fn:src/math.ts#sum",
+      "kind": "function",
+      "name": "sum",
+      "qualifiedName": "sum",
+      "location": {
+        "file": "src/math.ts",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 3,
+        "endColumn": 2
+      },
+      "meta": {
+        "language": "ts",
+        "exported": true,
+        "defaultExport": false,
+        "async": false
+      },
+      "parent": "file:src/math.ts"
+    },
+    {
+      "id": "method:src/models/user.ts#BaseModel.toJSON",
+      "kind": "method",
+      "name": "toJSON",
+      "qualifiedName": "BaseModel.toJSON",
+      "location": {
+        "file": "src/models/user.ts",
+        "startLine": 2,
+        "startColumn": 3,
+        "endLine": 4,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "method"
+      },
+      "parent": "class:src/models/user.ts#BaseModel"
+    },
+    {
+      "id": "method:src/models/user.ts#User.constructor",
+      "kind": "method",
+      "name": "constructor",
+      "qualifiedName": "User.constructor",
+      "location": {
+        "file": "src/models/user.ts",
+        "startLine": 8,
+        "startColumn": 3,
+        "endLine": 13,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "constructor"
+      },
+      "parent": "class:src/models/user.ts#User"
+    },
+    {
+      "id": "method:src/models/user.ts#User.get displayName",
+      "kind": "method",
+      "name": "get displayName",
+      "qualifiedName": "User.get displayName",
+      "location": {
+        "file": "src/models/user.ts",
+        "startLine": 15,
+        "startColumn": 3,
+        "endLine": 17,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "getter"
+      },
+      "parent": "class:src/models/user.ts#User"
+    },
+    {
+      "id": "method:src/services/user-service.ts#UserService.create",
+      "kind": "method",
+      "name": "create",
+      "qualifiedName": "UserService.create",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 8,
+        "startColumn": 3,
+        "endLine": 13,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "method"
+      },
+      "parent": "class:src/services/user-service.ts#UserService"
+    },
+    {
+      "id": "method:src/services/user-service.ts#UserService.findBySlug",
+      "kind": "method",
+      "name": "findBySlug",
+      "qualifiedName": "UserService.findBySlug",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 15,
+        "startColumn": 3,
+        "endLine": 17,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "method"
+      },
+      "parent": "class:src/services/user-service.ts#UserService"
+    },
+    {
+      "id": "method:src/services/user-service.ts#UserService.nextId",
+      "kind": "method",
+      "name": "nextId",
+      "qualifiedName": "UserService.nextId",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 31,
+        "startColumn": 3,
+        "endLine": 33,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "method"
+      },
+      "parent": "class:src/services/user-service.ts#UserService"
+    },
+    {
+      "id": "method:src/services/user-service.ts#UserService.onCreate",
+      "kind": "method",
+      "name": "onCreate",
+      "qualifiedName": "UserService.onCreate",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 25,
+        "startColumn": 3,
+        "endLine": 25,
+        "endColumn": 56
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "property"
+      },
+      "parent": "class:src/services/user-service.ts#UserService"
+    },
+    {
+      "id": "method:src/services/user-service.ts#UserService.validate",
+      "kind": "method",
+      "name": "validate",
+      "qualifiedName": "UserService.validate",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 27,
+        "startColumn": 3,
+        "endLine": 29,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "method"
+      },
+      "parent": "class:src/services/user-service.ts#UserService"
+    },
+    {
+      "id": "method:src/services/user-service.ts#UserService.withSeed",
+      "kind": "method",
+      "name": "withSeed",
+      "qualifiedName": "UserService.withSeed",
+      "location": {
+        "file": "src/services/user-service.ts",
+        "startLine": 19,
+        "startColumn": 3,
+        "endLine": 23,
+        "endColumn": 4
+      },
+      "meta": {
+        "language": "ts",
+        "memberKind": "method",
+        "static": true
+      },
+      "parent": "class:src/services/user-service.ts#UserService"
+    },
+    {
+      "id": "module:.",
+      "kind": "module",
+      "name": "(raiz)",
+      "qualifiedName": "."
+    },
+    {
+      "id": "module:src",
+      "kind": "module",
+      "name": "src",
+      "qualifiedName": "src",
+      "parent": "module:."
+    },
+    {
+      "id": "module:src/cycle",
+      "kind": "module",
+      "name": "cycle",
+      "qualifiedName": "src/cycle",
+      "parent": "module:src"
+    },
+    {
+      "id": "module:src/lib",
+      "kind": "module",
+      "name": "lib",
+      "qualifiedName": "src/lib",
+      "parent": "module:src"
+    },
+    {
+      "id": "module:src/models",
+      "kind": "module",
+      "name": "models",
+      "qualifiedName": "src/models",
+      "parent": "module:src"
+    },
+    {
+      "id": "module:src/services",
+      "kind": "module",
+      "name": "services",
+      "qualifiedName": "src/services",
+      "parent": "module:src"
+    },
+    {
+      "id": "pkg:fake-lib",
+      "kind": "package",
+      "name": "fake-lib",
+      "meta": {
+        "declared": true
+      }
+    },
+    {
+      "id": "pkg:lodash",
+      "kind": "package",
+      "name": "lodash",
+      "meta": {
+        "declared": true
+      }
+    },
+    {
+      "id": "pkg:node:fs",
+      "kind": "package",
+      "name": "node:fs",
+      "meta": {
+        "builtin": true,
+        "declared": true
+      }
+    },
+    {
+      "id": "unresolved:src/index.ts#call:cb",
+      "kind": "unresolved",
+      "name": "cb",
+      "parent": "file:src/index.ts",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 25,
+        "startColumn": 10,
+        "endLine": 25,
+        "endColumn": 14
+      },
+      "meta": {
+        "reason": "indirect-call",
+        "reference": "cb"
+      }
+    },
+    {
+      "id": "unresolved:src/index.ts#call:ghost",
+      "kind": "unresolved",
+      "name": "ghost",
+      "parent": "file:src/index.ts",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 16,
+        "startColumn": 3,
+        "endLine": 16,
+        "endColumn": 10
+      },
+      "meta": {
+        "reason": "symbol-not-found",
+        "reference": "ghost"
+      }
+    },
+    {
+      "id": "unresolved:src/index.ts#call:notDefinedAnywhere",
+      "kind": "unresolved",
+      "name": "notDefinedAnywhere",
+      "parent": "file:src/index.ts",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 18,
+        "startColumn": 3,
+        "endLine": 18,
+        "endColumn": 23
+      },
+      "meta": {
+        "reason": "symbol-not-found",
+        "reference": "notDefinedAnywhere"
+      }
+    },
+    {
+      "id": "unresolved:src/index.ts#import:./missing",
+      "kind": "unresolved",
+      "name": "./missing",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 8,
+        "startColumn": 1,
+        "endLine": 8,
+        "endColumn": 35
+      },
+      "meta": {
+        "reason": "module-not-found",
+        "reference": "./missing"
+      }
+    },
+    {
+      "id": "unresolved:src/index.ts#import:chalk",
+      "kind": "unresolved",
+      "name": "chalk",
+      "location": {
+        "file": "src/index.ts",
+        "startLine": 4,
+        "startColumn": 1,
+        "endLine": 4,
+        "endColumn": 27
+      },
+      "meta": {
+        "reason": "undeclared-package",
+        "reference": "chalk"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "calls:file:src/index.ts->fn:src/index.ts#main",
+      "kind": "calls",
+      "source": "file:src/index.ts",
+      "target": "fn:src/index.ts#main",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 28,
+          "column": 1,
+          "snippet": "main();"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/cycle/a.ts#ping->fn:src/cycle/b.ts#pong",
+      "kind": "calls",
+      "source": "fn:src/cycle/a.ts#ping",
+      "target": "fn:src/cycle/b.ts#pong",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/cycle/a.ts",
+          "line": 4,
+          "column": 18,
+          "snippet": "return n > 0 ? pong(n - 1) : 0;"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/cycle/b.ts#pong->fn:src/cycle/a.ts#ping",
+      "kind": "calls",
+      "source": "fn:src/cycle/b.ts#pong",
+      "target": "fn:src/cycle/a.ts#ping",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/cycle/b.ts",
+          "line": 4,
+          "column": 10,
+          "snippet": "return ping(n);"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->class:src/services/user-service.ts#UserService",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "class:src/services/user-service.ts#UserService",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 12,
+          "column": 19,
+          "snippet": "const service = new UserService();"
+        }
+      ],
+      "meta": {
+        "callKind": "new",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->fn:src/index.ts#runCallback",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "fn:src/index.ts#runCallback",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 19,
+          "column": 3,
+          "snippet": "runCallback(() => sum(4, 5));"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->fn:src/lib/strings.ts#slugify",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "fn:src/lib/strings.ts#slugify",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 14,
+          "column": 46,
+          "snippet": "console.log(sum(1, 2), average([1, 2, 3]), slugify(user.name));"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->fn:src/math.ts#average",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "fn:src/math.ts#average",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 14,
+          "column": 26,
+          "snippet": "console.log(sum(1, 2), average([1, 2, 3]), slugify(user.name));"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->fn:src/math.ts#sum",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "fn:src/math.ts#sum",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 14,
+          "column": 15,
+          "snippet": "console.log(sum(1, 2), average([1, 2, 3]), slugify(user.name));"
+        },
+        {
+          "file": "src/index.ts",
+          "line": 19,
+          "column": 21,
+          "snippet": "runCallback(() => sum(4, 5));"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 2
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->method:src/services/user-service.ts#UserService.create",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "method:src/services/user-service.ts#UserService.create",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 13,
+          "column": 22,
+          "snippet": "const user: User = service.create('Ada Lovelace');"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->unresolved:src/index.ts#call:ghost",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "unresolved:src/index.ts#call:ghost",
+      "resolution": "unresolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 16,
+          "column": 3,
+          "snippet": "ghost();"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#main->unresolved:src/index.ts#call:notDefinedAnywhere",
+      "kind": "calls",
+      "source": "fn:src/index.ts#main",
+      "target": "unresolved:src/index.ts#call:notDefinedAnywhere",
+      "resolution": "unresolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 18,
+          "column": 3,
+          "snippet": "notDefinedAnywhere();"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/index.ts#runCallback->unresolved:src/index.ts#call:cb",
+      "kind": "calls",
+      "source": "fn:src/index.ts#runCallback",
+      "target": "unresolved:src/index.ts#call:cb",
+      "resolution": "unresolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 25,
+          "column": 10,
+          "snippet": "return cb();"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/lib/strings.ts#slugify->fn:src/lib/strings.ts#normalize",
+      "kind": "calls",
+      "source": "fn:src/lib/strings.ts#slugify",
+      "target": "fn:src/lib/strings.ts#normalize",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/lib/strings.ts",
+          "line": 2,
+          "column": 10,
+          "snippet": "return normalize(text).replace(/\\s+/g, '-');"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/math.ts#average->fn:src/math.ts#sum",
+      "kind": "calls",
+      "source": "fn:src/math.ts#average",
+      "target": "fn:src/math.ts#sum",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/math.ts",
+          "line": 7,
+          "column": 36,
+          "snippet": "return values.reduce((acc, v) => sum(acc, v), 0) / values.length;"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:fn:src/math.ts#double->fn:src/math.ts#multiply",
+      "kind": "calls",
+      "source": "fn:src/math.ts#double",
+      "target": "fn:src/math.ts#multiply",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/math.ts",
+          "line": 10,
+          "column": 46,
+          "snippet": "export const double = (n: number): number => multiply(n, 2);"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.create->class:src/models/user.ts#User",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.create",
+      "target": "class:src/models/user.ts#User",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 9,
+          "column": 18,
+          "snippet": "const user = new User(this.nextId(), name);"
+        }
+      ],
+      "meta": {
+        "callKind": "new",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.create->method:src/services/user-service.ts#UserService.nextId",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.create",
+      "target": "method:src/services/user-service.ts#UserService.nextId",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 9,
+          "column": 27,
+          "snippet": "const user = new User(this.nextId(), name);"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.create->method:src/services/user-service.ts#UserService.validate",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.create",
+      "target": "method:src/services/user-service.ts#UserService.validate",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 10,
+          "column": 5,
+          "snippet": "this.validate(user);"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.findBySlug->fn:src/lib/strings.ts#slugify",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.findBySlug",
+      "target": "fn:src/lib/strings.ts#slugify",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 16,
+          "column": 35,
+          "snippet": "return this.users.find((u) => slugify(u.name) === slug);"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.onCreate->method:src/services/user-service.ts#UserService.create",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.onCreate",
+      "target": "method:src/services/user-service.ts#UserService.create",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 25,
+          "column": 38,
+          "snippet": "onCreate = (name: string): User => this.create(name);"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.withSeed->class:src/services/user-service.ts#UserService",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.withSeed",
+      "target": "class:src/services/user-service.ts#UserService",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 20,
+          "column": 21,
+          "snippet": "const service = new UserService();"
+        }
+      ],
+      "meta": {
+        "callKind": "new",
+        "count": 1
+      }
+    },
+    {
+      "id": "calls:method:src/services/user-service.ts#UserService.withSeed->method:src/services/user-service.ts#UserService.create",
+      "kind": "calls",
+      "source": "method:src/services/user-service.ts#UserService.withSeed",
+      "target": "method:src/services/user-service.ts#UserService.create",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 21,
+          "column": 5,
+          "snippet": "service.create('Grace Hopper');"
+        }
+      ],
+      "meta": {
+        "callKind": "call",
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/models/user.ts#BaseModel->method:src/models/user.ts#BaseModel.toJSON",
+      "kind": "contains",
+      "source": "class:src/models/user.ts#BaseModel",
+      "target": "method:src/models/user.ts#BaseModel.toJSON",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/models/user.ts#User->method:src/models/user.ts#User.constructor",
+      "kind": "contains",
+      "source": "class:src/models/user.ts#User",
+      "target": "method:src/models/user.ts#User.constructor",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/models/user.ts#User->method:src/models/user.ts#User.get displayName",
+      "kind": "contains",
+      "source": "class:src/models/user.ts#User",
+      "target": "method:src/models/user.ts#User.get displayName",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/services/user-service.ts#UserService->method:src/services/user-service.ts#UserService.create",
+      "kind": "contains",
+      "source": "class:src/services/user-service.ts#UserService",
+      "target": "method:src/services/user-service.ts#UserService.create",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/services/user-service.ts#UserService->method:src/services/user-service.ts#UserService.findBySlug",
+      "kind": "contains",
+      "source": "class:src/services/user-service.ts#UserService",
+      "target": "method:src/services/user-service.ts#UserService.findBySlug",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/services/user-service.ts#UserService->method:src/services/user-service.ts#UserService.nextId",
+      "kind": "contains",
+      "source": "class:src/services/user-service.ts#UserService",
+      "target": "method:src/services/user-service.ts#UserService.nextId",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/services/user-service.ts#UserService->method:src/services/user-service.ts#UserService.onCreate",
+      "kind": "contains",
+      "source": "class:src/services/user-service.ts#UserService",
+      "target": "method:src/services/user-service.ts#UserService.onCreate",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/services/user-service.ts#UserService->method:src/services/user-service.ts#UserService.validate",
+      "kind": "contains",
+      "source": "class:src/services/user-service.ts#UserService",
+      "target": "method:src/services/user-service.ts#UserService.validate",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:class:src/services/user-service.ts#UserService->method:src/services/user-service.ts#UserService.withSeed",
+      "kind": "contains",
+      "source": "class:src/services/user-service.ts#UserService",
+      "target": "method:src/services/user-service.ts#UserService.withSeed",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/cycle/a.ts->fn:src/cycle/a.ts#ping",
+      "kind": "contains",
+      "source": "file:src/cycle/a.ts",
+      "target": "fn:src/cycle/a.ts#ping",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/cycle/b.ts->fn:src/cycle/b.ts#pong",
+      "kind": "contains",
+      "source": "file:src/cycle/b.ts",
+      "target": "fn:src/cycle/b.ts#pong",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/index.ts->fn:src/index.ts#main",
+      "kind": "contains",
+      "source": "file:src/index.ts",
+      "target": "fn:src/index.ts#main",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/index.ts->fn:src/index.ts#runCallback",
+      "kind": "contains",
+      "source": "file:src/index.ts",
+      "target": "fn:src/index.ts#runCallback",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/index.ts->unresolved:src/index.ts#call:cb",
+      "kind": "contains",
+      "source": "file:src/index.ts",
+      "target": "unresolved:src/index.ts#call:cb",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/index.ts->unresolved:src/index.ts#call:ghost",
+      "kind": "contains",
+      "source": "file:src/index.ts",
+      "target": "unresolved:src/index.ts#call:ghost",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/index.ts->unresolved:src/index.ts#call:notDefinedAnywhere",
+      "kind": "contains",
+      "source": "file:src/index.ts",
+      "target": "unresolved:src/index.ts#call:notDefinedAnywhere",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/lib/strings.ts->fn:src/lib/strings.ts#normalize",
+      "kind": "contains",
+      "source": "file:src/lib/strings.ts",
+      "target": "fn:src/lib/strings.ts#normalize",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/lib/strings.ts->fn:src/lib/strings.ts#slugify",
+      "kind": "contains",
+      "source": "file:src/lib/strings.ts",
+      "target": "fn:src/lib/strings.ts#slugify",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/math.ts->fn:src/math.ts#average",
+      "kind": "contains",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#average",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/math.ts->fn:src/math.ts#double",
+      "kind": "contains",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#double",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/math.ts->fn:src/math.ts#multiply",
+      "kind": "contains",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#multiply",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/math.ts->fn:src/math.ts#sum",
+      "kind": "contains",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#sum",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/models/user.ts->class:src/models/user.ts#BaseModel",
+      "kind": "contains",
+      "source": "file:src/models/user.ts",
+      "target": "class:src/models/user.ts#BaseModel",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/models/user.ts->class:src/models/user.ts#User",
+      "kind": "contains",
+      "source": "file:src/models/user.ts",
+      "target": "class:src/models/user.ts#User",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:file:src/services/user-service.ts->class:src/services/user-service.ts#UserService",
+      "kind": "contains",
+      "source": "file:src/services/user-service.ts",
+      "target": "class:src/services/user-service.ts#UserService",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:.->module:src",
+      "kind": "contains",
+      "source": "module:.",
+      "target": "module:src",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->file:src/index.ts",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "file:src/index.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->file:src/math.ts",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "file:src/math.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->file:src/side-effect.ts",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "file:src/side-effect.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->module:src/cycle",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "module:src/cycle",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->module:src/lib",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "module:src/lib",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->module:src/models",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "module:src/models",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src->module:src/services",
+      "kind": "contains",
+      "source": "module:src",
+      "target": "module:src/services",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src/cycle->file:src/cycle/a.ts",
+      "kind": "contains",
+      "source": "module:src/cycle",
+      "target": "file:src/cycle/a.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src/cycle->file:src/cycle/b.ts",
+      "kind": "contains",
+      "source": "module:src/cycle",
+      "target": "file:src/cycle/b.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src/lib->file:src/lib/index.ts",
+      "kind": "contains",
+      "source": "module:src/lib",
+      "target": "file:src/lib/index.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src/lib->file:src/lib/strings.ts",
+      "kind": "contains",
+      "source": "module:src/lib",
+      "target": "file:src/lib/strings.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src/models->file:src/models/user.ts",
+      "kind": "contains",
+      "source": "module:src/models",
+      "target": "file:src/models/user.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "contains:module:src/services->file:src/services/user-service.ts",
+      "kind": "contains",
+      "source": "module:src/services",
+      "target": "file:src/services/user-service.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "depends_on:module:src->module:src/lib",
+      "kind": "depends_on",
+      "source": "module:src",
+      "target": "module:src/lib",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 7,
+          "column": 1,
+          "snippet": "import { slugify } from '@lib/strings';"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "depends_on:module:src->module:src/models",
+      "kind": "depends_on",
+      "source": "module:src",
+      "target": "module:src/models",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 9,
+          "column": 1,
+          "snippet": "import type { User } from './models/user';"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "depends_on:module:src->module:src/services",
+      "kind": "depends_on",
+      "source": "module:src",
+      "target": "module:src/services",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 6,
+          "column": 1,
+          "snippet": "import { UserService } from './services/user-service';"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "depends_on:module:src/lib->module:src",
+      "kind": "depends_on",
+      "source": "module:src/lib",
+      "target": "module:src",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [
+        {
+          "file": "src/lib/index.ts",
+          "line": 2,
+          "column": 1,
+          "snippet": "export { sum as add } from '../math';"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "depends_on:module:src/services->module:src/lib",
+      "kind": "depends_on",
+      "source": "module:src/services",
+      "target": "module:src/lib",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 2,
+          "column": 1,
+          "snippet": "import { slugify } from '../lib/strings';"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "depends_on:module:src/services->module:src/models",
+      "kind": "depends_on",
+      "source": "module:src/services",
+      "target": "module:src/models",
+      "resolution": "resolved",
+      "discovery": "derived",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "import { User } from '../models/user';"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/cycle/a.ts->fn:src/cycle/a.ts#ping",
+      "kind": "exports",
+      "source": "file:src/cycle/a.ts",
+      "target": "fn:src/cycle/a.ts#ping",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/cycle/a.ts",
+          "line": 3,
+          "column": 1,
+          "snippet": "export function ping(n: number): number {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "ping",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/cycle/b.ts->fn:src/cycle/b.ts#pong",
+      "kind": "exports",
+      "source": "file:src/cycle/b.ts",
+      "target": "fn:src/cycle/b.ts#pong",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/cycle/b.ts",
+          "line": 3,
+          "column": 1,
+          "snippet": "export function pong(n: number): number {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "pong",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/index.ts->fn:src/index.ts#main",
+      "kind": "exports",
+      "source": "file:src/index.ts",
+      "target": "fn:src/index.ts#main",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 11,
+          "column": 1,
+          "snippet": "export function main(): void {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "main",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/lib/index.ts->fn:src/lib/strings.ts#slugify",
+      "kind": "exports",
+      "source": "file:src/lib/index.ts",
+      "target": "fn:src/lib/strings.ts#slugify",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/lib/index.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "export * from './strings';"
+        }
+      ],
+      "meta": {
+        "exportedAs": "slugify",
+        "reexport": true,
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/lib/index.ts->fn:src/math.ts#sum",
+      "kind": "exports",
+      "source": "file:src/lib/index.ts",
+      "target": "fn:src/math.ts#sum",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/lib/index.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "export * from './strings';"
+        }
+      ],
+      "meta": {
+        "exportedAs": "add",
+        "reexport": true,
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/lib/strings.ts->fn:src/lib/strings.ts#slugify",
+      "kind": "exports",
+      "source": "file:src/lib/strings.ts",
+      "target": "fn:src/lib/strings.ts#slugify",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/lib/strings.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "export function slugify(text: string): string {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "slugify",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/math.ts->fn:src/math.ts#average",
+      "kind": "exports",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#average",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/math.ts",
+          "line": 5,
+          "column": 1,
+          "snippet": "export function average(values: number[]): number {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "average",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/math.ts->fn:src/math.ts#double",
+      "kind": "exports",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#double",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/math.ts",
+          "line": 10,
+          "column": 14,
+          "snippet": "export const double = (n: number): number => multiply(n, 2);"
+        }
+      ],
+      "meta": {
+        "exportedAs": "double",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/math.ts->fn:src/math.ts#sum",
+      "kind": "exports",
+      "source": "file:src/math.ts",
+      "target": "fn:src/math.ts#sum",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/math.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "export function sum(a: number, b: number): number {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "sum",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/models/user.ts->class:src/models/user.ts#BaseModel",
+      "kind": "exports",
+      "source": "file:src/models/user.ts",
+      "target": "class:src/models/user.ts#BaseModel",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/models/user.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "export class BaseModel {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "BaseModel",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/models/user.ts->class:src/models/user.ts#User",
+      "kind": "exports",
+      "source": "file:src/models/user.ts",
+      "target": "class:src/models/user.ts#User",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/models/user.ts",
+          "line": 7,
+          "column": 1,
+          "snippet": "export class User extends BaseModel {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "User",
+        "count": 1
+      }
+    },
+    {
+      "id": "exports:file:src/services/user-service.ts->class:src/services/user-service.ts#UserService",
+      "kind": "exports",
+      "source": "file:src/services/user-service.ts",
+      "target": "class:src/services/user-service.ts#UserService",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 4,
+          "column": 1,
+          "snippet": "export class UserService {"
+        }
+      ],
+      "meta": {
+        "exportedAs": "UserService",
+        "count": 1
+      }
+    },
+    {
+      "id": "extends:class:src/models/user.ts#User->class:src/models/user.ts#BaseModel",
+      "kind": "extends",
+      "source": "class:src/models/user.ts#User",
+      "target": "class:src/models/user.ts#BaseModel",
+      "resolution": "resolved",
+      "discovery": "static-typecheck",
+      "evidence": [
+        {
+          "file": "src/models/user.ts",
+          "line": 7,
+          "column": 27,
+          "snippet": "export class User extends BaseModel {"
+        }
+      ],
+      "meta": {
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/cycle/a.ts->file:src/cycle/b.ts",
+      "kind": "imports",
+      "source": "file:src/cycle/a.ts",
+      "target": "file:src/cycle/b.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/cycle/a.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "import { pong } from './b';"
+        }
+      ],
+      "meta": {
+        "specifier": "./b",
+        "importKind": "static",
+        "names": [
+          "pong"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/cycle/b.ts->file:src/cycle/a.ts",
+      "kind": "imports",
+      "source": "file:src/cycle/b.ts",
+      "target": "file:src/cycle/a.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/cycle/b.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "import { ping } from './a';"
+        }
+      ],
+      "meta": {
+        "specifier": "./a",
+        "importKind": "static",
+        "names": [
+          "ping"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->file:src/lib/strings.ts",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "file:src/lib/strings.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 7,
+          "column": 1,
+          "snippet": "import { slugify } from '@lib/strings';"
+        }
+      ],
+      "meta": {
+        "specifier": "@lib/strings",
+        "importKind": "static",
+        "names": [
+          "slugify"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->file:src/math.ts",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "file:src/math.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 5,
+          "column": 1,
+          "snippet": "import { sum, average } from './math.js';"
+        }
+      ],
+      "meta": {
+        "specifier": "./math.js",
+        "importKind": "static",
+        "names": [
+          "sum",
+          "average"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->file:src/models/user.ts",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "file:src/models/user.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 9,
+          "column": 1,
+          "snippet": "import type { User } from './models/user';"
+        }
+      ],
+      "meta": {
+        "specifier": "./models/user",
+        "importKind": "static",
+        "names": [
+          "User"
+        ],
+        "typeOnly": true,
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->file:src/services/user-service.ts",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "file:src/services/user-service.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 6,
+          "column": 1,
+          "snippet": "import { UserService } from './services/user-service';"
+        }
+      ],
+      "meta": {
+        "specifier": "./services/user-service",
+        "importKind": "static",
+        "names": [
+          "UserService"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->pkg:fake-lib",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "pkg:fake-lib",
+      "resolution": "external",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 3,
+          "column": 1,
+          "snippet": "import { greet } from 'fake-lib';"
+        }
+      ],
+      "meta": {
+        "specifier": "fake-lib",
+        "importKind": "static",
+        "names": [
+          "greet"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->pkg:lodash",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "pkg:lodash",
+      "resolution": "external",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 2,
+          "column": 1,
+          "snippet": "import _ from 'lodash';"
+        }
+      ],
+      "meta": {
+        "specifier": "lodash",
+        "importKind": "static",
+        "names": [
+          "default"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->pkg:node:fs",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "pkg:node:fs",
+      "resolution": "external",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "import fs from 'node:fs';"
+        }
+      ],
+      "meta": {
+        "specifier": "node:fs",
+        "importKind": "static",
+        "names": [
+          "default"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->unresolved:src/index.ts#import:./missing",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "unresolved:src/index.ts#import:./missing",
+      "resolution": "unresolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 8,
+          "column": 1,
+          "snippet": "import { ghost } from './missing';"
+        }
+      ],
+      "meta": {
+        "specifier": "./missing",
+        "importKind": "static",
+        "names": [
+          "ghost"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/index.ts->unresolved:src/index.ts#import:chalk",
+      "kind": "imports",
+      "source": "file:src/index.ts",
+      "target": "unresolved:src/index.ts#import:chalk",
+      "resolution": "unresolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/index.ts",
+          "line": 4,
+          "column": 1,
+          "snippet": "import chalk from 'chalk';"
+        }
+      ],
+      "meta": {
+        "specifier": "chalk",
+        "importKind": "static",
+        "names": [
+          "default"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/lib/index.ts->file:src/lib/strings.ts",
+      "kind": "imports",
+      "source": "file:src/lib/index.ts",
+      "target": "file:src/lib/strings.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/lib/index.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "export * from './strings';"
+        }
+      ],
+      "meta": {
+        "specifier": "./strings",
+        "importKind": "re-export",
+        "names": [
+          "*"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/lib/index.ts->file:src/math.ts",
+      "kind": "imports",
+      "source": "file:src/lib/index.ts",
+      "target": "file:src/math.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/lib/index.ts",
+          "line": 2,
+          "column": 1,
+          "snippet": "export { sum as add } from '../math';"
+        }
+      ],
+      "meta": {
+        "specifier": "../math",
+        "importKind": "re-export",
+        "names": [
+          "sum"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/services/user-service.ts->file:src/lib/strings.ts",
+      "kind": "imports",
+      "source": "file:src/services/user-service.ts",
+      "target": "file:src/lib/strings.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 2,
+          "column": 1,
+          "snippet": "import { slugify } from '../lib/strings';"
+        }
+      ],
+      "meta": {
+        "specifier": "../lib/strings",
+        "importKind": "static",
+        "names": [
+          "slugify"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/services/user-service.ts->file:src/models/user.ts",
+      "kind": "imports",
+      "source": "file:src/services/user-service.ts",
+      "target": "file:src/models/user.ts",
+      "resolution": "resolved",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/services/user-service.ts",
+          "line": 1,
+          "column": 1,
+          "snippet": "import { User } from '../models/user';"
+        }
+      ],
+      "meta": {
+        "specifier": "../models/user",
+        "importKind": "static",
+        "names": [
+          "User"
+        ],
+        "count": 1
+      }
+    },
+    {
+      "id": "imports:file:src/side-effect.ts->pkg:node:fs",
+      "kind": "imports",
+      "source": "file:src/side-effect.ts",
+      "target": "pkg:node:fs",
+      "resolution": "external",
+      "discovery": "static-ast",
+      "evidence": [
+        {
+          "file": "src/side-effect.ts",
+          "line": 2,
+          "column": 1,
+          "snippet": "import { writeFileSync } from 'node:fs';"
+        }
+      ],
+      "meta": {
+        "specifier": "node:fs",
+        "importKind": "static",
+        "names": [
+          "writeFileSync"
+        ],
+        "count": 1
+      }
+    }
+  ],
+  "stats": {
+    "files": 9,
+    "nodesByKind": {
+      "class": 3,
+      "file": 9,
+      "function": 10,
+      "method": 9,
+      "module": 6,
+      "package": 3,
+      "unresolved": 5
+    },
+    "edgesByKind": {
+      "calls": 22,
+      "contains": 39,
+      "depends_on": 6,
+      "exports": 12,
+      "extends": 1,
+      "imports": 16
+    },
+    "edgesByResolution": {
+      "resolved": 87,
+      "unresolved": 5,
+      "external": 4
+    },
+    "importCycles": [
+      [
+        "file:src/cycle/a.ts",
+        "file:src/cycle/b.ts"
+      ]
+    ],
+    "externalCallsSkipped": 12,
+    "unknownReceiverCalls": 2,
+    "computedCalls": 1,
+    "localCalls": 0,
+    "durationMs": 0
+  },
+  "diagnostics": []
+}

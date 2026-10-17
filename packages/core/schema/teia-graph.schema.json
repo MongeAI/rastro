@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MongeAI/teia/schema/teia-graph-0.1.0.json",
+  "title": "Teia graph",
+  "description": "Grafo de código exportado pelo Teia (schemaVersion 0.1.0).",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "tool",
+    "project",
+    "analyzer",
+    "nodes",
+    "edges",
+    "stats",
+    "diagnostics"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "0.1.0" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": { "name": { "const": "teia" }, "version": { "type": "string" } }
+    },
+    "project": {
+      "type": "object",
+      "required": ["name", "root", "languages"],
+      "properties": {
+        "name": { "type": "string" },
+        "root": { "type": "string" },
+        "languages": { "type": "array", "items": { "$ref": "#/$defs/language" } },
+        "tsconfig": { "type": "string" }
+      }
+    },
+    "analyzer": {
+      "type": "object",
+      "required": ["name", "version", "typescriptVersion", "options"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "typescriptVersion": { "type": "string" },
+        "options": {
+          "type": "object",
+          "required": ["exclude", "respectGitignore", "maxFiles", "maxFileSizeBytes"],
+          "properties": {
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "respectGitignore": { "type": "boolean" },
+            "maxFiles": { "type": "integer", "minimum": 1 },
+            "maxFileSizeBytes": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "stats": {
+      "type": "object",
+      "required": [
+        "files",
+        "nodesByKind",
+        "edgesByKind",
+        "edgesByResolution",
+        "importCycles",
+        "externalCallsSkipped",
+        "unknownReceiverCalls",
+        "computedCalls",
+        "localCalls",
+        "durationMs"
+      ],
+      "properties": {
+        "files": { "type": "integer", "minimum": 0 },
+        "nodesByKind": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "edgesByKind": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "edgesByResolution": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "importCycles": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "string" } }
+        },
+        "externalCallsSkipped": { "type": "integer", "minimum": 0 },
+        "unknownReceiverCalls": { "type": "integer", "minimum": 0 },
+        "computedCalls": { "type": "integer", "minimum": 0 },
+        "localCalls": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["level", "code", "message"],
+        "properties": {
+          "level": { "enum": ["info", "warning", "error"] },
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "language": { "enum": ["ts", "tsx", "js", "jsx"] },
+    "range": {
+      "type": "object",
+      "required": ["file", "startLine", "startColumn", "endLine", "endColumn"],
+      "properties": {
+        "file": { "type": "string" },
+        "startLine": { "type": "integer", "minimum": 1 },
+        "startColumn": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "endColumn": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["file", "line", "column"],
+      "properties": {
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "snippet": { "type": "string" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": [
+            "module",
+            "file",
+            "function",
+            "class",
+            "method",
+            "route",
+            "package",
+            "unresolved"
+          ]
+        },
+        "name": { "type": "string" },
+        "qualifiedName": { "type": "string" },
+        "parent": { "type": "string" },
+        "location": { "$ref": "#/$defs/range" },
+        "meta": { "type": "object" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "kind", "source", "target", "resolution", "discovery", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["contains", "imports", "exports", "calls", "extends", "depends_on"] },
+        "source": { "type": "string" },
+        "target": { "type": "string" },
+        "resolution": { "enum": ["resolved", "external", "unresolved"] },
+        "discovery": { "enum": ["static-ast", "static-typecheck", "derived", "framework-rule"] },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+        "meta": { "type": "object" }
+      }
+    }
+  }
+}
