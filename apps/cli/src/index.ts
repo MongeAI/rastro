@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -51,11 +52,19 @@ function webRoot(): string {
   return fileURLToPath(new URL('./web/', import.meta.url));
 }
 
+/** Mostra a pasta pessoal como ~ (não expõe o nome do usuário em capturas e logs). */
+function tildify(p: string): string {
+  const home = os.homedir();
+  return home && (p === home || p.startsWith(`${home}${path.sep}`))
+    ? `~${p.slice(home.length)}`
+    : p;
+}
+
 function printSummary(graph: RastroGraph, savedTo?: string): void {
   const { stats } = graph;
   const out = (s = '') => process.stderr.write(`${s}\n`);
   out();
-  out(`${bold(graph.project.name)} ${dim(graph.project.root)}`);
+  out(`${bold(graph.project.name)} ${dim(tildify(graph.project.root))}`);
   const names: Partial<Record<NodeKind, [string, string]>> = {
     function: ['função', 'funções'],
     class: ['classe', 'classes'],
@@ -91,7 +100,7 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
   out(
     dim(`  análise em ${stats.durationMs} ms com TypeScript ${graph.analyzer.typescriptVersion}`),
   );
-  if (savedTo) out(`  grafo salvo em ${cyan(savedTo)}`);
+  if (savedTo) out(`  grafo salvo em ${cyan(tildify(savedTo))}`);
   out();
 }
 
