@@ -92,7 +92,10 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
 
       <section className="details-section">
         <h3 className="section-title">
-          Evidências <span className="count">{members.length}</span>
+          {edge.aggregated ? 'Relações somadas' : 'Evidências'}{' '}
+          <span className="count">
+            {edge.aggregated ? members.length : members.reduce((n, m) => n + m.evidence.length, 0)}
+          </span>
         </h3>
         <ul className="rel-list">
           {members.slice(0, MAX_MEMBERS).map((m) => (

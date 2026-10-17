@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="220" viewBox="0 0 880 220">
+  <rect width="880" height="220" rx="18" fill="#000000"/>
+  <g opacity="0.18" stroke="#ffffff" stroke-width="1.2" fill="none" stroke-linecap="round">
+    <path d="M560 98 620 60l64 26 66-52 76 30"/>
+    <path d="M610 30 652 58l58-26 52 42"/>
+  </g>
+  <g fill="#ffffff" opacity="0.18">
+    <circle cx="560" cy="98" r="4"/><circle cx="620" cy="60" r="4"/><circle cx="684" cy="86" r="4"/>
+    <circle cx="750" cy="34" r="4"/><circle cx="826" cy="64" r="4"/><circle cx="610" cy="30" r="3"/>
+    <circle cx="652" cy="58" r="3"/><circle cx="710" cy="32" r="3"/><circle cx="762" cy="74" r="3"/>
+  </g>
+  <g transform="translate(64 62) scale(3)">
+    <rect width="32" height="32" rx="7" fill="#ffffff"/>
+    <path d="M7.5 23.5 13 15.5l5.5 4.5 6-11" fill="none" stroke="#000000" stroke-opacity="0.45" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g fill="#000000"><circle cx="7.5" cy="23.5" r="2"/><circle cx="13" cy="15.5" r="2"/><circle cx="18.5" cy="20" r="2"/><circle cx="24.5" cy="9" r="1.2"/></g>
+    <circle cx="24.5" cy="9" r="3.2" fill="none" stroke="#000000" stroke-width="1.6"/>
+  </g>
+  <text x="190" y="118" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="56" font-weight="600" fill="#ffffff" letter-spacing="-1.5">Rastro</text>
+  <text x="192" y="152" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" fill="#a1a1aa">Siga o rastro do seu código: um mapa navegável de projetos JS/TS.</text>
+</svg>
