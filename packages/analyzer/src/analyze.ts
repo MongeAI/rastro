@@ -73,7 +73,23 @@ export async function analyzeProject(
     skipAddingFilesFromTsConfig: true,
     skipFileDependencyResolution: true,
   });
-  for (const file of discovered.files) project.addSourceFileAtPath(file.absolute);
+  // o parse acontece aqui: um arquivo extremo (aninhamento profundo, sem permissão de leitura)
+  // vira um aviso e sai da análise, em vez de derrubar tudo
+  const readable: DiscoveredFile[] = [];
+  for (const file of discovered.files) {
+    try {
+      project.addSourceFileAtPath(file.absolute);
+      readable.push(file);
+    } catch (err) {
+      discovered.diagnostics.push({
+        level: 'warning',
+        code: 'parse-failed',
+        message: `Arquivo ignorado: não foi possível ler ou interpretar (${describeError(err)}).`,
+        file: file.relative,
+      });
+    }
+  }
+  discovered.files = readable;
 
   progress('Construindo o modelo do compilador...');
   let program: ts.Program;
@@ -89,7 +105,7 @@ export async function analyzeProject(
   const ctx: Ctx = {
     root,
     builder: new GraphBuilder(),
-    resolver: new ModuleResolver(root, config.options),
+    resolver: new ModuleResolver(root, config.options, config.scopes),
     checker: program.getTypeChecker(),
     filesByAbs: new Map(discovered.files.map((f) => [f.absolute, f])),
     entities: new Map(),
@@ -125,8 +141,10 @@ export async function analyzeProject(
       });
     }
   }
-  for (const [file, sf] of sourceFiles)
+  for (const [file, sf] of sourceFiles) {
     safely(ctx, file, 'rotas', () => detectExpressRoutes(ctx, file, sf));
+    release(sf);
+  }
 
   // Passo 2: relações (imports, exports, chamadas, herança)
   progress('Resolvendo imports, exports e chamadas...');
@@ -136,6 +154,7 @@ export async function analyzeProject(
     safely(ctx, file, 'chamadas', () => extractCalls(ctx, file, sf));
     safely(ctx, file, 'JSX', () => extractJsxUsages(ctx, file, sf));
     safely(ctx, file, 'herança', () => extractHeritage(ctx, file, sf));
+    release(sf);
   }
 
   progress('Montando o grafo...');
@@ -197,10 +216,7 @@ function safely(ctx: Ctx, file: DiscoveredFile, step: string, run: () => void): 
   try {
     run();
   } catch (err) {
-    const reason =
-      err instanceof RangeError
-        ? 'estrutura aninhada demais para analisar'
-        : (err as Error).message || String(err);
+    const reason = describeError(err);
     ctx.diagnostics.push({
       level: 'warning',
       code: 'analysis-failed',
@@ -208,6 +224,24 @@ function safely(ctx: Ctx, file: DiscoveredFile, step: string, run: () => void): 
       file: file.relative,
     });
   }
+}
+
+function describeError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof RangeError && /call stack/i.test(message))
+    return 'estrutura aninhada demais para analisar';
+  if ((err as NodeJS.ErrnoException)?.code === 'EACCES') return 'sem permissão de leitura';
+  return message;
+}
+
+/**
+ * Libera os objetos do ts-morph de um arquivo já processado. O grafo guarda só nós do
+ * compilador, então os "wrappers" podem ser recriados sob demanda; em projetos grandes isso
+ * evita manter milhões de objetos vivos até o fim.
+ */
+function release(sf: SourceFile): void {
+  descendantsCache.delete(sf);
+  sf.forgetDescendants();
 }
 
 const descendantsCache = new WeakMap<SourceFile, Map<SyntaxKind, Node[]>>();
@@ -357,7 +391,7 @@ const FUNCTION_WRAPPERS = new Set([
 ]);
 
 /** Para `memo(() => ...)` e afins, devolve a função embrulhada. */
-function wrappedFunction(call: Node): Node | undefined {
+export function wrappedFunction(call: Node): Node | undefined {
   if (!Node.isCallExpression(call)) return undefined;
   const callee = unwrap(call.getExpression());
   const name = Node.isIdentifier(callee)
@@ -1000,8 +1034,7 @@ export function resolveSymbolTargets(
       const mapped = entityFromDeclarationFile(ctx, decl, declFile);
       if (mapped) targets.push({ kind: 'entity', id: mapped, mapped: true });
       // declarado em um arquivo do projeto que ficou fora da análise (excluído, grande demais...)
-      else if (isInsideProject(ctx, declFile) && !DECLARATION_FILE.test(declFile))
-        targets.push({ kind: 'not-analyzed' });
+      else if (isInsideProject(ctx, declFile)) targets.push({ kind: 'not-analyzed' });
       else targets.push({ kind: 'external' });
       continue;
     }
@@ -1070,7 +1103,11 @@ function unwrapExpression(n: ts.Expression): ts.Expression {
 }
 
 function isInsideProject(ctx: Ctx, absolute: string): boolean {
-  return absolute.startsWith(`${ctx.root}/`) && !absolute.includes('/node_modules/');
+  // node_modules testado no caminho relativo: a raiz analisada pode estar dentro de um node_modules
+  return (
+    absolute.startsWith(`${ctx.root}/`) &&
+    !absolute.slice(ctx.root.length).includes('/node_modules/')
+  );
 }
 
 /** `const x = ...` (um `let`/`var` pode ser reatribuído, então o alvo não é garantido). */
@@ -1139,18 +1176,14 @@ const declarationSourceCache = new WeakMap<Ctx, Map<string, DiscoveredFile | nul
  * do pacote (`packages/core/src/index.ts`), ligamos ao fonte e marcamos a relação com `viaDeclaration`.
  */
 export function sourceForDeclarationFile(ctx: Ctx, absolute: string): DiscoveredFile | undefined {
-  if (
-    !DECLARATION_FILE.test(absolute) ||
-    !absolute.startsWith(`${ctx.root}/`) ||
-    absolute.includes('/node_modules/')
-  )
-    return undefined;
+  if (!DECLARATION_FILE.test(absolute) || !isInsideProject(ctx, absolute)) return undefined;
   let cache = declarationSourceCache.get(ctx);
   if (!cache) declarationSourceCache.set(ctx, (cache = new Map()));
   if (cache.has(absolute)) return cache.get(absolute) ?? undefined;
-  let found: DiscoveredFile | undefined;
   const stem = absolute.replace(DECLARATION_FILE, '');
-  if (BUILD_DIRS.test(stem)) {
+  // .d.ts escrito à mão ao lado do código (ex.: lib/foo.js + lib/foo.d.ts)
+  let found = SOURCE_EXTS.map((ext) => ctx.filesByAbs.get(stem + ext)).find((f) => !!f);
+  if (!found && BUILD_DIRS.test(stem)) {
     const candidates = [
       stem.replace(/\/(dist|build|lib|out|types)\/(?!.*\/(dist|build|lib|out|types)\/)/, '/src/'),
     ];
@@ -1207,7 +1240,7 @@ function entityFromDeclarationFile(ctx: Ctx, decl: ts.Node, declFile: string): s
 }
 
 /** Especificador do módulo de onde vem um alias (`import { x } from 'm'`, `const { x } = require('m')`). */
-function moduleSpecifierOfAlias(decl: ts.Node): string | undefined {
+export function moduleSpecifierOfAlias(decl: ts.Node): string | undefined {
   let current: ts.Node | undefined = decl;
   for (let i = 0; current && i < 6; i++, current = current.parent) {
     if (ts.isImportDeclaration(current) && ts.isStringLiteral(current.moduleSpecifier))

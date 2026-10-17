@@ -123,7 +123,7 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
                 {NODE_KIND_LABELS[index.node(m.target)?.kind ?? 'file']} ·{' '}
                 {DISCOVERY_TEXT[m.discovery]}
                 {m.meta?.specifier ? ` · '${m.meta.specifier}'` : ''}
-                {m.meta?.viaDeclaration ? ' · via .d.ts do workspace' : ''}
+                {m.meta?.viaDeclaration ? ' · ligada via declaração .d.ts' : ''}
               </p>
               {m.evidence.map((ev) => (
                 <a

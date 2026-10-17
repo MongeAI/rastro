@@ -111,7 +111,8 @@ export function computeView(index: GraphIndex, options: ViewOptions): GraphView 
   for (const id of options.pinned ?? []) if (index.node(id)) candidates.add(id);
 
   const showModules = options.nodeKinds.has('module');
-  const groupable = new Set(showModules ? groupableModules(index) : []);
+  const groupableSet = new Set(groupableModules(index));
+  const groupable = showModules ? groupableSet : new Set<string>();
   const collapsed = new Set(
     focused ? [] : [...(options.collapsedModules ?? [])].filter((id) => groupable.has(id)),
   );
@@ -192,18 +193,21 @@ export function computeView(index: GraphIndex, options: ViewOptions): GraphView 
     if (isViewAncestor(source, target) || isViewAncestor(target, source)) continue;
     const aggregated = source !== edge.source || target !== edge.target;
     const count = edge.meta?.count ?? edge.evidence.length;
-    const key = aggregated ? `agg:${edge.kind}:${source}->${target}` : edge.id;
+    // uma linha por (tipo, origem, destino): relações diretas e somadas não se duplicam
+    const key = `${edge.kind}|${source}|${target}`;
     const existing = byKey.get(key);
     if (existing) {
       existing.count += count;
       existing.members.push(edge.id);
+      existing.aggregated = true;
+      existing.id = `agg:${edge.kind}:${source}->${target}`;
       existing.typeOnly &&= !!edge.meta?.typeOnly;
       if (RESOLUTION_RANK[edge.resolution] < RESOLUTION_RANK[existing.resolution])
         existing.resolution = edge.resolution;
       continue;
     }
     byKey.set(key, {
-      id: key,
+      id: aggregated ? `agg:${edge.kind}:${source}->${target}` : edge.id,
       kind: edge.kind,
       source,
       target,
@@ -217,5 +221,9 @@ export function computeView(index: GraphIndex, options: ViewOptions): GraphView 
 
   nodes.sort((a, b) => compareStrings(a.id, b.id));
   const edges = [...byKey.values()].sort((a, b) => compareStrings(a.id, b.id));
-  return { nodes, edges, hiddenCount: Math.max(0, index.nodes.size - nodes.length) };
+  // pastas sem arquivos diretos (e a raiz) nunca aparecem, então não contam como "ocultas"
+  let displayable = 0;
+  for (const node of index.nodes.values())
+    if (node.kind !== 'module' || groupableSet.has(node.id)) displayable++;
+  return { nodes, edges, hiddenCount: Math.max(0, displayable - nodes.length) };
 }

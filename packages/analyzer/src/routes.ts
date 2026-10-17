@@ -4,6 +4,8 @@ import type { DiscoveredFile } from './discover.js';
 import {
   addUnresolvedNode,
   descendantsOfKind,
+  moduleSpecifierOfAlias,
+  wrappedFunction,
   evidenceAt,
   rangeOf,
   resolveSymbolTargets,
@@ -13,58 +15,72 @@ import {
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'all']);
 
-/** Chamadas que criam um app/roteador Express: `express()`, `express.Router()`, `Router()`. */
-const EXPRESS_FACTORIES = new Set([
-  'express',
-  'express.Router',
-  'Router',
-  "require('express')",
-  'require("express")',
-]);
+/** O identificador vem (por import/require, sem ser só de tipo) do pacote `express`? */
+function comesFromExpress(ctx: AnalyzerContext, identifier: ts.Node): boolean {
+  const symbol = ctx.checker.getSymbolAtLocation(identifier);
+  const decl = symbol?.declarations?.[0];
+  if (!decl) return false;
+  if (ts.isImportSpecifier(decl) && (decl.isTypeOnly || decl.parent.parent.isTypeOnly))
+    return false;
+  if (ts.isImportClause(decl) && decl.isTypeOnly) return false;
+  return moduleSpecifierOfAlias(decl) === 'express';
+}
 
-function importsExpress(sf: SourceFile): boolean {
-  if (sf.getImportDeclarations().some((d) => d.getModuleSpecifierValue() === 'express'))
-    return true;
-  return descendantsOfKind(sf, SyntaxKind.CallExpression).some(
-    (c) =>
-      c.getExpression().getText() === 'require' &&
-      c.getArguments()[0]?.getText().slice(1, -1) === 'express',
-  );
+/** `express()`, `e()`, `express.Router()`, `Router()`, `R()` (alias), `require('express')()`. */
+function isExpressFactory(ctx: AnalyzerContext, call: ts.CallExpression): boolean {
+  let callee: ts.Expression = call.expression;
+  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+  if (ts.isIdentifier(callee)) return comesFromExpress(ctx, callee);
+  if (
+    ts.isPropertyAccessExpression(callee) &&
+    callee.name.text === 'Router' &&
+    ts.isIdentifier(callee.expression)
+  )
+    return comesFromExpress(ctx, callee.expression);
+  // require('express')()
+  if (
+    ts.isCallExpression(callee) &&
+    ts.isIdentifier(callee.expression) &&
+    callee.expression.text === 'require' &&
+    callee.arguments[0] &&
+    ts.isStringLiteralLike(callee.arguments[0])
+  )
+    return callee.arguments[0].text === 'express';
+  return false;
 }
 
 /**
- * O receptor (`app`, `router`...) foi criado por `express()`/`express.Router()` em um arquivo
- * que importa o Express? Segue imports/requires até a declaração da variável.
+ * Declaração do receptor (`app`, `router`...) quando ele comprovadamente foi criado por uma
+ * fábrica do Express. Segue imports/requires até a variável. Devolve `undefined` caso contrário.
  */
-function isExpressReceiver(ctx: AnalyzerContext, receiver: Node): boolean {
+function expressReceiverDeclaration(ctx: AnalyzerContext, receiver: Node): ts.Node | undefined {
   let symbol = ctx.checker.getSymbolAtLocation(receiver.compilerNode);
-  if (!symbol) return false;
+  if (!symbol) return undefined;
   if (symbol.flags & ts.SymbolFlags.Alias) {
     try {
       symbol = ctx.checker.getAliasedSymbol(symbol);
     } catch {
-      return false;
+      return undefined;
     }
   }
   for (const decl of symbol.declarations ?? []) {
     if (!ts.isVariableDeclaration(decl) || !decl.initializer) continue;
     let init: ts.Expression = decl.initializer;
     while (ts.isParenthesizedExpression(init) || ts.isAwaitExpression(init)) init = init.expression;
-    if (!ts.isCallExpression(init)) continue;
-    const callee = init.expression.getText(decl.getSourceFile()).replace(/\s+/g, '');
-    if (!EXPRESS_FACTORIES.has(callee)) continue;
-    const declFile = ctx.filesByAbs.get(decl.getSourceFile().fileName);
-    const declSf = declFile && receiver.getProject().getSourceFile(declFile.absolute);
-    if (declSf && importsExpress(declSf)) return true;
+    if (ts.isCallExpression(init) && isExpressFactory(ctx, init)) return decl;
   }
-  return false;
+  return undefined;
+}
+
+/** Função que atende a rota: inline, referência, ou embrulhada (`asyncHandler(async () => ...)`). */
+function handlerFunction(n: Node): Node | undefined {
+  if (Node.isArrowFunction(n) || Node.isFunctionExpression(n)) return n;
+  if (Node.isCallExpression(n)) return wrappedFunction(n);
+  return undefined;
 }
 
 const isHandlerLike = (n: Node) =>
-  Node.isArrowFunction(n) ||
-  Node.isFunctionExpression(n) ||
-  Node.isIdentifier(n) ||
-  Node.isPropertyAccessExpression(n);
+  !!handlerFunction(n) || Node.isIdentifier(n) || Node.isPropertyAccessExpression(n);
 
 /**
  * Regra de framework suportada: rotas do Express.
@@ -78,6 +94,7 @@ export function detectExpressRoutes(
   sf: SourceFile,
 ): void {
   const fileId = nodeId.file(file.relative);
+  const routeOwners = new Map<string, ts.Node>();
 
   for (const call of descendantsOfKind(sf, SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
@@ -91,11 +108,17 @@ export function detectExpressRoutes(
       continue;
     const routePath = first.getLiteralValue();
     if (!routePath.startsWith('/') || !handlers.some(isHandlerLike)) continue;
-    if (!isExpressReceiver(ctx, receiver)) continue;
+    const receiverDecl = expressReceiverDeclaration(ctx, receiver);
+    if (!receiverDecl) continue;
 
     const httpMethod = method.toUpperCase();
     const receiverName = receiver.getText();
-    const id = nodeId.route(file.relative, receiverName, httpMethod, routePath);
+    // dois roteadores com o mesmo nome (em funções diferentes) não podem virar uma rota só
+    const baseId = nodeId.route(file.relative, receiverName, httpMethod, routePath);
+    let id = baseId;
+    for (let i = 2; routeOwners.has(id) && routeOwners.get(id) !== receiverDecl; i++)
+      id = `${baseId}~${i}`;
+    routeOwners.set(id, receiverDecl);
     if (!ctx.builder.hasNode(id)) {
       ctx.builder.addNode({
         id,
@@ -117,9 +140,10 @@ export function detectExpressRoutes(
     }
 
     for (const handler of handlers) {
-      if (Node.isArrowFunction(handler) || Node.isFunctionExpression(handler)) {
-        // chamadas feitas dentro do handler inline passam a ser atribuídas à rota
-        ctx.entities.set(handler.compilerNode, id);
+      const inline = handlerFunction(handler);
+      if (inline) {
+        // chamadas feitas dentro do handler inline (ou embrulhado) passam a ser atribuídas à rota
+        ctx.entities.set(inline.compilerNode, id);
         continue;
       }
       const nameNode = Node.isPropertyAccessExpression(handler)

@@ -588,3 +588,122 @@ describe('regressões da revisão de código', () => {
     expect(f.location?.startLine).toBeLessThanOrEqual(node(g, 'file:a.ts')!.meta!.lines!);
   });
 });
+
+describe('regressões da segunda revisão', () => {
+  it('tsconfig com references: aliases iguais em apps diferentes não se misturam', async () => {
+    const root = makeProject({
+      'tsconfig.json':
+        '{"files":[],"references":[{"path":"./apps/web/tsconfig.json"},{"path":"./apps/api/tsconfig.json"}]}',
+      'apps/web/tsconfig.json':
+        '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]},"moduleResolution":"Bundler","module":"ESNext"},"include":["src"]}',
+      'apps/api/tsconfig.json':
+        '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]},"moduleResolution":"Bundler","module":"ESNext"},"include":["src"]}',
+      'apps/web/src/util.ts': 'export function helper() {}',
+      'apps/api/src/util.ts': 'export function helper() {}',
+      'apps/api/src/main.ts':
+        "import { helper } from '@/util';\nexport function run() { helper(); }",
+    });
+    const g = await analyzeProject(root);
+    expect(
+      edge(g, 'imports', 'file:apps/api/src/main.ts', 'file:apps/api/src/util.ts'),
+    ).toBeDefined();
+    expect(
+      edge(g, 'imports', 'file:apps/api/src/main.ts', 'file:apps/web/src/util.ts'),
+    ).toBeUndefined();
+    expect(
+      g.edges.some((e) => e.target === 'fn:apps/web/src/util.ts#helper' && e.kind === 'calls'),
+    ).toBe(false);
+    expect(g.diagnostics.some((d) => d.code === 'ambiguous-paths')).toBe(true);
+  });
+
+  it('arquivo impossível de interpretar vira aviso e sai da análise', async () => {
+    const depth = 3000;
+    const root = makeProject({
+      'deep.ts': `export const x = ${'['.repeat(depth)}${']'.repeat(depth)};\n`,
+      'ok.ts': 'export function ok() {}',
+    });
+    const g = await analyzeProject(root);
+    expect(node(g, 'fn:ok.ts#ok')).toBeDefined();
+    expect(validateGraph(g).valid).toBe(true);
+  });
+
+  it('.js com .d.ts escrito à mão ao lado mantém seus chamadores', async () => {
+    const root = makeProject({
+      'lib/foo.js': 'export function add(a, b) { return a + b; }',
+      'lib/foo.d.ts': 'export declare function add(a: number, b: number): number;',
+      'main.ts': "import { add } from './lib/foo';\nexport function run() { return add(1, 2); }",
+    });
+    const g = await analyzeProject(root);
+    expect(edge(g, 'imports', 'file:main.ts', 'file:lib/foo.js')).toBeDefined();
+    expect(edge(g, 'calls', 'fn:main.ts#run', 'fn:lib/foo.js#add')).toBeDefined();
+  });
+
+  it('Express por símbolo: aliases reconhecidos, homônimos de outros pacotes não', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5","itty-router":"5"}}',
+      'a.ts': "import e from 'express';\nconst app = e();\nfunction h() {}\napp.get('/a', h);",
+      'b.ts':
+        "import { Router as R } from 'express';\nconst r = R();\nfunction h() {}\nr.post('/b', h);",
+      'c.ts':
+        "import express from 'express';\nimport { Router } from 'itty-router';\nconst x = express();\nconst router = Router();\nfunction h() {}\nrouter.get('/fake', h);",
+      'd.ts':
+        "import type { Express } from 'express';\nfunction express() { return { get(_p: string, _h: unknown) {} }; }\nconst app = express();\nfunction h() {}\napp.get('/fake2', h);",
+    });
+    const g = await analyzeProject(root);
+    expect(
+      g.nodes
+        .filter((n) => n.kind === 'route')
+        .map((n) => n.id)
+        .sort(),
+    ).toEqual(['route:a.ts#app GET /a', 'route:b.ts#r POST /b']);
+  });
+
+  it('Express: handlers embrulhados (asyncHandler) e roteadores homônimos', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'app.js': [
+        "const express = require('express');",
+        'function asyncHandler(fn) { return fn; }',
+        'function save() {}',
+        'function auth() {}',
+        'function v1() {',
+        '  const r = express.Router();',
+        "  r.post('/', auth, asyncHandler(async (req, res) => { save(); }));",
+        '}',
+        'function v2() {',
+        '  const r = express.Router();',
+        "  r.post('/', auth);",
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const routes = g.nodes
+      .filter((n) => n.kind === 'route')
+      .map((n) => n.id)
+      .sort();
+    expect(routes).toEqual(['route:app.js#r POST /', 'route:app.js#r POST /~2']);
+    expect(edge(g, 'calls', 'route:app.js#r POST /', 'fn:app.js#save')).toBeDefined();
+  });
+
+  it('raiz dentro de node_modules continua resolvendo arquivos', async () => {
+    const parent = makeProject({});
+    const root = path.join(parent, 'node_modules', 'lib');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'a.ts'), "import { b } from './b';\nexport const x = b;");
+    fs.writeFileSync(path.join(root, 'b.ts'), 'export const b = 1;');
+    const g = await analyzeProject(root);
+    expect(edge(g, 'imports', 'file:a.ts', 'file:b.ts')?.resolution).toBe('resolved');
+  });
+
+  it('depends_on só de tipos é marcado e soma a contagem real', async () => {
+    const root = makeProject({
+      'p/a.ts': "import type { T } from '../n/t';\nexport const a: T = 1;",
+      'n/t.ts': 'export type T = number;',
+    });
+    const g = await analyzeProject(root);
+    expect(edge(g, 'depends_on', 'module:p', 'module:n')?.meta).toMatchObject({
+      typeOnly: true,
+      count: 1,
+    });
+  });
+});

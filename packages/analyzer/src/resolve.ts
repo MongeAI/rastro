@@ -7,8 +7,17 @@ import { toPosix } from './discover.js';
 
 const BUILTINS = new Set(builtinModules.filter((m) => !m.startsWith('_')));
 
+/** Opções de um tsconfig referenciado, válidas só para os arquivos que ele inclui. */
+export interface ConfigScope {
+  name: string;
+  files: Set<string>;
+  options: ts.CompilerOptions;
+}
+
 export interface LoadedCompilerOptions {
   options: ts.CompilerOptions;
+  /** tsconfig referenciados (ex.: tsconfig.app.json): cada um resolve os imports dos seus arquivos. */
+  scopes: ConfigScope[];
   /** Arquivo de configuração usado (relativo à raiz), se houver. */
   configFile?: string;
   diagnostics: Diagnostic[];
@@ -57,44 +66,100 @@ export function loadCompilerOptions(root: string): LoadedCompilerOptions {
     const options: ts.CompilerOptions = { ...parsed.options };
     // tsconfig "solução" (padrão do Vite): `files: []` + `references` para tsconfig.app.json etc.
     // As opções de resolução (paths, baseUrl, jsx) ficam nos arquivos referenciados.
+    // Cada referência resolve os imports dos próprios arquivos (escopo). No programa único usado
+    // pelo verificador de tipos, só juntamos o que não conflita: dois apps com "@/*" apontando
+    // para pastas diferentes não podem ser misturados, ou o grafo inventaria ligações.
     const referenced: string[] = [];
+    const scopes: ConfigScope[] = [];
+    const mergedPaths: Record<string, { targets: string; base: string | undefined }> = {};
+    const conflicts = new Set<string>();
+    const settings = {
+      jsx: new Set<unknown>(),
+      moduleResolution: new Set<unknown>(),
+      module: new Set<unknown>(),
+    };
     for (const ref of parsed.projectReferences ?? []) {
       const refFile = ts.resolveProjectReferencePath(ref);
       if (!refFile.startsWith(`${root}${path.sep}`) && !refFile.startsWith(`${root}/`)) continue;
       if (!fs.existsSync(refFile) || fs.lstatSync(refFile).isSymbolicLink()) continue;
       const refRead = ts.readConfigFile(refFile, ts.sys.readFile);
       if (refRead.error) continue;
+      // aqui sim expandimos "include" para saber quais arquivos pertencem a cada referência
       const refParsed = ts.parseJsonConfigFileContent(
         refRead.config,
-        host,
+        ts.sys,
         path.dirname(refFile),
         undefined,
         refFile,
       );
-      const { paths, baseUrl, pathsBasePath, jsx, moduleResolution, module, rootDirs } =
-        refParsed.options as ts.CompilerOptions & { pathsBasePath?: string };
-      if (paths) {
-        options.paths = { ...paths, ...options.paths };
-        (options as { pathsBasePath?: string }).pathsBasePath ??= pathsBasePath;
-        options.baseUrl ??= baseUrl;
+      const refOptions = refParsed.options as ts.CompilerOptions & { pathsBasePath?: string };
+      scopes.push({
+        name: path.relative(root, refFile),
+        files: new Set(refParsed.fileNames.map((f) => toPosix(path.resolve(f)))),
+        options: withModernResolution({ ...defaults, ...refOptions, ...enforced }),
+      });
+      for (const [key, targets] of Object.entries(refOptions.paths ?? {})) {
+        const entry = {
+          targets: JSON.stringify(targets),
+          base: refOptions.pathsBasePath ?? refOptions.baseUrl,
+        };
+        const previous = mergedPaths[key];
+        if (previous && (previous.targets !== entry.targets || previous.base !== entry.base))
+          conflicts.add(key);
+        else mergedPaths[key] = entry;
       }
-      options.jsx ??= jsx;
-      options.moduleResolution ??= moduleResolution;
-      options.module ??= module;
-      options.rootDirs ??= rootDirs;
+      settings.jsx.add(refOptions.jsx);
+      settings.moduleResolution.add(refOptions.moduleResolution);
+      settings.module.add(refOptions.module);
       referenced.push(path.relative(root, refFile));
     }
-    // projetos sem moduleResolution moderna resolvem pior extensões e index; usamos Bundler
-    const mr = options.moduleResolution;
-    if (mr === undefined || mr === ts.ModuleResolutionKind.Classic) {
-      options.moduleResolution = ts.ModuleResolutionKind.Bundler;
-      if (options.module === undefined || options.module === ts.ModuleKind.CommonJS)
-        options.module = ts.ModuleKind.ESNext;
+    if (scopes.length) {
+      const paths: ts.MapLike<string[]> = { ...options.paths };
+      let base: string | undefined;
+      for (const [key, entry] of Object.entries(mergedPaths)) {
+        if (conflicts.has(key) || paths[key]) continue;
+        if (base !== undefined && entry.base !== base) {
+          conflicts.add(key);
+          continue;
+        }
+        base = entry.base;
+        paths[key] = JSON.parse(entry.targets) as string[];
+      }
+      if (Object.keys(paths).length) {
+        options.paths = paths;
+        if (base) (options as { pathsBasePath?: string }).pathsBasePath ??= base;
+      }
+      // configurações de módulo só valem para todos quando as referências concordam
+      const single = <T>(values: Set<unknown>) =>
+        values.size === 1 ? ([...values][0] as T | undefined) : undefined;
+      options.jsx ??= single<ts.JsxEmit>(settings.jsx);
+      options.moduleResolution ??= single<ts.ModuleResolutionKind>(settings.moduleResolution);
+      options.module ??= single<ts.ModuleKind>(settings.module);
+      if (conflicts.size) {
+        diagnostics.push({
+          level: 'info',
+          code: 'ambiguous-paths',
+          message: `Os tsconfig referenciados definem os aliases ${[...conflicts].join(', ')} de formas diferentes. Os imports de cada arquivo usam o tsconfig dele, mas chamadas através desses aliases podem ficar sem resolução.`,
+        });
+      }
     }
+    // projetos sem moduleResolution moderna resolvem pior extensões e index; usamos Bundler
+    withModernResolution(options);
     const configFile = referenced.length ? `${name} (+ ${referenced.join(', ')})` : name;
-    return { options: { ...defaults, ...options, ...enforced }, configFile, diagnostics };
+    return { options: { ...defaults, ...options, ...enforced }, scopes, configFile, diagnostics };
   }
-  return { options: { ...defaults, ...enforced }, diagnostics };
+  return { options: { ...defaults, ...enforced }, scopes: [], diagnostics };
+}
+
+/** Projetos sem moduleResolution moderna resolvem pior extensões e index; usamos Bundler. */
+function withModernResolution(options: ts.CompilerOptions): ts.CompilerOptions {
+  const mr = options.moduleResolution;
+  if (mr === undefined || mr === ts.ModuleResolutionKind.Classic) {
+    options.moduleResolution = ts.ModuleResolutionKind.Bundler;
+    if (options.module === undefined || options.module === ts.ModuleKind.CommonJS)
+      options.module = ts.ModuleKind.ESNext;
+  }
+  return options;
 }
 
 /** Nome do pacote a partir de um especificador: `@scope/pkg/sub` → `@scope/pkg`. */
@@ -119,14 +184,25 @@ export type ResolvedTarget =
 
 /** Resolve especificadores de módulo usando o algoritmo do próprio compilador TypeScript. */
 export class ModuleResolver {
-  private readonly cache: ts.ModuleResolutionCache;
   private readonly declaredByDir = new Map<string, Set<string>>();
+  private readonly base: { options: ts.CompilerOptions; cache: ts.ModuleResolutionCache };
+  private readonly scopes: Array<ConfigScope & { cache: ts.ModuleResolutionCache }>;
 
   constructor(
     private readonly root: string,
-    private readonly options: ts.CompilerOptions,
+    options: ts.CompilerOptions,
+    scopes: ConfigScope[] = [],
   ) {
-    this.cache = ts.createModuleResolutionCache(root, (f) => f, options);
+    this.base = { options, cache: ts.createModuleResolutionCache(root, (f) => f, options) };
+    this.scopes = scopes.map((scope) => ({
+      ...scope,
+      cache: ts.createModuleResolutionCache(root, (f) => f, scope.options),
+    }));
+  }
+
+  /** Opções do tsconfig que inclui o arquivo (ou as da raiz). */
+  private configFor(fromAbsolute: string) {
+    return this.scopes.find((s) => s.files.has(fromAbsolute)) ?? this.base;
   }
 
   resolve(specifier: string, fromAbsolute: string): ResolvedTarget {
@@ -138,12 +214,22 @@ export class ModuleResolver {
     });
     // `node:fs` é sempre nativo; já `constants`/`events` podem ser pastas do projeto (baseUrl)
     if (specifier.startsWith('node:')) return builtin();
-    const result = ts.resolveModuleName(specifier, fromAbsolute, this.options, ts.sys, this.cache);
+    const config = this.configFor(fromAbsolute);
+    const result = ts.resolveModuleName(
+      specifier,
+      fromAbsolute,
+      config.options,
+      ts.sys,
+      config.cache,
+    );
     const resolved = result.resolvedModule;
     if (resolved) {
       const file = toPosix(resolved.resolvedFileName);
       const insideRoot = file.startsWith(`${this.root}/`);
-      const inNodeModules = file.includes('/node_modules/');
+      // testado no caminho relativo: a própria raiz pode estar dentro de um node_modules
+      const inNodeModules = (insideRoot ? file.slice(this.root.length) : file).includes(
+        '/node_modules/',
+      );
       if (isBuiltinModule(specifier) && (!insideRoot || inNodeModules)) return builtin();
       // pacotes do workspace chegam via link em node_modules (isExternalLibraryImport = true),
       // mas o caminho real fica dentro do projeto: decidimos pelo caminho real

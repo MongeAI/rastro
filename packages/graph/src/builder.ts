@@ -162,23 +162,36 @@ export class GraphBuilder {
   }
 
   private deriveModuleDependencies(): void {
-    const imports = [...this.edges.values()].filter(
-      (e) => e.kind === 'imports' && e.resolution === 'resolved',
-    );
-    for (const edge of imports) {
+    // soma por par de pastas: evidências (até o limite), contagem real e se é só de tipo
+    const pairs = new Map<
+      string,
+      { from: string; to: string; evidence: Evidence[]; count: number; typeOnly: boolean }
+    >();
+    for (const edge of this.edges.values()) {
+      if (edge.kind !== 'imports' || edge.resolution !== 'resolved') continue;
       const from = this.fileModule(edge.source);
       const to = this.fileModule(edge.target);
       if (!from || !to || from === to) continue;
-      for (const evidence of edge.evidence.length ? edge.evidence : [undefined]) {
-        this.addEdge({
-          kind: 'depends_on',
-          source: from,
-          target: to,
-          resolution: 'resolved',
-          discovery: 'derived',
-          ...(evidence ? { evidence } : {}),
-        });
-      }
+      const key = `${from}|${to}`;
+      const pair = pairs.get(key) ?? { from, to, evidence: [], count: 0, typeOnly: true };
+      pairs.set(key, pair);
+      for (const ev of edge.evidence)
+        if (pair.evidence.length < MAX_EVIDENCE_PER_EDGE) pair.evidence.push(ev);
+      pair.count += edge.meta?.count ?? Math.max(1, edge.evidence.length);
+      pair.typeOnly &&= !!edge.meta?.typeOnly;
+    }
+    for (const pair of pairs.values()) {
+      const edgeIdValue = edgeId('depends_on', pair.from, pair.to);
+      this.edges.set(edgeIdValue, {
+        id: edgeIdValue,
+        kind: 'depends_on',
+        source: pair.from,
+        target: pair.to,
+        resolution: 'resolved',
+        discovery: 'derived',
+        evidence: pair.evidence,
+        meta: { count: pair.count, ...(pair.typeOnly ? { typeOnly: true } : {}) },
+      });
     }
   }
 

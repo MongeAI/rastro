@@ -352,4 +352,25 @@ describe('computeView (expansão progressiva)', () => {
       view.nodes.filter((n) => n.kind === 'function' || n.kind === 'method').map((n) => n.id),
     ).toEqual(['fn:src/a.ts#run']);
   });
+
+  it('relações diretas e somadas entre as mesmas pastas viram uma linha só', () => {
+    const view = computeView(index, {
+      nodeKinds: allKinds,
+      edgeKinds: new Set<EdgeKind>(['imports', 'depends_on']),
+      expandedFiles: new Set(),
+      collapsedModules: new Set(['module:src', 'module:lib']),
+    });
+    const keys = view.edges.map((e) => `${e.kind}|${e.source}|${e.target}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('não conta como ocultas pastas que nunca aparecem', () => {
+    const view = computeView(index, {
+      nodeKinds: allKinds,
+      edgeKinds,
+      expandedFiles: new Set(),
+      expandAll: true,
+    });
+    expect(view.hiddenCount).toBe(0);
+  });
 });
