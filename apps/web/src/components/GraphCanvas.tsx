@@ -233,7 +233,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     cy.on('zoom', scaleGroupLabels);
     cy.on('style', () => (lastScale = 0));
 
+    // quando o espaço do mapa muda (painel recolhido, janela redimensionada), mantém o centro
+    let size = { w: cy.width(), h: cy.height() };
+    const observer = new ResizeObserver(() => {
+      cy.resize();
+      const next = { w: cy.width(), h: cy.height() };
+      if (size.w > 0 && size.h > 0)
+        cy.panBy({ x: (next.w - size.w) / 2, y: (next.h - size.h) / 2 });
+      size = next;
+    });
+    if (containerRef.current) observer.observe(containerRef.current);
+
     return () => {
+      observer.disconnect();
       cy.destroy();
       cyRef.current = null;
     };

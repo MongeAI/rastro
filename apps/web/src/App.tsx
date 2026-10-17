@@ -165,7 +165,12 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
   const [hideTypeOnly, setHideTypeOnly] = useState(false);
   const [highlightNeighbors, setHighlightNeighbors] = useState(true);
   const [centerRequest, setCenterRequest] = useState<{ id: string; seq: number } | null>(null);
+  /** Gaveta de filtros em telas estreitas. */
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** Painel de filtros recolhido em telas largas (o mapa ganha a largura). */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => readPref<'shown' | 'hidden'>('sidebar', 'shown', ['shown', 'hidden']) === 'hidden',
+  );
   const [history, setHistory] = useState<string[]>([]);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedId;
@@ -176,6 +181,7 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
   }, [theme]);
   useEffect(() => writePref('editor', editor), [editor]);
   useEffect(() => writePref('layout', layout), [layout]);
+  useEffect(() => writePref('sidebar', sidebarCollapsed ? 'hidden' : 'shown'), [sidebarCollapsed]);
   useEffect(() => {
     document.title = `${graph.project.name} · Teia`;
   }, [graph.project.name]);
@@ -358,6 +364,19 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
     if (blob) downloadBlob(`${slug(graph.project.name)}.teia.png`, blob);
   };
 
+  // o mesmo botão abre a gaveta (telas estreitas) ou recolhe o painel (telas largas)
+  const isNarrow = () => window.matchMedia?.('(max-width: 900px)').matches ?? false;
+  const sidebarVisible = isNarrow() ? sidebarOpen : !sidebarCollapsed;
+  const toggleSidebar = () => {
+    if (isNarrow()) {
+      setSidebarOpen((o) => !o);
+      return;
+    }
+    setSidebarCollapsed((c) => !c);
+    // depois da transição do painel, reenquadra para aproveitar o espaço novo
+    setTimeout(() => canvas.current?.fit(), 260);
+  };
+
   const fitKey = `${focus?.id ?? ''}|${focus?.depth ?? ''}|${level}`;
   const focusNode = focus ? index.node(focus.id) : undefined;
   const selectedEdge = selectedEdgeId ? view.edges.find((e) => e.id === selectedEdgeId) : undefined;
@@ -369,14 +388,17 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
 
   return (
     <div
-      className={`app${sidebarOpen ? ' sidebar-open' : ''}${panelMode !== 'overview' ? ' has-selection' : ''}`}
+      className={`app${sidebarOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}${panelMode !== 'overview' ? ' has-selection' : ''}`}
     >
       <header className="topbar">
         <button
           type="button"
-          className="icon-button only-narrow"
-          onClick={() => setSidebarOpen((o) => !o)}
-          aria-label="Filtros"
+          className="icon-button"
+          onClick={toggleSidebar}
+          aria-label={sidebarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
+          aria-expanded={sidebarVisible}
+          aria-controls="teia-sidebar"
+          title={sidebarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
         >
           <IconMenu />
         </button>
@@ -445,7 +467,7 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
         onEditor={setEditor}
         onReset={resetView}
       />
-      <div className="scrim only-narrow" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+      <div className="scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
 
       <main className="stage">
         <GraphCanvas

@@ -69,7 +69,7 @@ interface Props {
 export function Sidebar(p: Props) {
   const { stats } = p.graph;
   return (
-    <aside className="sidebar" aria-label="Filtros e legenda">
+    <aside className="sidebar" id="teia-sidebar" aria-label="Filtros e legenda">
       <section className="side-section">
         <h2 className="side-title">Nível de detalhe</h2>
         <div className="segmented three" role="radiogroup" aria-label="Nível de detalhe">

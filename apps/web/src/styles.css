@@ -190,7 +190,6 @@ pre,
   position: absolute;
   inset: 0;
 }
-.only-narrow,
 .scrim {
   display: none;
 }
@@ -1133,6 +1132,25 @@ kbd {
   }
 }
 
+/* ---------- painel de filtros recolhido (telas largas) ---------- */
+@media (min-width: 901px) {
+  .app {
+    transition: grid-template-columns 0.2s ease;
+  }
+  .app.sidebar-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr) 380px;
+  }
+  .sidebar-collapsed .sidebar {
+    visibility: hidden;
+    border-right: 0;
+  }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  .app.sidebar-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr) 330px;
+  }
+}
+
 /* ---------- telas menores ---------- */
 @media (max-width: 1180px) {
   .app {
@@ -1150,9 +1168,6 @@ kbd {
       'top'
       'stage'
       'panel';
-  }
-  .only-narrow {
-    display: inline-grid;
   }
   .brand-project,
   .brand-sep,
