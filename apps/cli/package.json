@@ -1,11 +1,11 @@
 {
-  "name": "teia",
+  "name": "rastro",
   "version": "0.1.0",
-  "description": "Teia — CLI que analisa um repositório JS/TS e abre o mapa navegável do código.",
+  "description": "Rastro — CLI que analisa um repositório JS/TS e abre o mapa navegável do código.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "teia": "./bin/teia.js"
+    "rastro": "./bin/rastro.js"
   },
   "main": "./dist/index.js",
   "files": [
@@ -16,8 +16,29 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@teia/analyzer": "0.1.0",
-    "@teia/core": "0.1.0",
-    "@teia/graph": "0.1.0"
-  }
+    "@rastro/analyzer": "0.1.0",
+    "@rastro/core": "0.1.0",
+    "@rastro/graph": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MongeAI/rastro.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/MongeAI/rastro#readme",
+  "bugs": {
+    "url": "https://github.com/MongeAI/rastro/issues"
+  },
+  "author": "MongeAI",
+  "keywords": [
+    "code-map",
+    "static-analysis",
+    "dependency-graph",
+    "call-graph",
+    "typescript",
+    "javascript",
+    "visualization",
+    "cli",
+    "local-first"
+  ]
 }

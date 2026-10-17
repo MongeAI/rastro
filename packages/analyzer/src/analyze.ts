@@ -4,17 +4,17 @@ import { Node, Project, SyntaxKind, ts, type KindToNodeMappings, type SourceFile
 import {
   nodeId,
   SCHEMA_VERSION,
-  TEIA_VERSION,
+  RASTRO_VERSION,
   type Diagnostic,
   type EdgeMeta,
   type Evidence,
   type GraphNode,
   type Language,
   type SourceRange,
-  type TeiaGraph,
+  type RastroGraph,
   type UnresolvedReason,
-} from '@teia/core';
-import { GraphBuilder } from '@teia/graph';
+} from '@rastro/core';
+import { GraphBuilder } from '@rastro/graph';
 import { discoverFiles, toPosix, type DiscoverOptions, type DiscoveredFile } from './discover.js';
 import { loadCompilerOptions, ModuleResolver, packageNameOf } from './resolve.js';
 import { detectExpressRoutes } from './routes.js';
@@ -58,7 +58,7 @@ interface Ctx {
 export async function analyzeProject(
   rootInput: string,
   options: AnalyzeOptions = {},
-): Promise<TeiaGraph> {
+): Promise<RastroGraph> {
   const started = performance.now();
   const progress = options.onProgress ?? (() => {});
 
@@ -142,10 +142,10 @@ export async function analyzeProject(
   const finalized = ctx.builder.finalize();
   const languages = [...new Set(discovered.files.map((f) => f.language))].sort();
 
-  const graph: TeiaGraph = {
+  const graph: RastroGraph = {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
-    tool: { name: 'teia', version: TEIA_VERSION },
+    tool: { name: 'rastro', version: RASTRO_VERSION },
     project: {
       name: options.name ?? projectName(root),
       root,
@@ -153,8 +153,8 @@ export async function analyzeProject(
       ...(config.configFile ? { tsconfig: config.configFile } : {}),
     },
     analyzer: {
-      name: '@teia/analyzer (ts-morph)',
-      version: TEIA_VERSION,
+      name: '@rastro/analyzer (ts-morph)',
+      version: RASTRO_VERSION,
       typescriptVersion: ts.version,
       options: {
         exclude: options.exclude ?? [],

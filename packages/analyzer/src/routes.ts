@@ -1,5 +1,5 @@
 import { Node, SyntaxKind, ts, type SourceFile } from 'ts-morph';
-import { nodeId } from '@teia/core';
+import { nodeId } from '@rastro/core';
 import type { DiscoveredFile } from './discover.js';
 import {
   addUnresolvedNode,

@@ -2,8 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import cytoscape, { type Core, type ElementDefinition, type NodeSingular } from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import layoutUtilities from 'cytoscape-layout-utilities';
-import { EDGE_KIND_LABELS, NODE_KIND_LABELS, type EdgeKind, type NodeKind } from '@teia/core';
-import type { GraphView, ViewNode } from '@teia/graph';
+import { EDGE_KIND_LABELS, NODE_KIND_LABELS, type EdgeKind, type NodeKind } from '@rastro/core';
+import type { GraphView, ViewNode } from '@rastro/graph';
 import { computeElkPositions } from '../lib/elkLayout';
 import { buildStyle, displayLabel } from '../lib/graphStyle';
 import type { Palette } from '../lib/theme';

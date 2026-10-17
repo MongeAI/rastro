@@ -4,7 +4,7 @@ import {
   NODE_KINDS,
   RESOLUTIONS,
   SCHEMA_VERSION,
-  type TeiaGraph,
+  type RastroGraph,
 } from './model.js';
 
 export interface ValidationResult {
@@ -20,7 +20,7 @@ const isPositiveInt = (v: unknown) => Number.isInteger(v) && (v as number) >= 1;
 /**
  * Valida a estrutura de um grafo e sua integridade referencial
  * (toda relação aponta para nós existentes, ids são únicos, localizações são coerentes).
- * Complementa o JSON Schema em `schema/teia-graph.schema.json`, que não consegue
+ * Complementa o JSON Schema em `schema/rastro-graph.schema.json`, que não consegue
  * expressar regras entre nós e relações.
  */
 export function validateGraph(input: unknown, maxErrors = 50): ValidationResult {
@@ -59,7 +59,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     fail('project.languages deve ser uma lista.');
   if (errors.length) return { valid: false, errors };
 
-  const graph = input as unknown as TeiaGraph;
+  const graph = input as unknown as RastroGraph;
   const ids = new Set<string>();
   const nodeKinds = new Set<string>(NODE_KINDS);
 
@@ -149,7 +149,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
 }
 
 /** Lê e valida um grafo vindo de JSON, lançando erro descritivo se for inválido. */
-export function parseGraph(json: string): TeiaGraph {
+export function parseGraph(json: string): RastroGraph {
   let data: unknown;
   try {
     data = JSON.parse(json);
@@ -160,5 +160,5 @@ export function parseGraph(json: string): TeiaGraph {
   if (!result.valid) {
     throw new Error(`Grafo inválido:\n- ${result.errors.join('\n- ')}`);
   }
-  return data as TeiaGraph;
+  return data as RastroGraph;
 }

@@ -3,21 +3,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { analyzeProject } from '@teia/analyzer';
-import { TEIA_VERSION, validateGraph, type NodeKind, type TeiaGraph } from '@teia/core';
+import { analyzeProject } from '@rastro/analyzer';
+import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
 import { openBrowser } from './browser.js';
 import { startServer } from './server.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
 
 const HELP = `
-Teia ${TEIA_VERSION} — mapa navegável de projetos JavaScript/TypeScript
+Rastro ${RASTRO_VERSION} — siga o rastro do seu código (mapa navegável de projetos JS/TS)
 
 Uso:
-  teia <caminho>                  analisa o projeto e abre o mapa no navegador
-                                  (equivale a "teia open <caminho>")
-  teia analyze <caminho>          só analisa e salva o grafo em JSON
-  teia serve <grafo.json>         abre o mapa de um JSON salvo anteriormente
-  teia validate <grafo.json>      confere se um JSON exportado é válido
+  rastro <caminho>                  analisa o projeto e abre o mapa no navegador
+                                  (equivale a "rastro open <caminho>")
+  rastro analyze <caminho>          só analisa e salva o grafo em JSON
+  rastro serve <grafo.json>         abre o mapa de um JSON salvo anteriormente
+  rastro validate <grafo.json>      confere se um JSON exportado é válido
 
 Opções:
   -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário)
@@ -30,7 +30,7 @@ Opções:
   -h, --help                mostra esta ajuda
   -v, --version             mostra a versão
 
-O Teia só lê arquivos: não executa o projeto, não instala dependências e não
+O Rastro só lê arquivos: não executa o projeto, não instala dependências e não
 envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
 `;
 
@@ -51,7 +51,7 @@ function webRoot(): string {
   return fileURLToPath(new URL('./web/', import.meta.url));
 }
 
-function printSummary(graph: TeiaGraph, savedTo?: string): void {
+function printSummary(graph: RastroGraph, savedTo?: string): void {
   const { stats } = graph;
   const out = (s = '') => process.stderr.write(`${s}\n`);
   out();
@@ -95,14 +95,16 @@ function printSummary(graph: TeiaGraph, savedTo?: string): void {
   out();
 }
 
-async function serve(graph: TeiaGraph, port: number, open: boolean): Promise<void> {
+async function serve(graph: RastroGraph, port: number, open: boolean): Promise<void> {
   const root = webRoot();
   if (!fs.existsSync(path.join(root, 'index.html'))) {
-    fail('a interface web não foi compilada. Rode "npm run build" na raiz do repositório do Teia.');
+    fail(
+      'a interface web não foi compilada. Rode "npm run build" na raiz do repositório do Rastro.',
+    );
   }
   const server = await startServer({ graph, webRoot: root, port });
   process.stderr.write(
-    `${bold('Teia')} pronto em ${cyan(server.url)}  ${dim('(Ctrl+C para encerrar)')}\n` +
+    `${bold('Rastro')} pronto em ${cyan(server.url)}  ${dim('(Ctrl+C para encerrar)')}\n` +
       dim('  O endereço inclui um token de acesso válido só nesta execução.\n'),
   );
   if (open) openBrowser(server.url);
@@ -134,19 +136,20 @@ async function main(argv: string[]): Promise<void> {
       },
     });
   } catch (err) {
-    fail(`${(err as Error).message}\nUse "teia --help" para ver as opções.`);
+    fail(`${(err as Error).message}\nUse "rastro --help" para ver as opções.`);
   }
   const { values, positionals } = parsed;
-  if (values.version) return void process.stdout.write(`${TEIA_VERSION}\n`);
+  if (values.version) return void process.stdout.write(`${RASTRO_VERSION}\n`);
   if (values.help || positionals.length === 0) return void process.stdout.write(HELP);
 
   const commands = ['open', 'analyze', 'serve', 'validate'];
   const [first, ...rest] = positionals;
-  // "teia analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho
+  // "rastro analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho
   const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
   const command = isCommand ? first! : 'open';
   const target = isCommand ? rest[0] : first;
-  if (!target) fail(`informe o caminho para "${command}". Exemplo: teia ${command} ./meu-projeto`);
+  if (!target)
+    fail(`informe o caminho para "${command}". Exemplo: rastro ${command} ./meu-projeto`);
 
   const servesUi = command === 'open' || command === 'serve';
   if (values.port !== undefined && (!servesUi || !/^\d+$/.test(values.port)))
@@ -157,7 +160,7 @@ async function main(argv: string[]): Promise<void> {
     );
   const port = values.port !== undefined ? Number(values.port) : 4321;
   if (port > 65535) fail('--port precisa ser um número entre 0 e 65535.');
-  if (values.stdout && command !== 'analyze') fail('--stdout só funciona com "teia analyze".');
+  if (values.stdout && command !== 'analyze') fail('--stdout só funciona com "rastro analyze".');
   if (values.out && command !== 'analyze' && command !== 'open')
     fail(`--out não se aplica a "${command}".`);
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
@@ -178,7 +181,7 @@ async function main(argv: string[]): Promise<void> {
       );
       process.exit(1);
     }
-    const g = data as TeiaGraph;
+    const g = data as RastroGraph;
     process.stdout.write(
       `válido — ${g.nodes.length} nós, ${g.edges.length} relações (schema ${g.schemaVersion})\n`,
     );
@@ -186,7 +189,7 @@ async function main(argv: string[]): Promise<void> {
   }
 
   if (command === 'serve') {
-    let graph: TeiaGraph;
+    let graph: RastroGraph;
     try {
       graph = loadGraph(target);
     } catch (err) {

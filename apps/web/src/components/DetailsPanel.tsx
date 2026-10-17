@@ -7,8 +7,8 @@ import {
   type EdgeKind,
   type GraphEdge,
   type GraphNode,
-} from '@teia/core';
-import type { GraphIndex } from '@teia/graph';
+} from '@rastro/core';
+import type { GraphIndex } from '@rastro/graph';
 import { absolutePath, copyText, EDITORS, type EditorId } from '../lib/editor';
 import { DISCOVERY_TEXT, plural, REASON_TEXT } from '../lib/explain';
 import { IconClose, IconCopy, IconExpand, IconExternal, IconLayers, IconTarget } from './Icons';

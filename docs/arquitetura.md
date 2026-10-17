@@ -1,6 +1,6 @@
 # Arquitetura
 
-O Teia é um monorepo npm com pacotes pequenos e independentes. A regra principal: **o grafo é a fonte da verdade**. Analisadores produzem o grafo; a CLI armazena e serve; a interface só lê.
+O Rastro é um monorepo npm com pacotes pequenos e independentes. A regra principal: **o grafo é a fonte da verdade**. Analisadores produzem o grafo; a CLI armazena e serve; a interface só lê.
 
 ```
             ┌──────────────┐     ┌────────────────┐     ┌──────────────┐
@@ -20,13 +20,13 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 
 ## Pacotes
 
-| Pacote              | Responsabilidade                                                                                                                                                       | Depende de                       |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `@teia/core`        | Tipos (`GraphNode`, `GraphEdge`, `Evidence`...), ids, rótulos em português, JSON Schema, `validateGraph`                                                               | nada                             |
-| `@teia/graph`       | `GraphBuilder` (deduplicação, evidências, `depends_on`, ciclos via Tarjan iterativo), `GraphIndex` (vizinhança, impacto, busca), `computeView` (o que aparece na tela) | core                             |
-| `@teia/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regra de rotas do Express                                                   | core, graph, ts-morph, ignore    |
-| `teia` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local                                                                                                       | core, graph, analyzer            |
-| `@teia/web`         | Interface; usa `@teia/graph` diretamente no navegador                                                                                                                  | core, graph, React, Cytoscape.js |
+| Pacote                | Responsabilidade                                                                                                                                                       | Depende de                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `@rastro/core`        | Tipos (`GraphNode`, `GraphEdge`, `Evidence`...), ids, rótulos em português, JSON Schema, `validateGraph`                                                               | nada                             |
+| `@rastro/graph`       | `GraphBuilder` (deduplicação, evidências, `depends_on`, ciclos via Tarjan iterativo), `GraphIndex` (vizinhança, impacto, busca), `computeView` (o que aparece na tela) | core                             |
+| `@rastro/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regra de rotas do Express                                                   | core, graph, ts-morph, ignore    |
+| `rastro` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local                                                                                                       | core, graph, analyzer            |
+| `@rastro/web`         | Interface; usa `@rastro/graph` diretamente no navegador                                                                                                                | core, graph, React, Cytoscape.js |
 
 `core` e `graph` não usam APIs do Node.js, para rodarem no navegador.
 
@@ -40,7 +40,7 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 
 ### Como uma chamada é resolvida
 
-Para `alvo()` ou `obj.alvo()`, o Teia pede ao verificador de tipos o **símbolo** do nome chamado, segue aliases (`import`, `require`, reexportações) e olha as declarações:
+Para `alvo()` ou `obj.alvo()`, o Rastro pede ao verificador de tipos o **símbolo** do nome chamado, segue aliases (`import`, `require`, reexportações) e olha as declarações:
 
 | A declaração é...                                         | Resultado                                           |
 | --------------------------------------------------------- | --------------------------------------------------- |
@@ -56,14 +56,14 @@ Para `alvo()` ou `obj.alvo()`, o Teia pede ao verificador de tipos o **símbolo*
 
 ## Interface
 
-- `computeView` (em `@teia/graph`) decide o que aparece. Há três níveis: **Pastas** (cada pasta recolhida vira um nó, e as relações dos arquivos internos são somadas em uma linha só, com a lista das relações originais em `members`), **Arquivos** e **Símbolos**. Também cuida do foco e da "expansão de conexões". Relações de um grupo para o próprio filho não são desenhadas, o que evita laços.
+- `computeView` (em `@rastro/graph`) decide o que aparece. Há três níveis: **Pastas** (cada pasta recolhida vira um nó, e as relações dos arquivos internos são somadas em uma linha só, com a lista das relações originais em `members`), **Arquivos** e **Símbolos**. Também cuida do foco e da "expansão de conexões". Relações de um grupo para o próprio filho não são desenhadas, o que evita laços.
 - O layout padrão é **hierárquico** (ELK _layered_, `lib/elkLayout.ts`), feito de dentro para fora: cada grupo (pasta, arquivo, classe) organiza seus filhos pelas relações entre eles. As relações que atravessam grupos são elevadas até o grupo em comum mais próximo, e componentes sem ligação são empacotados respeitando a proporção da tela. O layout **orgânico** (fcose + layout-utilities) continua disponível.
 - `GraphCanvas` sincroniza a visão com o Cytoscape **de forma incremental** (adiciona, move e remove só o que mudou) e anima as posições novas. Os rótulos dos grupos crescem quando o zoom diminui, para o mapa continuar legível de longe.
 - O código-fonte é pedido sob demanda a `/api/source`, que só entrega arquivos presentes no grafo.
 
 ## Como adicionar uma nova linguagem
 
-1. Crie `packages/analyzer-<linguagem>` que produza nós e relações pelo `GraphBuilder` (mesmos ids e tipos do `@teia/core`).
+1. Crie `packages/analyzer-<linguagem>` que produza nós e relações pelo `GraphBuilder` (mesmos ids e tipos do `@rastro/core`).
 2. Registre evidências (arquivo + linha) para toda relação resolvida e use `unresolved` com motivo quando não houver prova.
 3. Adicione fixtures e testes; o restante (armazenamento, servidor, interface, exportação) funciona sem mudanças.
 

@@ -1,7 +1,7 @@
 {
-  "name": "@teia/graph",
+  "name": "@rastro/graph",
   "version": "0.1.0",
-  "description": "Construção, normalização e consultas sobre o grafo do Teia (sem dependências de Node).",
+  "description": "Construção, normalização e consultas sobre o grafo do Rastro (sem dependências de Node).",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,6 +17,16 @@
   ],
   "sideEffects": false,
   "dependencies": {
-    "@teia/core": "0.1.0"
-  }
+    "@rastro/core": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MongeAI/rastro.git",
+    "directory": "packages/graph"
+  },
+  "homepage": "https://github.com/MongeAI/rastro#readme",
+  "bugs": {
+    "url": "https://github.com/MongeAI/rastro/issues"
+  },
+  "author": "MongeAI"
 }

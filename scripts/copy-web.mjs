@@ -5,7 +5,7 @@ const from = new URL('../apps/web/dist/', import.meta.url);
 const to = new URL('../apps/cli/dist/web/', import.meta.url);
 
 if (!fs.existsSync(new URL('index.html', from))) {
-  console.error('apps/web/dist/index.html não existe. Rode "npm run build -w @teia/web" antes.');
+  console.error('apps/web/dist/index.html não existe. Rode "npm run build -w @rastro/web" antes.');
   process.exit(1);
 }
 fs.rmSync(to, { recursive: true, force: true });

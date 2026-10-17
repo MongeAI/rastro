@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import type { TeiaGraph } from '@teia/core';
+import type { RastroGraph } from '@rastro/core';
 
 export interface ServerOptions {
-  graph: TeiaGraph;
+  graph: RastroGraph;
   /** Pasta com a interface já compilada (index.html + assets). */
   webRoot: string;
   /** Porta preferida; se ocupada, tenta as seguintes. 0 = qualquer porta livre. */
@@ -75,7 +75,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       .map((n) => n.qualifiedName ?? n.name),
   );
   let port = 0;
-  const cookieName = () => `teia_${port}`;
+  const cookieName = () => `rastro_${port}`;
 
   const server = http.createServer((req, res) => {
     const send = (
@@ -102,7 +102,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         return send(
           403,
           `Host não permitido: "${host}". Abra http://127.0.0.1:${port}/ diretamente nesta máquina ` +
-            '(o Teia recusa outros nomes de host para se proteger de DNS rebinding).',
+            '(o Rastro recusa outros nomes de host para se proteger de DNS rebinding).',
         );
       }
       if (req.method !== 'GET' && req.method !== 'HEAD')
@@ -166,7 +166,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       if (!isFile(file)) {
         return send(
           500,
-          'A interface web não foi encontrada. Rode "npm run build" na raiz do repositório do Teia.',
+          'A interface web não foi encontrada. Rode "npm run build" na raiz do repositório do Rastro.',
         );
       }
       const relative = path.relative(webRoot, file);
@@ -183,7 +183,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       stream.on('error', () => res.destroy());
       stream.pipe(res);
     } catch {
-      if (!res.headersSent) send(500, 'Erro interno do servidor do Teia.');
+      if (!res.headersSent) send(500, 'Erro interno do servidor do Rastro.');
       else res.destroy();
     }
   });
@@ -258,7 +258,7 @@ interface SourceResult {
 /**
  * Lê um arquivo do projeto, apenas se ele estiver no grafo, for JS/TS e ficar dentro da raiz
  * (também depois de resolver links simbólicos). Protege inclusive contra um JSON adulterado
- * aberto com `teia serve`, que poderia listar caminhos como `../../.ssh/id_rsa`.
+ * aberto com `rastro serve`, que poderia listar caminhos como `../../.ssh/id_rsa`.
  */
 export function readSource(root: string, file: string, allowed: ReadonlySet<string>): SourceResult {
   const notInGraph = { status: 404, body: { error: 'Arquivo fora do grafo analisado.' } };

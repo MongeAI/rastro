@@ -5,16 +5,16 @@ import {
   parseGraph,
   SCHEMA_VERSION,
   validateGraph,
-  type TeiaGraph,
-} from '@teia/core';
+  type RastroGraph,
+} from '@rastro/core';
 
-function minimalGraph(): TeiaGraph {
+function minimalGraph(): RastroGraph {
   const file = nodeId.file('src/a.ts');
   const fn = nodeId.function('src/a.ts', 'run');
   return {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: new Date(0).toISOString(),
-    tool: { name: 'teia', version: '0.1.0' },
+    tool: { name: 'rastro', version: '0.1.0' },
     project: { name: 'demo', root: '/tmp/demo', languages: ['ts'] },
     analyzer: {
       name: 'test',

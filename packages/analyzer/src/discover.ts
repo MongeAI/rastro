@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ignore, { type Ignore } from 'ignore';
-import type { Diagnostic, Language } from '@teia/core';
-import { compareStrings } from '@teia/core';
+import type { Diagnostic, Language } from '@rastro/core';
+import { compareStrings } from '@rastro/core';
 
 /** Diretórios que quase sempre contêm código gerado, dependências ou dados de ferramentas. */
 export const DEFAULT_EXCLUDED_DIRS = [
@@ -25,7 +25,7 @@ export const DEFAULT_EXCLUDED_DIRS = [
   '.netlify',
   '.angular',
   '.expo',
-  '.teia',
+  '.rastro',
   'storybook-static',
   'bower_components',
   'jspm_packages',
@@ -128,7 +128,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
           diagnostics.push({
             level: 'info',
             code: 'symlink-skipped',
-            message: 'Link simbólico ignorado (o Teia não segue links simbólicos).',
+            message: 'Link simbólico ignorado (o Rastro não segue links simbólicos).',
             file: rel,
           });
         }

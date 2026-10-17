@@ -2,19 +2,19 @@
   "schemaVersion": "0.1.0",
   "generatedAt": "2026-10-17T00:00:00.000Z",
   "tool": {
-    "name": "teia",
+    "name": "rastro",
     "version": "0.1.0"
   },
   "project": {
     "name": "ts-basic",
-    "root": "/caminho/para/teia/fixtures/ts-basic",
+    "root": "/caminho/para/rastro/fixtures/ts-basic",
     "languages": [
       "ts"
     ],
     "tsconfig": "tsconfig.json"
   },
   "analyzer": {
-    "name": "@teia/analyzer (ts-morph)",
+    "name": "@rastro/analyzer (ts-morph)",
     "version": "0.1.0",
     "typescriptVersion": "6.0.2",
     "options": {

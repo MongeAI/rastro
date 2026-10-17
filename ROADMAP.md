@@ -1,6 +1,6 @@
 # Roadmap
 
-O Teia 0.1 é o núcleo: um grafo confiável e rastreável de projetos JS/TS e uma interface para explorá-lo. As próximas etapas, em ordem aproximada de prioridade:
+O Rastro 0.1 é o núcleo: um grafo confiável e rastreável de projetos JS/TS e uma interface para explorá-lo. As próximas etapas, em ordem aproximada de prioridade:
 
 ## 0.2: mais precisão no JS/TS
 

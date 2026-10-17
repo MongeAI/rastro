@@ -128,21 +128,25 @@ export const IconFile = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-/** Marca do Teia: uma teia hexagonal simples. */
+/** Marca do Rastro: pontos ligados por um caminho até um alvo (cada relação leva ao código). */
 export const Logo = ({ size = 22 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
     <rect width="32" height="32" rx="7" fill="var(--text)" />
-    <g stroke="var(--bg)" strokeWidth="1.6" fill="none" strokeLinecap="round">
-      <path d="M16 7v18M8.2 11.5l15.6 9M8.2 20.5l15.6-9" />
-      <path d="M16 11.2l4.2 2.4v4.8L16 20.8l-4.2-2.4v-4.8z" />
-    </g>
+    <path
+      d="M7.5 23.5 13 15.5l5.5 4.5 6-11"
+      fill="none"
+      stroke="var(--bg)"
+      strokeOpacity="0.4"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
     <g fill="var(--bg)">
-      <circle cx="16" cy="7" r="2" />
-      <circle cx="16" cy="25" r="2" />
-      <circle cx="8.2" cy="11.5" r="2" />
-      <circle cx="23.8" cy="20.5" r="2" />
-      <circle cx="8.2" cy="20.5" r="2" />
-      <circle cx="23.8" cy="11.5" r="2" />
+      <circle cx="7.5" cy="23.5" r="2" />
+      <circle cx="13" cy="15.5" r="2" />
+      <circle cx="18.5" cy="20" r="2" />
+      <circle cx="24.5" cy="9" r="1.2" />
     </g>
+    <circle cx="24.5" cy="9" r="3.2" fill="none" stroke="var(--bg)" strokeWidth="1.6" />
   </svg>
 );

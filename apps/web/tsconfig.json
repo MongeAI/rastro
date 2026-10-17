@@ -12,8 +12,8 @@
     "noEmit": true,
     "types": [],
     "paths": {
-      "@teia/core": ["../../packages/core/src/index.ts"],
-      "@teia/graph": ["../../packages/graph/src/index.ts"]
+      "@rastro/core": ["../../packages/core/src/index.ts"],
+      "@rastro/graph": ["../../packages/graph/src/index.ts"]
     }
   },
   "include": ["src"]

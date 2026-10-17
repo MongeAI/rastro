@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { analyzeProject } from '@teia/analyzer';
-import { validateGraph, type TeiaGraph } from '@teia/core';
+import { analyzeProject } from '@rastro/analyzer';
+import { validateGraph, type RastroGraph } from '@rastro/core';
 import { readSource, startServer, type RunningServer } from '../src/server.js';
 import { defaultGraphPath, loadGraph, saveGraph } from '../src/storage.js';
 
@@ -33,25 +33,25 @@ function get(port: number, urlPath: string, host = `127.0.0.1:${port}`, method =
   );
 }
 
-let graph: TeiaGraph;
+let graph: RastroGraph;
 beforeAll(async () => {
   graph = await analyzeProject(fixture);
 });
 
 describe('armazenamento', () => {
   it('salva e lê o grafo sem perdas, fora do projeto analisado', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-store-'));
-    process.env.TEIA_CACHE_DIR = dir;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-store-'));
+    process.env.RASTRO_CACHE_DIR = dir;
     const file = defaultGraphPath(graph);
     expect(file.startsWith(dir)).toBe(true);
     expect(path.basename(file)).toMatch(/^ts-basic-[0-9a-f]{10}\.graph\.json$/);
     saveGraph(graph, file);
     expect(loadGraph(file)).toEqual(JSON.parse(JSON.stringify(graph)));
-    delete process.env.TEIA_CACHE_DIR;
+    delete process.env.RASTRO_CACHE_DIR;
   });
 
   it('recusa JSON inválido ao carregar', () => {
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'teia-bad-')), 'bad.json');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-bad-')), 'bad.json');
     fs.writeFileSync(file, '{"schemaVersion":"0.1.0","nodes":[]}');
     expect(() => loadGraph(file)).toThrow(/Grafo inválido/);
   });
@@ -61,8 +61,8 @@ describe('servidor local', () => {
   let server: RunningServer;
   let webRoot: string;
   beforeAll(async () => {
-    webRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-web-'));
-    fs.writeFileSync(path.join(webRoot, 'index.html'), '<!doctype html><title>Teia</title>');
+    webRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-web-'));
+    fs.writeFileSync(path.join(webRoot, 'index.html'), '<!doctype html><title>Rastro</title>');
     server = await startServer({ graph, webRoot, port: 0 });
   });
   afterAll(() => server.close());
@@ -92,7 +92,7 @@ describe('servidor local', () => {
     expect(validateGraph(JSON.parse(res.body)).valid).toBe(true);
     expect(res.headers['content-security-policy']).toContain("default-src 'self'");
     const page = await get(server.port, '/qualquer/rota');
-    expect(page.body).toContain('<title>Teia</title>');
+    expect(page.body).toContain('<title>Rastro</title>');
   });
 
   it('recusa Host desconhecido (DNS rebinding) e métodos de escrita', async () => {
@@ -132,8 +132,8 @@ describe('readSource', () => {
   });
 
   it('não segue pastas que viraram links simbólicos depois da análise', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-src-'));
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-secret-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-src-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-secret-'));
     fs.writeFileSync(path.join(outside, 'a.ts'), 'segredo');
     fs.symlinkSync(outside, path.join(root, 'src'));
     expect(readSource(root, 'src/a.ts', new Set(['src/a.ts'])).status).toBe(403);
@@ -146,13 +146,13 @@ describe.skipIf(!fs.existsSync(cli))('CLI compilada (após npm run build)', () =
     const out = execFileSync(process.execPath, [cli, 'analyze', fixture, '--stdout'], {
       encoding: 'utf8',
     });
-    const g = JSON.parse(out) as TeiaGraph;
+    const g = JSON.parse(out) as RastroGraph;
     expect(validateGraph(g).valid).toBe(true);
     expect(g.stats.files).toBe(9);
   });
 
   it('analyze -o salva e validate confirma', () => {
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'teia-cli-')), 'g.json');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-cli-')), 'g.json');
     execFileSync(process.execPath, [cli, 'analyze', fixture, '-o', file], {
       encoding: 'utf8',
       stdio: 'pipe',

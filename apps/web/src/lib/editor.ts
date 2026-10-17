@@ -37,7 +37,7 @@ export function readPref<T extends string>(
   allowed: readonly string[],
 ): T {
   try {
-    const v = localStorage.getItem(`teia:${key}`);
+    const v = localStorage.getItem(`rastro:${key}`);
     return v && allowed.includes(v) ? (v as T) : fallback;
   } catch {
     return fallback;
@@ -46,7 +46,7 @@ export function readPref<T extends string>(
 
 export function writePref(key: string, value: string): void {
   try {
-    localStorage.setItem(`teia:${key}`, value);
+    localStorage.setItem(`rastro:${key}`, value);
   } catch {
     // preferências são apenas conveniência
   }

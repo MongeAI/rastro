@@ -1,7 +1,7 @@
 {
-  "name": "@teia/core",
+  "name": "@rastro/core",
   "version": "0.1.0",
-  "description": "Modelo de dados do Teia: nós, relações, evidências e validação do grafo.",
+  "description": "Modelo de dados do Rastro: nós, relações, evidências e validação do grafo.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,11 +11,21 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./schema.json": "./schema/teia-graph.schema.json"
+    "./schema.json": "./schema/rastro-graph.schema.json"
   },
   "files": [
     "dist",
     "schema"
   ],
-  "sideEffects": false
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MongeAI/rastro.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/MongeAI/rastro#readme",
+  "bugs": {
+    "url": "https://github.com/MongeAI/rastro/issues"
+  },
+  "author": "MongeAI"
 }

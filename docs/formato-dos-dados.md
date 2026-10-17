@@ -1,9 +1,9 @@
 # Formato dos dados (schema 0.1.0)
 
-O Teia exporta um único arquivo JSON com todo o grafo. Ele é:
+O Rastro exporta um único arquivo JSON com todo o grafo. Ele é:
 
 - **Versionado:** campo `schemaVersion` (hoje `"0.1.0"`).
-- **Validável:** JSON Schema em [`packages/core/schema/teia-graph.schema.json`](../packages/core/schema/teia-graph.schema.json) (draft 2020-12) e validação de integridade com `teia validate <arquivo>` (ids únicos, toda relação aponta para nós existentes, localizações coerentes).
+- **Validável:** JSON Schema em [`packages/core/schema/rastro-graph.schema.json`](../packages/core/schema/rastro-graph.schema.json) (draft 2020-12) e validação de integridade com `rastro validate <arquivo>` (ids únicos, toda relação aponta para nós existentes, localizações coerentes).
 - **Determinístico:** nós e relações vêm ordenados por `id`.
 
 ## Estrutura geral
@@ -12,9 +12,9 @@ O Teia exporta um único arquivo JSON com todo o grafo. Ele é:
 {
   "schemaVersion": "0.1.0",
   "generatedAt": "2026-10-17T22:30:00.000Z",
-  "tool": { "name": "teia", "version": "0.1.0" },
+  "tool": { "name": "rastro", "version": "0.1.0" },
   "project": { "name": "ts-basic", "root": "/caminho/absoluto", "languages": ["ts"], "tsconfig": "tsconfig.json" },
-  "analyzer": { "name": "@teia/analyzer (ts-morph)", "version": "0.1.0", "typescriptVersion": "6.0.2", "options": { ... } },
+  "analyzer": { "name": "@rastro/analyzer (ts-morph)", "version": "0.1.0", "typescriptVersion": "6.0.2", "options": { ... } },
   "nodes": [ /* GraphNode */ ],
   "edges": [ /* GraphEdge */ ],
   "stats": { /* contagens e ciclos */ },

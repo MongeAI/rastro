@@ -1,4 +1,4 @@
-import { NODE_KIND_LABELS, type NodeKind } from '@teia/core';
+import { NODE_KIND_LABELS, type NodeKind } from '@rastro/core';
 
 /** Ponto colorido + rótulo do tipo de nó. As cores vêm de variáveis CSS (--k-<tipo>). */
 export function KindDot({ kind }: { kind: NodeKind }) {

@@ -10,7 +10,7 @@ import {
   type GraphNode,
   type GraphStats,
   type Resolution,
-} from '@teia/core';
+} from '@rastro/core';
 import { stronglyConnectedComponents } from './cycles.js';
 
 /** Máximo de evidências guardadas por relação; o total fica em `meta.count`. */

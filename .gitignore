@@ -1,4 +1,4 @@
-# dependências e builds do próprio Teia
+# dependências e builds do próprio Rastro
 node_modules/
 !fixtures/**/node_modules/
 /packages/*/dist/
@@ -7,7 +7,7 @@ node_modules/
 coverage/
 
 # saídas de análise geradas localmente
-.teia/
+.rastro/
 *.graph.json
 !docs/examples/*.graph.json
 

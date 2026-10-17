@@ -1,5 +1,5 @@
-import type { EdgeKind, GraphNode, NodeKind, Resolution } from '@teia/core';
-import { compareStrings } from '@teia/core';
+import type { EdgeKind, GraphNode, NodeKind, Resolution } from '@rastro/core';
+import { compareStrings } from '@rastro/core';
 import type { GraphIndex } from './query.js';
 
 /**

@@ -1,4 +1,4 @@
-Fontes incluídas na interface do Teia (servidas localmente, sem acesso à internet):
+Fontes incluídas na interface do Rastro (servidas localmente, sem acesso à internet):
 
 - Inter — Copyright (c) The Inter Project Authors (https://github.com/rsms/inter)
 - JetBrains Mono — Copyright (c) The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)

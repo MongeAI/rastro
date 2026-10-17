@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { nodeId, SCHEMA_VERSION, type NodeKind, type EdgeKind, type TeiaGraph } from '@teia/core';
+import {
+  nodeId,
+  SCHEMA_VERSION,
+  type NodeKind,
+  type EdgeKind,
+  type RastroGraph,
+} from '@rastro/core';
 import {
   computeView,
   GraphBuilder,
@@ -7,12 +13,12 @@ import {
   groupableModules,
   MAX_EVIDENCE_PER_EDGE,
   stronglyConnectedComponents,
-} from '@teia/graph';
+} from '@rastro/graph';
 
 const ev = (line: number) => ({ file: 'src/a.ts', line, column: 1 });
 
 /** Projeto pequeno: src/a.ts (run → helper), src/b.ts (Svc.go → run), lib/c.ts importado por b. */
-function sampleGraph(): TeiaGraph {
+function sampleGraph(): RastroGraph {
   const b = new GraphBuilder();
   const files = ['src/a.ts', 'src/b.ts', 'lib/c.ts'];
   for (const f of files) {
@@ -79,7 +85,7 @@ function sampleGraph(): TeiaGraph {
   return {
     schemaVersion: SCHEMA_VERSION,
     generatedAt: '',
-    tool: { name: 'teia', version: '0.1.0' },
+    tool: { name: 'rastro', version: '0.1.0' },
     project: { name: 't', root: '/t', languages: ['ts'] },
     analyzer: {
       name: 't',

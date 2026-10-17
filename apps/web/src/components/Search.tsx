@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { GraphIndex } from '@teia/graph';
-import { NODE_KIND_LABELS } from '@teia/core';
+import type { GraphIndex } from '@rastro/graph';
+import { NODE_KIND_LABELS } from '@rastro/core';
 import { IconSearch } from './Icons';
 import { KindDot } from './KindBadge';
 

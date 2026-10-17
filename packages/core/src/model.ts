@@ -1,5 +1,5 @@
 /**
- * Modelo de dados do Teia.
+ * Modelo de dados do Rastro.
  *
  * O grafo é a fonte da verdade: cada nó é uma entidade do código (arquivo, função, classe...)
  * e cada relação aponta para as evidências (arquivo + linha) que a sustentam.
@@ -212,10 +212,10 @@ export interface AnalyzerInfo {
   };
 }
 
-export interface TeiaGraph {
+export interface RastroGraph {
   schemaVersion: typeof SCHEMA_VERSION;
   generatedAt: string;
-  tool: { name: 'teia'; version: string };
+  tool: { name: 'rastro'; version: string };
   project: ProjectInfo;
   analyzer: AnalyzerInfo;
   nodes: GraphNode[];

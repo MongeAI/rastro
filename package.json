@@ -1,8 +1,8 @@
 {
-  "name": "teia-monorepo",
+  "name": "rastro-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Teia — transforma repositórios JavaScript/TypeScript em mapas navegáveis de código.",
+  "description": "Rastro — transforma repositórios JavaScript/TypeScript em mapas navegáveis de código.",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -16,16 +16,16 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run build -w @teia/web && node scripts/copy-web.mjs",
-    "dev:web": "npm run dev -w @teia/web",
+    "build": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run build -w @rastro/web && node scripts/copy-web.mjs",
+    "dev:web": "npm run dev -w @rastro/web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run typecheck -w @teia/web",
+    "typecheck": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run typecheck -w @rastro/web",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "node scripts/clean.mjs",
-    "teia": "node apps/cli/bin/teia.js"
+    "rastro": "node apps/cli/bin/rastro.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -38,5 +38,14 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.2",
     "vitest": "^5.0.5"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MongeAI/rastro.git"
+  },
+  "homepage": "https://github.com/MongeAI/rastro#readme",
+  "bugs": {
+    "url": "https://github.com/MongeAI/rastro/issues"
+  },
+  "author": "MongeAI"
 }

@@ -1,5 +1,5 @@
-import type { EdgeKind, GraphEdge, GraphNode, NodeKind, TeiaGraph } from '@teia/core';
-import { compareStrings } from '@teia/core';
+import type { EdgeKind, GraphEdge, GraphNode, NodeKind, RastroGraph } from '@rastro/core';
+import { compareStrings } from '@rastro/core';
 
 export interface SearchResult {
   node: GraphNode;
@@ -27,7 +27,7 @@ export class GraphIndex {
   private readonly in = new Map<string, GraphEdge[]>();
   private readonly childrenOf = new Map<string, GraphNode[]>();
 
-  constructor(readonly graph: TeiaGraph) {
+  constructor(readonly graph: RastroGraph) {
     for (const node of graph.nodes) {
       this.nodes.set(node.id, node);
       if (node.parent) {

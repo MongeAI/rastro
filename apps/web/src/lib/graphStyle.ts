@@ -1,5 +1,5 @@
 import type { NodeSingular, StylesheetJson } from 'cytoscape';
-import type { ViewNode } from '@teia/graph';
+import type { ViewNode } from '@rastro/graph';
 import { GROUP_PADDING } from './elkLayout';
 import type { Palette } from './theme';
 

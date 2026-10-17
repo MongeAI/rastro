@@ -1,5 +1,10 @@
-import { EDGE_KIND_LABELS, NODE_KIND_LABELS, RESOLUTION_LABELS, type GraphEdge } from '@teia/core';
-import type { GraphIndex, ViewEdge } from '@teia/graph';
+import {
+  EDGE_KIND_LABELS,
+  NODE_KIND_LABELS,
+  RESOLUTION_LABELS,
+  type GraphEdge,
+} from '@rastro/core';
+import type { GraphIndex, ViewEdge } from '@rastro/graph';
 import { absolutePath, EDITORS, type EditorId } from '../lib/editor';
 import { DISCOVERY_TEXT, plural } from '../lib/explain';
 import { IconClose } from './Icons';

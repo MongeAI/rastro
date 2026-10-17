@@ -4,15 +4,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
-import { validateGraph, type GraphEdge, type TeiaGraph } from '@teia/core';
-import { analyzeProject, discoverFiles } from '@teia/analyzer';
+import { validateGraph, type GraphEdge, type RastroGraph } from '@rastro/core';
+import { analyzeProject, discoverFiles } from '@rastro/analyzer';
 
 const fixtures = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
 const fixture = (name: string) => path.join(fixtures, name);
 
-const edge = (g: TeiaGraph, kind: string, source: string, target: string): GraphEdge | undefined =>
+const edge = (
+  g: RastroGraph,
+  kind: string,
+  source: string,
+  target: string,
+): GraphEdge | undefined =>
   g.edges.find((e) => e.kind === kind && e.source === source && e.target === target);
-const node = (g: TeiaGraph, id: string) => g.nodes.find((n) => n.id === id);
+const node = (g: RastroGraph, id: string) => g.nodes.find((n) => n.id === id);
 
 describe('descoberta de arquivos', () => {
   it('ignora node_modules, dist, .gitignore, .d.ts e .min.js', () => {
@@ -37,8 +42,8 @@ describe('descoberta de arquivos', () => {
   });
 
   it('não segue links simbólicos', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-symlink-'));
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-outside-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-symlink-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-outside-'));
     fs.writeFileSync(path.join(outside, 'secret.ts'), 'export const secret = 1;');
     fs.writeFileSync(path.join(tmp, 'main.ts'), 'export const ok = 1;');
     fs.symlinkSync(outside, path.join(tmp, 'linked-dir'));
@@ -58,7 +63,7 @@ describe('descoberta de arquivos', () => {
 });
 
 describe('projeto TypeScript (ts-basic)', () => {
-  let g: TeiaGraph;
+  let g: RastroGraph;
   beforeAll(async () => {
     g = await analyzeProject(fixture('ts-basic'));
   });
@@ -66,7 +71,10 @@ describe('projeto TypeScript (ts-basic)', () => {
   it('gera um grafo válido pela validação interna e pelo JSON Schema', () => {
     expect(validateGraph(g)).toEqual({ valid: true, errors: [] });
     const schema = JSON.parse(
-      fs.readFileSync(new URL('../../core/schema/teia-graph.schema.json', import.meta.url), 'utf8'),
+      fs.readFileSync(
+        new URL('../../core/schema/rastro-graph.schema.json', import.meta.url),
+        'utf8',
+      ),
     );
     const ajv = new Ajv2020({ allErrors: true, strict: false });
     const validate = ajv.compile(schema);
@@ -190,7 +198,7 @@ describe('projeto TypeScript (ts-basic)', () => {
 
   it('é determinístico', async () => {
     const again = await analyzeProject(fixture('ts-basic'));
-    const strip = (x: TeiaGraph) => ({
+    const strip = (x: RastroGraph) => ({
       ...x,
       generatedAt: '',
       stats: { ...x.stats, durationMs: 0 },
@@ -200,7 +208,7 @@ describe('projeto TypeScript (ts-basic)', () => {
 });
 
 describe('projeto JavaScript misto (js-mixed)', () => {
-  let g: TeiaGraph;
+  let g: RastroGraph;
   beforeAll(async () => {
     g = await analyzeProject(fixture('js-mixed'));
   });
@@ -258,7 +266,7 @@ describe('projeto JavaScript misto (js-mixed)', () => {
 });
 
 describe('API Express (express-api)', () => {
-  let g: TeiaGraph;
+  let g: RastroGraph;
   beforeAll(async () => {
     g = await analyzeProject(fixture('express-api'));
   });
@@ -299,7 +307,7 @@ describe('API Express (express-api)', () => {
 
 describe('projeto vazio', () => {
   it('retorna grafo válido com aviso', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-empty-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-empty-'));
     fs.writeFileSync(path.join(tmp, 'README.md'), '# vazio');
     const g = await analyzeProject(tmp);
     expect(validateGraph(g).valid).toBe(true);
@@ -309,7 +317,7 @@ describe('projeto vazio', () => {
 });
 
 describe('monorepo (pacotes do workspace)', () => {
-  let g: TeiaGraph;
+  let g: RastroGraph;
   beforeAll(async () => {
     g = await analyzeProject(fixture('monorepo'));
   });
@@ -356,7 +364,7 @@ describe('monorepo (pacotes do workspace)', () => {
 });
 
 describe('componentes React (js-mixed/src/esm/counter.jsx)', () => {
-  let g: TeiaGraph;
+  let g: RastroGraph;
   beforeAll(async () => {
     g = await analyzeProject(fixture('js-mixed'));
   });
@@ -380,7 +388,7 @@ describe('componentes React (js-mixed/src/esm/counter.jsx)', () => {
 
 /** Cria um projeto temporário com os arquivos indicados. */
 function makeProject(files: Record<string, string>): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-case-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-case-'));
   for (const [rel, content] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), content);

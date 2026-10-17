@@ -6,9 +6,9 @@ const src = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
-      '@teia/core': src('./packages/core/src/index.ts'),
-      '@teia/graph': src('./packages/graph/src/index.ts'),
-      '@teia/analyzer': src('./packages/analyzer/src/index.ts'),
+      '@rastro/core': src('./packages/core/src/index.ts'),
+      '@rastro/graph': src('./packages/graph/src/index.ts'),
+      '@rastro/analyzer': src('./packages/analyzer/src/index.ts'),
     },
   },
   test: {

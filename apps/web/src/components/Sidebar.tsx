@@ -3,8 +3,8 @@ import {
   NODE_KIND_LABELS,
   type EdgeKind,
   type NodeKind,
-  type TeiaGraph,
-} from '@teia/core';
+  type RastroGraph,
+} from '@rastro/core';
 import type { Level } from '../lib/levels';
 import { EDITORS, type EditorId } from '../lib/editor';
 import type { LayoutMode } from './GraphCanvas';
@@ -46,7 +46,7 @@ const EDGE_HINTS: Record<EdgeKind, string> = {
 };
 
 interface Props {
-  graph: TeiaGraph;
+  graph: RastroGraph;
   nodeKinds: ReadonlySet<NodeKind>;
   edgeKinds: ReadonlySet<EdgeKind>;
   level: Level;
@@ -69,7 +69,7 @@ interface Props {
 export function Sidebar(p: Props) {
   const { stats } = p.graph;
   return (
-    <aside className="sidebar" id="teia-sidebar" aria-label="Filtros e legenda">
+    <aside className="sidebar" id="rastro-sidebar" aria-label="Filtros e legenda">
       <section className="side-section">
         <h2 className="side-title">Nível de detalhe</h2>
         <div className="segmented three" role="radiogroup" aria-label="Nível de detalhe">

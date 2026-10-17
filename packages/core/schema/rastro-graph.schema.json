@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/MongeAI/teia/schema/teia-graph-0.1.0.json",
-  "title": "Teia graph",
-  "description": "Grafo de código exportado pelo Teia (schemaVersion 0.1.0).",
+  "$id": "https://github.com/MongeAI/rastro/schema/rastro-graph-0.1.0.json",
+  "title": "Rastro graph",
+  "description": "Grafo de código exportado pelo Rastro (schemaVersion 0.1.0).",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -21,7 +21,7 @@
     "tool": {
       "type": "object",
       "required": ["name", "version"],
-      "properties": { "name": { "const": "teia" }, "version": { "type": "string" } }
+      "properties": { "name": { "const": "rastro" }, "version": { "type": "string" } }
     },
     "project": {
       "type": "object",

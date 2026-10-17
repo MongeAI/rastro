@@ -1,10 +1,11 @@
-import { NODE_KIND_LABELS, type NodeKind, type TeiaGraph } from '@teia/core';
-import type { GraphIndex } from '@teia/graph';
+import { NODE_KIND_LABELS, type NodeKind, type RastroGraph } from '@rastro/core';
+import type { GraphIndex } from '@rastro/graph';
 import { REASON_TEXT } from '../lib/explain';
+import { displayPath } from '../lib/paths';
 import { KindDot } from './KindBadge';
 
 interface Props {
-  graph: TeiaGraph;
+  graph: RastroGraph;
   index: GraphIndex;
   onNavigate(id: string): void;
 }
@@ -34,7 +35,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
         <p className="eyebrow">Resumo da análise</p>
         <h2 className="details-name">{graph.project.name}</h2>
         <p className="details-sub mono" title={graph.project.root}>
-          {graph.project.root}
+          {displayPath(graph.project.root)}
         </p>
       </header>
 
@@ -132,8 +133,8 @@ export function Overview({ graph, index, onNavigate }: Props) {
                 Não resolvidos <span className="count">{unresolved.length}</span>
               </h3>
               <p className="muted small">
-                O Teia não inventa conexões: estas referências existem no código, mas o destino não
-                pôde ser comprovado.
+                O Rastro não inventa conexões: estas referências existem no código, mas o destino
+                não pôde ser comprovado.
               </p>
               <ul className="rel-list">
                 {unresolved.slice(0, 40).map((n) => (

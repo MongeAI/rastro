@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { validateGraph, type EdgeKind, type NodeKind, type TeiaGraph } from '@teia/core';
-import { computeView, GraphIndex, groupableModules } from '@teia/graph';
+import { validateGraph, type EdgeKind, type NodeKind, type RastroGraph } from '@rastro/core';
+import { computeView, GraphIndex, groupableModules } from '@rastro/graph';
 import { DetailsPanel } from './components/DetailsPanel';
 import { EdgeDetails } from './components/EdgeDetails';
 import { GraphCanvas, type GraphCanvasHandle, type LayoutMode } from './components/GraphCanvas';
@@ -24,11 +24,12 @@ import { NODE_KIND_ORDER, Sidebar } from './components/Sidebar';
 import { downloadBlob, downloadText, slug } from './lib/download';
 import { EDITORS, readPref, writePref, type EditorId } from './lib/editor';
 import type { Level } from './lib/levels';
+import { displayPath } from './lib/paths';
 import { PALETTES, type ThemeName } from './lib/theme';
 
 type Load =
   | { status: 'loading' }
-  | { status: 'ready'; graph: TeiaGraph; fromServer: boolean }
+  | { status: 'ready'; graph: RastroGraph; fromServer: boolean }
   | { status: 'error'; message: string; canPickFile: boolean };
 
 const DEFAULT_EDGES: EdgeKind[] = ['imports', 'calls', 'extends'];
@@ -44,12 +45,12 @@ export function App() {
     if (!result.valid) {
       setLoad({
         status: 'error',
-        message: `O arquivo não é um grafo válido do Teia:\n${result.errors.slice(0, 5).join('\n')}`,
+        message: `O arquivo não é um grafo válido do Rastro:\n${result.errors.slice(0, 5).join('\n')}`,
         canPickFile: true,
       });
       return;
     }
-    setLoad({ status: 'ready', graph: data as TeiaGraph, fromServer });
+    setLoad({ status: 'ready', graph: data as RastroGraph, fromServer });
   }, []);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export function App() {
           setLoad({
             status: 'error',
             message:
-              'Acesso negado: esta página precisa do endereço completo exibido no terminal (ele inclui um token de acesso). Copie a URL que o comando "teia" mostrou e abra de novo.',
+              'Acesso negado: esta página precisa do endereço completo exibido no terminal (ele inclui um token de acesso). Copie a URL que o comando "rastro" mostrou e abra de novo.',
             canPickFile: true,
           });
           return;
@@ -71,7 +72,7 @@ export function App() {
         setLoad({
           status: 'error',
           message:
-            'Nenhum grafo foi carregado. Rode "teia <caminho-do-projeto>" no terminal, ou abra um JSON exportado pelo Teia.',
+            'Nenhum grafo foi carregado. Rode "rastro <caminho-do-projeto>" no terminal, ou abra um JSON exportado pelo Rastro.',
           canPickFile: true,
         }),
       );
@@ -111,7 +112,7 @@ export function App() {
         }}
       >
         <Logo size={36} />
-        <h1 className="screen-title">Teia</h1>
+        <h1 className="screen-title">Rastro</h1>
         <p className="screen-message">{load.message}</p>
         {load.canPickFile && (
           <label className="button">
@@ -131,7 +132,7 @@ export function App() {
   return <Explorer key={load.graph.generatedAt} graph={load.graph} fromServer={load.fromServer} />;
 }
 
-function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean }) {
+function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boolean }) {
   const index = useMemo(() => new GraphIndex(graph), [graph]);
   const groupable = useMemo(() => groupableModules(index), [index]);
   const canvas = useRef<GraphCanvasHandle>(null);
@@ -183,7 +184,7 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
   useEffect(() => writePref('layout', layout), [layout]);
   useEffect(() => writePref('sidebar', sidebarCollapsed ? 'hidden' : 'shown'), [sidebarCollapsed]);
   useEffect(() => {
-    document.title = `${graph.project.name} · Teia`;
+    document.title = `${graph.project.name} · Rastro`;
   }, [graph.project.name]);
 
   const collapsedModules = useMemo(
@@ -358,10 +359,10 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
   }, [selectedId, selectedEdgeId, focus, sidebarOpen]);
 
   const exportJson = () =>
-    downloadText(`${slug(graph.project.name)}.teia.json`, `${JSON.stringify(graph, null, 2)}\n`);
+    downloadText(`${slug(graph.project.name)}.rastro.json`, `${JSON.stringify(graph, null, 2)}\n`);
   const exportPng = () => {
     const blob = canvas.current?.png(PALETTES[theme].bg);
-    if (blob) downloadBlob(`${slug(graph.project.name)}.teia.png`, blob);
+    if (blob) downloadBlob(`${slug(graph.project.name)}.rastro.png`, blob);
   };
 
   // o mesmo botão abre a gaveta (telas estreitas) ou recolhe o painel (telas largas)
@@ -397,18 +398,18 @@ function Explorer({ graph, fromServer }: { graph: TeiaGraph; fromServer: boolean
           onClick={toggleSidebar}
           aria-label={sidebarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
           aria-expanded={sidebarVisible}
-          aria-controls="teia-sidebar"
+          aria-controls="rastro-sidebar"
           title={sidebarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
         >
           <IconMenu />
         </button>
         <div className="brand">
           <Logo />
-          <span className="brand-name">Teia</span>
+          <span className="brand-name">Rastro</span>
           <span className="brand-sep" aria-hidden="true">
             /
           </span>
-          <span className="brand-project" title={graph.project.root}>
+          <span className="brand-project" title={displayPath(graph.project.root)}>
             {graph.project.name}
           </span>
           <span className="beta">v0.1</span>

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { builtinModules } from 'node:module';
 import { ts } from 'ts-morph';
-import type { Diagnostic } from '@teia/core';
+import type { Diagnostic } from '@rastro/core';
 import { toPosix } from './discover.js';
 
 const BUILTINS = new Set(builtinModules.filter((m) => !m.startsWith('_')));
@@ -17,7 +17,7 @@ export interface LoadedCompilerOptions {
 /**
  * Lê `tsconfig.json` ou `jsconfig.json` da raiz apenas para aproveitar as opções de
  * resolução (paths, baseUrl, moduleResolution, jsx). A lista de arquivos é sempre a
- * descoberta pelo Teia. Ler a configuração não executa nada do projeto.
+ * descoberta pelo Rastro. Ler a configuração não executa nada do projeto.
  */
 export function loadCompilerOptions(root: string): LoadedCompilerOptions {
   const diagnostics: Diagnostic[] = [];

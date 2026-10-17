@@ -1,4 +1,4 @@
-import type { EdgeKind, NodeKind } from '@teia/core';
+import type { EdgeKind, NodeKind } from '@rastro/core';
 
 export type ThemeName = 'dark' | 'light';
 

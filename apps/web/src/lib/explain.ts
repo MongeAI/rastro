@@ -1,4 +1,4 @@
-import type { DiscoveryMethod, UnresolvedReason } from '@teia/core';
+import type { DiscoveryMethod, UnresolvedReason } from '@rastro/core';
 
 export const REASON_TEXT: Record<UnresolvedReason, string> = {
   'module-not-found': 'O arquivo importado não foi encontrado no projeto.',

@@ -1,6 +1,6 @@
-# Contribuindo com o Teia
+# Contribuindo com o Rastro
 
-Obrigado pelo interesse! O Teia está em fase inicial e contribuições são bem-vindas: correções, novos casos de teste, melhorias na interface e, principalmente, exemplos de código que o analisador entende errado.
+Obrigado pelo interesse! O Rastro está em fase inicial e contribuições são bem-vindas: correções, novos casos de teste, melhorias na interface e, principalmente, exemplos de código que o analisador entende errado.
 
 ## Preparando o ambiente
 
@@ -14,7 +14,7 @@ Requer Node.js 22.12+. O `npm test` roda os testes do analisador, do grafo, do m
 
 ## Como o projeto é organizado
 
-- `packages/core`: tipos do grafo, JSON Schema (`schema/teia-graph.schema.json`) e validação. **Mudou o formato? Atualize o schema, a validação, `docs/formato-dos-dados.md` e incremente `SCHEMA_VERSION`.**
+- `packages/core`: tipos do grafo, JSON Schema (`schema/rastro-graph.schema.json`) e validação. **Mudou o formato? Atualize o schema, a validação, `docs/formato-dos-dados.md` e incremente `SCHEMA_VERSION`.**
 - `packages/graph`: código sem dependência de Node.js (é usado também pela interface): `GraphBuilder`, ciclos, consultas e cálculo da visão.
 - `packages/analyzer`: análise JS/TS com ts-morph. Novos analisadores (outras linguagens) devem produzir nós e relações pelo `GraphBuilder`.
 - `apps/cli`: comandos, armazenamento e servidor.
@@ -42,4 +42,4 @@ Mensagens de commit curtas e no imperativo (ex.: "Resolve chamadas via super"). 
 
 ## Reportando um problema de análise
 
-Inclua, se possível, um trecho mínimo de código que reproduz o problema, o que o Teia mostrou e o que você esperava. Não compartilhe código privado que você não pode divulgar.
+Inclua, se possível, um trecho mínimo de código que reproduz o problema, o que o Rastro mostrou e o que você esperava. Não compartilhe código privado que você não pode divulgar.
