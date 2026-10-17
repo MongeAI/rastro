@@ -5,10 +5,11 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "teia": "./dist/index.js"
+    "teia": "./bin/teia.js"
   },
   "main": "./dist/index.js",
   "files": [
+    "bin",
     "dist"
   ],
   "engines": {

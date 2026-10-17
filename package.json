@@ -25,7 +25,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "node scripts/clean.mjs",
-    "teia": "node apps/cli/dist/index.js"
+    "teia": "node apps/cli/bin/teia.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
