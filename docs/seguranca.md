@@ -21,13 +21,14 @@ O Teia é **local-first** e **somente leitura**. Este documento lista exatamente
 ## Proteções do servidor local
 
 - Escuta apenas em `127.0.0.1` (nunca em `0.0.0.0`).
+- Gera um **token aleatório por execução**. A CLI abre `http://127.0.0.1:<porta>/?token=...`; o servidor troca o token por um cookie `HttpOnly; SameSite=Strict` e a API (`/api/*`) recusa quem não o tiver. Assim, outros usuários ou processos da máquina não conseguem ler o código pela porta local.
 - Aceita só `GET` e `HEAD`.
 - Recusa requisições cujo cabeçalho `Host` não seja `127.0.0.1:<porta>`, `localhost:<porta>` ou `[::1]:<porta>`, o que bloqueia ataques de DNS rebinding.
-- `/api/source` só entrega arquivos que estão no grafo como analisados, confirma que o caminho real fica dentro da raiz, recusa links simbólicos e limita o tamanho a 2 MB.
+- `/api/source` só entrega arquivos JS/TS que estão no grafo como analisados, recusa caminhos absolutos e com `..` (mesmo vindos de um JSON adulterado aberto com `teia serve`), confirma que o caminho real fica dentro da raiz, recusa links simbólicos e limita o tamanho a 2 MB.
 - Arquivos estáticos são servidos apenas de dentro da pasta da interface (sem _path traversal_).
 - Cabeçalhos: `Content-Security-Policy` restritiva (`default-src 'self'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
 
-Observação: qualquer processo da sua máquina que consiga acessar `127.0.0.1` pode ler o grafo enquanto o servidor estiver aberto, como acontece com qualquer servidor local de desenvolvimento. Encerre com `Ctrl+C` quando terminar.
+Encerre o servidor com `Ctrl+C` quando terminar. Os arquivos estáticos da interface (HTML, JS, CSS) não exigem token, porque não contêm dados do projeto.
 
 ## Ao compartilhar um JSON exportado
 

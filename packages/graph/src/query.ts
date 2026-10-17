@@ -1,4 +1,5 @@
 import type { EdgeKind, GraphEdge, GraphNode, NodeKind, TeiaGraph } from '@teia/core';
+import { compareStrings } from '@teia/core';
 
 export interface SearchResult {
   node: GraphNode;
@@ -64,8 +65,10 @@ export class GraphIndex {
   /** Ancestrais (pai, avô...) de um nó, do mais próximo ao mais distante. */
   ancestors(id: string): GraphNode[] {
     const result: GraphNode[] = [];
+    const seen = new Set<string>([id]);
     let current = this.nodes.get(id)?.parent;
-    while (current) {
+    while (current && !seen.has(current)) {
+      seen.add(current);
       const node = this.nodes.get(current);
       if (!node) break;
       result.push(node);
@@ -84,13 +87,8 @@ export class GraphIndex {
 
   /** Todos os descendentes (filhos, netos...) de um nó. */
   descendants(id: string): GraphNode[] {
-    const result: GraphNode[] = [];
-    const queue = [...this.children(id)];
-    while (queue.length) {
-      const node = queue.shift()!;
-      result.push(node);
-      queue.push(...this.children(node.id));
-    }
+    const result: GraphNode[] = [...this.children(id)];
+    for (let i = 0; i < result.length; i++) result.push(...this.children(result[i]!.id));
     return result;
   }
 
@@ -101,18 +99,20 @@ export class GraphIndex {
   neighborhood(id: string, depth: number, kinds?: readonly EdgeKind[]): Set<string> {
     const allowed = (kinds ?? []).filter((k) => k !== 'contains');
     const visited = new Set<string>([id]);
+    // lista explícita vazia = nenhuma relação habilitada: não percorre nada
+    if (kinds && allowed.length === 0) return visited;
     let frontier = [id];
     for (let d = 0; d < depth && frontier.length; d++) {
       const next: string[] = [];
       for (const current of frontier) {
-        for (const e of this.outgoing(current, allowed.length ? allowed : undefined)) {
+        for (const e of this.outgoing(current, kinds ? allowed : undefined)) {
           if (e.kind === 'contains') continue;
           if (!visited.has(e.target)) {
             visited.add(e.target);
             next.push(e.target);
           }
         }
-        for (const e of this.incoming(current, allowed.length ? allowed : undefined)) {
+        for (const e of this.incoming(current, kinds ? allowed : undefined)) {
           if (e.kind === 'contains') continue;
           if (!visited.has(e.source)) {
             visited.add(e.source);
@@ -136,8 +136,9 @@ export class GraphIndex {
     const start = this.nodes.get(id);
     if (!start) return [];
     const seeds = [id];
-    if (start.kind === 'file' || start.kind === 'class') {
-      for (const d of this.descendants(id)) if (SYMBOL_KINDS.has(d.kind)) seeds.push(d.id);
+    if (start.kind === 'file' || start.kind === 'class' || start.kind === 'module') {
+      for (const d of this.descendants(id))
+        if (SYMBOL_KINDS.has(d.kind) || d.kind === 'file') seeds.push(d.id);
     }
     const visited = new Set<string>(seeds);
     let frontier = seeds;
@@ -156,7 +157,7 @@ export class GraphIndex {
       frontier = next;
     }
     return [...result.values()].sort(
-      (a, b) => a.depth - b.depth || a.node.id.localeCompare(b.node.id),
+      (a, b) => a.depth - b.depth || compareStrings(a.node.id, b.node.id),
     );
   }
 
@@ -186,7 +187,7 @@ export class GraphIndex {
         (a, b) =>
           b.score - a.score ||
           a.node.name.length - b.node.name.length ||
-          a.node.id.localeCompare(b.node.id),
+          compareStrings(a.node.id, b.node.id),
       )
       .slice(0, limit);
   }

@@ -9,17 +9,26 @@ interface Props {
   onPick(id: string): void;
 }
 
+const optionId = (i: number) => `search-option-${i}`;
+
 export function Search({ index, onPick }: Props) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const results = useMemo(() => index.search(query, 40), [index, query]);
+  const showList = open && query.trim().length > 0;
 
+  // atalhos globais: "/" e Ctrl/Cmd+K focam a busca
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
       const typing =
-        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+        (t instanceof HTMLInputElement && !['checkbox', 'radio'].includes(t.type)) ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement;
       if ((e.key === '/' && !typing) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
         inputRef.current?.focus();
@@ -30,6 +39,22 @@ export function Search({ index, onPick }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // fecha ao clicar fora (em vez de depender do blur, que tem corridas com o clique)
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [open]);
+
+  // mantém a opção ativa visível ao navegar com as setas
+  useEffect(() => {
+    if (!showList) return;
+    listRef.current?.querySelector(`#${optionId(active)}`)?.scrollIntoView({ block: 'nearest' });
+  }, [active, showList]);
+
   const pick = (id: string) => {
     onPick(id);
     setOpen(false);
@@ -37,16 +62,17 @@ export function Search({ index, onPick }: Props) {
   };
 
   return (
-    <div className="search" role="search">
+    <div className="search" role="search" ref={rootRef}>
       <IconSearch className="search-icon" />
       <input
         ref={inputRef}
         type="search"
         placeholder="Buscar arquivo, função, classe…"
         aria-label="Buscar no grafo"
-        aria-expanded={open && results.length > 0}
+        aria-expanded={showList}
         aria-controls="search-results"
         aria-autocomplete="list"
+        aria-activedescendant={showList && results[active] ? optionId(active) : undefined}
         role="combobox"
         value={query}
         onChange={(e) => {
@@ -55,11 +81,11 @@ export function Search({ index, onPick }: Props) {
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
-            setActive((a) => Math.min(a + 1, results.length - 1));
+            setOpen(true);
+            setActive((a) => Math.min(a + 1, Math.max(results.length - 1, 0)));
           } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             setActive((a) => Math.max(a - 1, 0));
@@ -68,14 +94,22 @@ export function Search({ index, onPick }: Props) {
           } else if (e.key === 'Escape') {
             setOpen(false);
             inputRef.current?.blur();
+          } else if (e.key === 'Tab') {
+            setOpen(false);
           }
         }}
       />
       <kbd className="search-kbd" aria-hidden="true">
         /
       </kbd>
-      {open && query.trim() && (
-        <div className="search-results" id="search-results" role="listbox">
+      {showList && (
+        <div
+          className="search-results"
+          id="search-results"
+          role="listbox"
+          ref={listRef}
+          onMouseDown={(e) => e.preventDefault()}
+        >
           {results.length === 0 && (
             <div className="search-empty">Nada encontrado para “{query}”.</div>
           )}
@@ -85,12 +119,13 @@ export function Search({ index, onPick }: Props) {
             return (
               <button
                 key={r.node.id}
+                id={optionId(i)}
                 type="button"
                 role="option"
+                tabIndex={-1}
                 aria-selected={i === active}
                 className={`search-item${i === active ? ' active' : ''}`}
                 onMouseEnter={() => setActive(i)}
-                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(r.node.id)}
               >
                 <KindDot kind={r.node.kind} />
@@ -101,11 +136,7 @@ export function Search({ index, onPick }: Props) {
                 </span>
                 <span className="search-meta">
                   {NODE_KIND_LABELS[r.node.kind]}
-                  {file && r.node.kind !== 'file'
-                    ? ` · ${file}`
-                    : r.node.kind === 'file'
-                      ? ` · ${file}`
-                      : ''}
+                  {file ? ` · ${file}` : ''}
                 </span>
               </button>
             );

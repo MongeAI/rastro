@@ -56,8 +56,9 @@ Para `alvo()` ou `obj.alvo()`, o Teia pede ao verificador de tipos o **símbolo*
 
 ## Interface
 
-- `computeView` (em `@teia/graph`) decide o que aparece: por padrão, pastas e arquivos; símbolos só quando o arquivo é expandido, no modo “Símbolos”, no foco ou via “expandir conexões”. Pastas e arquivos viram grupos (_compound nodes_).
-- `GraphCanvas` sincroniza a visão com o Cytoscape **de forma incremental** (adiciona, move e remove só o que mudou) e roda o layout fcose a partir das posições atuais, para o mapa não “pular” a cada interação.
+- `computeView` (em `@teia/graph`) decide o que aparece. Há três níveis: **Pastas** (cada pasta recolhida vira um nó, e as relações dos arquivos internos são somadas em uma linha só, com a lista das relações originais em `members`), **Arquivos** e **Símbolos**. Também cuida do foco e da "expansão de conexões". Relações de um grupo para o próprio filho não são desenhadas, o que evita laços.
+- O layout padrão é **hierárquico** (ELK _layered_, `lib/elkLayout.ts`), feito de dentro para fora: cada grupo (pasta, arquivo, classe) organiza seus filhos pelas relações entre eles. As relações que atravessam grupos são elevadas até o grupo em comum mais próximo, e componentes sem ligação são empacotados respeitando a proporção da tela. O layout **orgânico** (fcose + layout-utilities) continua disponível.
+- `GraphCanvas` sincroniza a visão com o Cytoscape **de forma incremental** (adiciona, move e remove só o que mudou) e anima as posições novas. Os rótulos dos grupos crescem quando o zoom diminui, para o mapa continuar legível de longe.
 - O código-fonte é pedido sob demanda a `/api/source`, que só entrega arquivos presentes no grafo.
 
 ## Como adicionar uma nova linguagem

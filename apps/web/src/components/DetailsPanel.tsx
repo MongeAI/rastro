@@ -23,11 +23,14 @@ interface Props {
   focusId: string | null;
   focusDepth: number;
   expanded: boolean;
+  /** Para pastas: está recolhida no mapa. */
+  moduleCollapsed: boolean;
   onNavigate(id: string): void;
   onFocus(id: string | null): void;
   onFocusDepth(depth: number): void;
   onExpandNeighbors(id: string): void;
   onToggleExpand(fileId: string): void;
+  onToggleModule(moduleId: string): void;
   onClose(): void;
 }
 
@@ -168,6 +171,15 @@ export function DetailsPanel(p: Props) {
               <IconLayers /> {p.expanded ? 'Recolher símbolos' : 'Mostrar símbolos'}
             </button>
           )}
+          {node.kind === 'module' && children.some((c) => c.kind === 'file') && (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() => p.onToggleModule(node.id)}
+            >
+              <IconLayers /> {p.moduleCollapsed ? 'Abrir pasta no mapa' : 'Recolher pasta no mapa'}
+            </button>
+          )}
         </div>
         {focused && (
           <div className="depth">
@@ -295,6 +307,7 @@ export function DetailsPanel(p: Props) {
             startLine={node.kind === 'file' ? 1 : loc.startLine}
             endLine={node.kind === 'file' ? Math.min(loc.endLine, 40) : loc.endLine}
             available={p.sourceAvailable}
+            highlightRange={node.kind !== 'file'}
           />
         </section>
       )}

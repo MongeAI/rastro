@@ -1,78 +1,107 @@
-import { Node, SyntaxKind, type SourceFile } from 'ts-morph';
+import { Node, SyntaxKind, ts, type SourceFile } from 'ts-morph';
 import { nodeId } from '@teia/core';
 import type { DiscoveredFile } from './discover.js';
 import {
   addUnresolvedNode,
+  descendantsOfKind,
   evidenceAt,
   rangeOf,
   resolveSymbolTargets,
+  unresolvedReason,
   type AnalyzerContext,
 } from './analyze.js';
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'all']);
-const ROUTER_NAME = /^(app|api|router|server|routes|\w*router)$/i;
+
+/** Chamadas que criam um app/roteador Express: `express()`, `express.Router()`, `Router()`. */
+const EXPRESS_FACTORIES = new Set([
+  'express',
+  'express.Router',
+  'Router',
+  "require('express')",
+  'require("express")',
+]);
 
 function importsExpress(sf: SourceFile): boolean {
   if (sf.getImportDeclarations().some((d) => d.getModuleSpecifierValue() === 'express'))
     return true;
-  return sf
-    .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .some(
-      (c) =>
-        c.getExpression().getText() === 'require' &&
-        c.getArguments()[0]?.getText().slice(1, -1) === 'express',
-    );
+  return descendantsOfKind(sf, SyntaxKind.CallExpression).some(
+    (c) =>
+      c.getExpression().getText() === 'require' &&
+      c.getArguments()[0]?.getText().slice(1, -1) === 'express',
+  );
 }
 
-const projectCache = new WeakMap<AnalyzerContext, boolean>();
+/**
+ * O receptor (`app`, `router`...) foi criado por `express()`/`express.Router()` em um arquivo
+ * que importa o Express? Segue imports/requires até a declaração da variável.
+ */
+function isExpressReceiver(ctx: AnalyzerContext, receiver: Node): boolean {
+  let symbol = ctx.checker.getSymbolAtLocation(receiver.compilerNode);
+  if (!symbol) return false;
+  if (symbol.flags & ts.SymbolFlags.Alias) {
+    try {
+      symbol = ctx.checker.getAliasedSymbol(symbol);
+    } catch {
+      return false;
+    }
+  }
+  for (const decl of symbol.declarations ?? []) {
+    if (!ts.isVariableDeclaration(decl) || !decl.initializer) continue;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init) || ts.isAwaitExpression(init)) init = init.expression;
+    if (!ts.isCallExpression(init)) continue;
+    const callee = init.expression.getText(decl.getSourceFile()).replace(/\s+/g, '');
+    if (!EXPRESS_FACTORIES.has(callee)) continue;
+    const declFile = ctx.filesByAbs.get(decl.getSourceFile().fileName);
+    const declSf = declFile && receiver.getProject().getSourceFile(declFile.absolute);
+    if (declSf && importsExpress(declSf)) return true;
+  }
+  return false;
+}
+
+const isHandlerLike = (n: Node) =>
+  Node.isArrowFunction(n) ||
+  Node.isFunctionExpression(n) ||
+  Node.isIdentifier(n) ||
+  Node.isPropertyAccessExpression(n);
 
 /**
- * Regra de framework suportada no MVP: rotas do Express.
- * Reconhece `app.get('/caminho', handler)`, `router.post(...)` etc. quando:
- * - o arquivo importa `express`; ou
- * - o projeto usa `express` e o receptor tem nome típico de roteador (`app`, `router`, `xxxRouter`).
- * O primeiro argumento precisa ser um texto literal começando com `/`.
+ * Regra de framework suportada: rotas do Express.
+ * Reconhece `app.get('/caminho', handler)`, `router.post(...)` etc. somente quando o receptor
+ * comprovadamente vem de `express()` ou `express.Router()`, o caminho é um texto literal
+ * começando com `/` e há ao menos um handler (função ou referência a uma).
  */
 export function detectExpressRoutes(
   ctx: AnalyzerContext,
   file: DiscoveredFile,
   sf: SourceFile,
 ): void {
-  if (!projectCache.has(ctx)) {
-    projectCache.set(
-      ctx,
-      [...ctx.filesByAbs.keys()].some((abs) => {
-        const other = sf.getProject().getSourceFile(abs);
-        return !!other && importsExpress(other);
-      }),
-    );
-  }
-  if (!projectCache.get(ctx)) return;
-  const fileImportsExpress = importsExpress(sf);
   const fileId = nodeId.file(file.relative);
 
-  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+  for (const call of descendantsOfKind(sf, SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     if (!Node.isPropertyAccessExpression(callee)) continue;
     const method = callee.getName().toLowerCase();
     if (!HTTP_METHODS.has(method)) continue;
     const receiver = callee.getExpression();
     if (!Node.isIdentifier(receiver)) continue;
-    if (!fileImportsExpress && !ROUTER_NAME.test(receiver.getText())) continue;
     const [first, ...handlers] = call.getArguments();
     if (!first || !(Node.isStringLiteral(first) || Node.isNoSubstitutionTemplateLiteral(first)))
       continue;
     const routePath = first.getLiteralValue();
-    if (!routePath.startsWith('/') || handlers.length === 0) continue;
+    if (!routePath.startsWith('/') || !handlers.some(isHandlerLike)) continue;
+    if (!isExpressReceiver(ctx, receiver)) continue;
 
     const httpMethod = method.toUpperCase();
-    const id = nodeId.route(file.relative, httpMethod, routePath);
+    const receiverName = receiver.getText();
+    const id = nodeId.route(file.relative, receiverName, httpMethod, routePath);
     if (!ctx.builder.hasNode(id)) {
       ctx.builder.addNode({
         id,
         kind: 'route',
         name: `${httpMethod} ${routePath}`,
-        qualifiedName: `${receiver.getText()}.${method}('${routePath}')`,
+        qualifiedName: `${receiverName}.${method}('${routePath}')`,
         parent: fileId,
         location: rangeOf(file.relative, call),
         meta: { httpMethod, routePath, framework: 'express' },
@@ -125,7 +154,7 @@ export function detectExpressRoutes(
           file.relative,
           'call',
           handler.getText(),
-          targets.some((t) => t.kind === 'indirect') ? 'indirect-call' : 'symbol-not-found',
+          unresolvedReason(targets),
           handler,
         );
         ctx.builder.addEdge({

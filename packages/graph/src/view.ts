@@ -1,10 +1,12 @@
 import type { EdgeKind, GraphNode, NodeKind, Resolution } from '@teia/core';
+import { compareStrings } from '@teia/core';
 import type { GraphIndex } from './query.js';
 
 /**
  * Cálculo do que aparece na tela. A ideia é nunca despejar todos os símbolos de uma vez:
- * por padrão mostramos módulos e arquivos; os símbolos de um arquivo aparecem quando
- * ele é expandido, ou quando o usuário foca em uma entidade e pede a vizinhança.
+ * - pastas podem ficar recolhidas (viram um nó só, com as relações dos arquivos somadas);
+ * - arquivos mostram seus símbolos apenas quando expandidos;
+ * - o foco mostra só a vizinhança de uma entidade.
  */
 export interface ViewOptions {
   /** Tipos de nó habilitados nos filtros. */
@@ -15,7 +17,9 @@ export interface ViewOptions {
   expandedFiles: ReadonlySet<string>;
   /** Expande os símbolos de todos os arquivos. */
   expandAll?: boolean;
-  /** Mostra apenas a vizinhança de um nó. */
+  /** Pastas recolhidas: aparecem como um único nó, com as relações internas agregadas. */
+  collapsedModules?: ReadonlySet<string>;
+  /** Mostra apenas a vizinhança de um nó (ignora pastas recolhidas). */
   focus?: { id: string; depth: number };
   /** Nós adicionados manualmente (ex.: "expandir relações"). */
   pinned?: ReadonlySet<string>;
@@ -33,6 +37,10 @@ export interface ViewNode {
   /** O arquivo tem símbolos que podem ser expandidos. */
   expandable: boolean;
   expanded: boolean;
+  /** Pasta recolhida (desenhada como um nó só). */
+  collapsed: boolean;
+  /** Para pastas recolhidas: quantos arquivos ela contém. */
+  fileCount?: number;
   /** `false` para arquivos referenciados mas não analisados (css, json...). */
   analyzed: boolean;
 }
@@ -45,6 +53,10 @@ export interface ViewEdge {
   resolution: Resolution;
   count: number;
   typeOnly: boolean;
+  /** Soma de relações de nós internos a pastas recolhidas. */
+  aggregated: boolean;
+  /** Ids das relações originais representadas por esta aresta. */
+  members: string[];
 }
 
 export interface GraphView {
@@ -59,90 +71,151 @@ const SYMBOL_KINDS = new Set<NodeKind>(['function', 'class', 'method', 'route'])
 const isSymbolLevel = (node: GraphNode) =>
   SYMBOL_KINDS.has(node.kind) || (node.kind === 'unresolved' && !!node.parent);
 
+/** Pastas que viram grupo no mapa: as que contêm arquivos diretamente (exceto a raiz). */
+export function groupableModules(index: GraphIndex): string[] {
+  const result: string[] = [];
+  for (const node of index.nodes.values()) {
+    if (node.kind !== 'module' || node.qualifiedName === '.') continue;
+    if (index.children(node.id).some((c) => c.kind === 'file')) result.push(node.id);
+  }
+  return result.sort();
+}
+
+const RESOLUTION_RANK: Record<Resolution, number> = { resolved: 0, unresolved: 1, external: 2 };
+
 export function computeView(index: GraphIndex, options: ViewOptions): GraphView {
-  const visible = new Set<string>();
+  const candidates = new Set<string>();
   const enabled = (n: GraphNode) => options.nodeKinds.has(n.kind);
   const fileExpanded = (fileId: string | undefined) =>
     !!fileId && (options.expandAll || options.expandedFiles.has(fileId));
+  const focused = !!(options.focus && index.node(options.focus.id));
 
-  if (options.focus && index.node(options.focus.id)) {
-    const edgeKinds = [...options.edgeKinds];
-    for (const id of index.neighborhood(options.focus.id, options.focus.depth, edgeKinds)) {
+  if (focused) {
+    const { id: focusId, depth } = options.focus!;
+    for (const id of index.neighborhood(focusId, depth, [...options.edgeKinds])) {
       const node = index.node(id);
-      if (node && (enabled(node) || id === options.focus.id)) visible.add(id);
+      if (node && (enabled(node) || id === focusId)) candidates.add(id);
     }
     // ao focar um arquivo expandido, seus símbolos também aparecem
-    for (const id of [...visible]) {
-      const node = index.node(id)!;
-      if (node.kind === 'file' && fileExpanded(id))
-        for (const d of index.descendants(id)) if (enabled(d)) visible.add(d.id);
+    for (const id of [...candidates]) {
+      if (index.node(id)!.kind === 'file' && fileExpanded(id))
+        for (const d of index.descendants(id)) if (enabled(d)) candidates.add(d.id);
     }
   } else {
     for (const node of index.nodes.values()) {
       if (!enabled(node) || node.kind === 'module') continue;
       if (isSymbolLevel(node) && !fileExpanded(index.fileOf(node.id)?.id)) continue;
-      visible.add(node.id);
+      candidates.add(node.id);
     }
   }
-  for (const id of options.pinned ?? []) if (index.node(id)) visible.add(id);
+  for (const id of options.pinned ?? []) if (index.node(id)) candidates.add(id);
 
-  // ancestrais viram grupos (compound nodes): módulo → arquivo → classe.
-  // Só pastas que contêm arquivos viram grupo, evitando caixas vazias aninhadas (apps → cli → src).
   const showModules = options.nodeKinds.has('module');
-  const groupable = (n: GraphNode) =>
-    (n.kind === 'module' &&
-      showModules &&
-      n.qualifiedName !== '.' &&
-      index.children(n.id).some((c) => c.kind === 'file')) ||
-    n.kind === 'file' ||
-    n.kind === 'class';
+  const groupable = new Set(showModules ? groupableModules(index) : []);
+  const collapsed = new Set(
+    focused ? [] : [...(options.collapsedModules ?? [])].filter((id) => groupable.has(id)),
+  );
+
+  // representante de cada candidato: a pasta recolhida mais externa que o contém, ou ele mesmo
+  const repOf = new Map<string, string>();
+  for (const id of candidates) {
+    let rep = id;
+    for (const ancestor of index.ancestors(id)) if (collapsed.has(ancestor.id)) rep = ancestor.id;
+    repOf.set(id, rep);
+  }
+  const visible = new Set(repOf.values());
+
+  // ancestrais viram grupos: pasta → arquivo → classe
+  const isGroup = (n: GraphNode) => groupable.has(n.id) || n.kind === 'file' || n.kind === 'class';
   for (const id of [...visible]) {
-    for (const ancestor of index.ancestors(id)) if (groupable(ancestor)) visible.add(ancestor.id);
+    for (const ancestor of index.ancestors(id)) if (isGroup(ancestor)) visible.add(ancestor.id);
   }
   const parentOf = new Map<string, string>();
   for (const id of visible) {
     const parent = index.ancestors(id).find((a) => visible.has(a.id));
     if (parent) parentOf.set(id, parent.id);
   }
-
   const hasVisibleChildren = new Set(parentOf.values());
+
   const nodes: ViewNode[] = [];
   for (const id of visible) {
     const node = index.node(id)!;
-    const symbols = node.kind === 'file' ? index.children(id).some((c) => isSymbolLevel(c)) : false;
     const parent = parentOf.get(id);
+    const isCollapsed = collapsed.has(id);
     nodes.push({
       id,
       kind: node.kind,
-      // módulos mostram o caminho completo, já que pastas intermediárias não aparecem
+      // pastas mostram o caminho completo, já que pastas intermediárias não aparecem
       label: node.kind === 'module' ? (node.qualifiedName ?? node.name) : node.name,
       ...(parent ? { parent } : {}),
       compound: hasVisibleChildren.has(id),
-      inCycle: !!node.meta?.inCycle,
+      inCycle: isCollapsed
+        ? index.descendants(id).some((d) => d.meta?.inCycle)
+        : !!node.meta?.inCycle,
       exported: !!node.meta?.exported,
-      expandable: symbols,
+      expandable: node.kind === 'file' && index.children(id).some(isSymbolLevel),
       expanded: node.kind === 'file' && fileExpanded(id),
+      collapsed: isCollapsed,
+      ...(isCollapsed
+        ? { fileCount: index.descendants(id).filter((d) => d.kind === 'file').length }
+        : {}),
       analyzed: node.meta?.analyzed !== false,
     });
   }
 
-  const edges: ViewEdge[] = [];
+  /**
+   * Representante de um nó para desenhar relações. Pastas (ex.: `depends_on`) não são
+   * candidatas, mas aparecem como grupo ou dentro de uma pasta recolhida.
+   */
+  const repFor = (id: string): string | undefined => {
+    const rep = repOf.get(id);
+    if (rep) return rep;
+    if (index.node(id)?.kind !== 'module') return undefined;
+    let outer: string | undefined;
+    for (const ancestor of index.ancestors(id)) if (collapsed.has(ancestor.id)) outer = ancestor.id;
+    if (outer) return outer;
+    return visible.has(id) ? id : undefined;
+  };
+
+  /** `a` é ancestral de `b` no mapa (a relação desenhada seria um laço no próprio grupo). */
+  const isViewAncestor = (a: string, b: string) => {
+    for (let cur = parentOf.get(b); cur; cur = parentOf.get(cur)) if (cur === a) return true;
+    return false;
+  };
+
+  const byKey = new Map<string, ViewEdge>();
   for (const edge of index.edges.values()) {
     if (edge.kind === 'contains' || !options.edgeKinds.has(edge.kind)) continue;
-    if (!visible.has(edge.source) || !visible.has(edge.target)) continue;
-    // não desenha aresta de um grupo para o próprio filho (fica redundante com o agrupamento)
-    if (parentOf.get(edge.target) === edge.source && edge.kind === 'exports') continue;
-    edges.push({
-      id: edge.id,
+    const source = repFor(edge.source);
+    const target = repFor(edge.target);
+    if (!source || !target || source === target) continue;
+    if (isViewAncestor(source, target) || isViewAncestor(target, source)) continue;
+    const aggregated = source !== edge.source || target !== edge.target;
+    const count = edge.meta?.count ?? edge.evidence.length;
+    const key = aggregated ? `agg:${edge.kind}:${source}->${target}` : edge.id;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.count += count;
+      existing.members.push(edge.id);
+      existing.typeOnly &&= !!edge.meta?.typeOnly;
+      if (RESOLUTION_RANK[edge.resolution] < RESOLUTION_RANK[existing.resolution])
+        existing.resolution = edge.resolution;
+      continue;
+    }
+    byKey.set(key, {
+      id: key,
       kind: edge.kind,
-      source: edge.source,
-      target: edge.target,
+      source,
+      target,
       resolution: edge.resolution,
-      count: edge.meta?.count ?? edge.evidence.length,
+      count,
       typeOnly: !!edge.meta?.typeOnly,
+      aggregated,
+      members: [edge.id],
     });
   }
 
-  nodes.sort((a, b) => a.id.localeCompare(b.id));
+  nodes.sort((a, b) => compareStrings(a.id, b.id));
+  const edges = [...byKey.values()].sort((a, b) => compareStrings(a.id, b.id));
   return { nodes, edges, hiddenCount: Math.max(0, index.nodes.size - nodes.length) };
 }

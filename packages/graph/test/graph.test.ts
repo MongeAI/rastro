@@ -4,6 +4,7 @@ import {
   computeView,
   GraphBuilder,
   GraphIndex,
+  groupableModules,
   MAX_EVIDENCE_PER_EDGE,
   stronglyConnectedComponents,
 } from '@teia/graph';
@@ -277,5 +278,72 @@ describe('computeView (expansão progressiva)', () => {
     });
     expect(view.nodes.every((n) => n.kind === 'file' && !n.parent)).toBe(true);
     expect(view.edges).toHaveLength(0);
+  });
+
+  it('pastas recolhidas viram um nó só, com as relações agregadas', () => {
+    expect(groupableModules(index)).toEqual(['module:lib', 'module:src']);
+    const view = computeView(index, {
+      nodeKinds: allKinds,
+      edgeKinds,
+      expandedFiles: new Set(),
+      collapsedModules: new Set(['module:src', 'module:lib']),
+    });
+    expect(view.nodes.map((n) => [n.id, n.collapsed, n.fileCount])).toEqual([
+      ['module:lib', true, 1],
+      ['module:src', true, 2],
+    ]);
+    const edges = view.edges.map((e) => [e.source, e.target, e.aggregated, e.members.length]);
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        ['module:src', 'module:lib', true, 1],
+        ['module:lib', 'module:src', true, 1],
+      ]),
+    );
+    // import src/b → src/a fica dentro da mesma pasta: não vira laço
+    expect(view.edges.some((e) => e.source === e.target)).toBe(false);
+  });
+
+  it('não desenha relações de um grupo para o próprio filho', () => {
+    const b = new GraphBuilder();
+    const mod = b.ensureModule('src');
+    b.addNode({ id: 'file:src/x.ts', kind: 'file', name: 'x.ts', parent: mod });
+    b.addNode({ id: 'fn:src/x.ts#main', kind: 'function', name: 'main', parent: 'file:src/x.ts' });
+    b.addEdge({
+      kind: 'calls',
+      source: 'file:src/x.ts',
+      target: 'fn:src/x.ts#main',
+      resolution: 'resolved',
+      discovery: 'static-typecheck',
+    });
+    const f = b.finalize();
+    const g = { ...sampleGraph(), nodes: f.nodes, edges: f.edges };
+    const view = computeView(new GraphIndex(g), {
+      nodeKinds: allKinds,
+      edgeKinds,
+      expandedFiles: new Set(['file:src/x.ts']),
+    });
+    expect(view.nodes.some((n) => n.id === 'fn:src/x.ts#main')).toBe(true);
+    expect(view.edges).toEqual([]);
+  });
+
+  it('desenha depends_on entre pastas', () => {
+    const view = computeView(index, {
+      nodeKinds: allKinds,
+      edgeKinds: new Set<EdgeKind>(['depends_on']),
+      expandedFiles: new Set(),
+    });
+    expect(view.edges.map((e) => e.id)).toContain('depends_on:module:src->module:lib');
+  });
+
+  it('foco sem nenhum tipo de relação habilitado mostra só a própria entidade', () => {
+    const view = computeView(index, {
+      nodeKinds: allKinds,
+      edgeKinds: new Set<EdgeKind>(),
+      expandedFiles: new Set(),
+      focus: { id: 'fn:src/a.ts#run', depth: 2 },
+    });
+    expect(
+      view.nodes.filter((n) => n.kind === 'function' || n.kind === 'method').map((n) => n.id),
+    ).toEqual(['fn:src/a.ts#run']);
   });
 });

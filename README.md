@@ -52,7 +52,7 @@ Pronto. Para testar com um projeto de exemplo que já vem no repositório:
 npx teia fixtures/ts-basic
 ```
 
-O terminal mostra um resumo da análise e o navegador abre em `http://127.0.0.1:4321/`.
+O terminal mostra um resumo da análise e o navegador abre em `http://127.0.0.1:4321/?token=...`. O token é gerado a cada execução e protege o código contra outros programas da máquina. Se fechar a aba, use de novo o endereço completo que aparece no terminal.
 
 > Quer o comando `teia` disponível em qualquer pasta? Rode `npm link -w apps/cli` uma vez (para desfazer: `npm unlink -g teia`).
 
@@ -89,14 +89,21 @@ O Teia **nunca grava nada dentro do projeto analisado**. O JSON vai para a pasta
 
 ## Como explorar o mapa
 
-1. **Visão geral.** O mapa abre mostrando as pastas (caixas tracejadas) e os arquivos. À direita fica o **resumo**: contagens, ciclos de importação e referências não resolvidas.
-2. **Clique** em qualquer nó para ver os detalhes: onde está, o trecho de código, quem ele chama, quem o chama, o que importa e o que exporta. Cada relação mostra o **arquivo:linha** e a linha de código que a comprova.
-3. **Dois cliques** em um arquivo marcado com `+` mostram as funções e classes dele. O botão **Símbolos** expande todos de uma vez.
-4. **Busque** com `/` (ou `Ctrl+K`) por nome de arquivo, função, classe ou caminho. `Enter` leva até o item.
-5. **Focar vizinhança** isola a entidade e suas conexões (distância 1, 2 ou 3). **Expandir conexões** adiciona os vizinhos ao mapa sem esconder o resto.
-6. **Calcular quem pode ser afetado** lista quem depende da entidade, direta ou indiretamente.
-7. **Abrir no editor** abre o arquivo na linha certa (VS Code, Cursor, VSCodium, Zed ou JetBrains; escolha no painel da esquerda).
-8. **Exportar JSON** baixa o grafo completo; o botão de imagem no canto do mapa salva um PNG.
+1. **Escolha o nível de detalhe** no painel da esquerda:
+   - **Pastas**: cada pasta vira um bloco, e as linhas somam os imports entre elas. É a visão de arquitetura. Projetos grandes abrem aqui.
+   - **Arquivos**: os arquivos agrupados por pasta, com os imports entre eles.
+   - **Símbolos**: funções, classes e métodos de todos os arquivos, com as chamadas.
+2. **Dois cliques** abrem e fecham as coisas: numa pasta recolhida ela se abre; num arquivo com `+` aparecem as funções e classes dele.
+3. **Clique** em um nó para ver os detalhes: onde está, o trecho de código, quem ele chama, quem o chama, o que importa e o que exporta. Cada relação mostra o **arquivo:linha** e a linha de código que a comprova.
+4. **Clique numa linha** do mapa para ver todas as evidências daquela relação (inclusive as somadas entre pastas). Passe o mouse sobre nós e linhas para ver um resumo.
+5. **Busque** com `/` (ou `Ctrl+K`) por nome de arquivo, função, classe ou caminho. `Enter` leva até o item, abrindo as pastas necessárias.
+6. **Focar vizinhança** isola a entidade e suas conexões (distância 1, 2 ou 3). **Expandir conexões** adiciona os vizinhos ao mapa sem esconder o resto.
+7. **Calcular quem pode ser afetado** lista quem depende da entidade (ou de uma pasta inteira), direta ou indiretamente.
+8. **Abrir no editor** abre o arquivo na linha certa (VS Code, Cursor, VSCodium, Zed ou JetBrains; escolha no painel da esquerda).
+9. **Organização do mapa**: _Hierárquica_ (padrão) desenha o fluxo de dependências da esquerda para a direita; _Orgânica_ agrupa por proximidade.
+10. **Exportar JSON** baixa o grafo completo; o botão de imagem no canto do mapa salva um PNG. A URL guarda a seleção (`#n=...`), então dá para voltar direto a uma entidade.
+
+Atalhos: `/` busca · `F` enquadra o mapa · `Esc` limpa a seleção ou sai do foco · roda do mouse aproxima e afasta.
 
 Legenda das linhas: contínua = resolvida no projeto · tracejada cinza = externa · tracejada vermelha = não resolvida · pontilhada = import só de tipo ou export · contorno laranja = ciclo de importação.
 
@@ -117,7 +124,7 @@ Detalhes em [docs/arquitetura.md](docs/arquitetura.md) e no [formato dos dados](
 
 - **Local-first:** nenhum código é enviado para fora da sua máquina. A análise não depende de IA, API paga, conta ou internet.
 - **Só leitura:** o Teia **não executa** o projeto analisado, não roda scripts/hooks do `package.json` e não instala dependências.
-- **Servidor restrito:** a interface escuta apenas em `127.0.0.1`, aceita só `GET`/`HEAD`, recusa `Host` diferente de localhost (proteção contra DNS rebinding) e só entrega código de arquivos que fazem parte do grafo.
+- **Servidor restrito:** a interface escuta apenas em `127.0.0.1`, exige um token aleatório por execução, aceita só `GET`/`HEAD`, recusa `Host` diferente de localhost (proteção contra DNS rebinding) e só entrega código de arquivos JS/TS que fazem parte do grafo.
 - **Links simbólicos não são seguidos** e arquivos muito grandes (provavelmente gerados) são ignorados.
 
 O JSON exportado contém o **caminho absoluto** da raiz do projeto (para os links “abrir no editor”), além de nomes e trechos de código. Leve isso em conta antes de compartilhar. Mais em [docs/seguranca.md](docs/seguranca.md).
@@ -128,8 +135,9 @@ O JSON exportado contém o **caminho absoluto** da raiz do projeto (para os link
 - **Chamadas dinâmicas** (`obj[nome]()`, callbacks, injeção de dependência, eventos) não viram ligações confirmadas: aparecem como não resolvidas ou entram só nas contagens.
 - **JavaScript sem tipos:** chamadas como `obj.metodo()` só são ligadas quando o TypeScript consegue inferir o tipo de `obj`.
 - **Funções declaradas dentro de outras funções** não viram nós próprios; suas chamadas são contadas à parte.
-- **Rotas:** só Express, com caminho literal. Next.js, Fastify, NestJS etc. ainda não.
-- **Monorepos:** usa o `tsconfig.json`/`jsconfig.json` da raiz; `paths` definidos só em subpacotes podem não ser resolvidos. Imports entre pacotes que apontam para `dist/*.d.ts` são ligados ao `src/` correspondente quando ele existe (marcado com `viaDeclaration`).
+- **Rotas:** só Express, com caminho literal e quando o `app`/`router` vem de `express()` ou `express.Router()` no próprio código (roteadores recebidos por parâmetro não são reconhecidos). Next.js, Fastify, NestJS etc. ainda não.
+- **Arquivos excluídos** (`.gitignore`, `--exclude`, grandes demais) ainda são lidos pelo compilador quando outro arquivo os importa; chamadas para eles aparecem como “não analisado”.
+- **Monorepos:** usa o `tsconfig.json`/`jsconfig.json` da raiz (incluindo os arquivos de `references`, como no Vite); `paths` definidos só em `tsconfig` de subpacotes podem não ser resolvidos. Imports entre pacotes que apontam para `dist/*.d.ts` são ligados ao `src/` correspondente quando ele existe (marcado com `viaDeclaration`).
 - **Escala:** testado com projetos de dezenas a algumas centenas de arquivos. Projetos muito grandes funcionam, mas a análise e o layout ficam mais lentos.
 
 ## Estrutura do repositório
@@ -158,6 +166,7 @@ Para trabalhar na interface com recarga automática:
 ```bash
 npx teia fixtures/ts-basic --port 4321 --no-open   # terminal 1: análise + API em 127.0.0.1:4321
 npm run dev:web                                    # terminal 2: Vite em http://127.0.0.1:5173 (usa a API acima)
+# abra uma vez a URL com token do terminal 1 (o cookie vale para o Vite também)
 ```
 
 Veja [CONTRIBUTING.md](CONTRIBUTING.md).

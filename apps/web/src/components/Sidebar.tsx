@@ -5,7 +5,9 @@ import {
   type NodeKind,
   type TeiaGraph,
 } from '@teia/core';
+import type { Level } from '../lib/levels';
 import { EDITORS, type EditorId } from '../lib/editor';
+import type { LayoutMode } from './GraphCanvas';
 import { KindDot } from './KindBadge';
 
 export const NODE_KIND_ORDER: NodeKind[] = [
@@ -20,6 +22,20 @@ export const NODE_KIND_ORDER: NodeKind[] = [
 ];
 export const EDGE_KIND_ORDER: EdgeKind[] = ['imports', 'calls', 'extends', 'exports', 'depends_on'];
 
+const LEVELS: Array<[Level, string]> = [
+  ['modules', 'Pastas'],
+  ['files', 'Arquivos'],
+  ['symbols', 'Símbolos'],
+];
+
+const LEVEL_HINTS: Record<Level, string> = {
+  modules:
+    'Cada pasta é um bloco; as linhas somam os imports entre elas. Duplo clique abre a pasta.',
+  files:
+    'Arquivos agrupados por pasta. Duplo clique em um arquivo com + mostra suas funções e classes.',
+  symbols: 'Funções, classes e métodos de todos os arquivos, com as chamadas entre eles.',
+};
+
 const EDGE_HINTS: Record<EdgeKind, string> = {
   contains: '',
   imports: 'arquivo → arquivo ou pacote',
@@ -33,14 +49,17 @@ interface Props {
   graph: TeiaGraph;
   nodeKinds: ReadonlySet<NodeKind>;
   edgeKinds: ReadonlySet<EdgeKind>;
-  expandAll: boolean;
+  level: Level;
+  layout: LayoutMode;
+  moduleCount: number;
   hideTypeOnly: boolean;
   highlightNeighbors: boolean;
   editor: EditorId;
   symbolCount: number;
   onToggleNodeKind(kind: NodeKind): void;
   onToggleEdgeKind(kind: EdgeKind): void;
-  onExpandAll(value: boolean): void;
+  onLevel(value: Level): void;
+  onLayout(value: LayoutMode): void;
   onHideTypeOnly(value: boolean): void;
   onHighlightNeighbors(value: boolean): void;
   onEditor(value: EditorId): void;
@@ -52,41 +71,44 @@ export function Sidebar(p: Props) {
   return (
     <aside className="sidebar" aria-label="Filtros e legenda">
       <section className="side-section">
-        <h2 className="side-title">Visualização</h2>
-        <div className="segmented" role="radiogroup" aria-label="Nível de detalhe">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!p.expandAll}
-            className={!p.expandAll ? 'on' : ''}
-            onClick={() => p.onExpandAll(false)}
-          >
-            Arquivos
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={p.expandAll}
-            className={p.expandAll ? 'on' : ''}
-            onClick={() => {
-              if (
-                p.symbolCount > 1500 &&
-                !confirm(
-                  `Mostrar ${p.symbolCount} símbolos de uma vez pode deixar o mapa ilegível e lento. Continuar?`,
+        <h2 className="side-title">Nível de detalhe</h2>
+        <div className="segmented three" role="radiogroup" aria-label="Nível de detalhe">
+          {LEVELS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={p.level === id}
+              className={p.level === id ? 'on' : ''}
+              disabled={id === 'modules' && p.moduleCount < 2}
+              onClick={() => {
+                if (
+                  id === 'symbols' &&
+                  p.symbolCount > 1500 &&
+                  !confirm(
+                    `Mostrar ${p.symbolCount} símbolos de uma vez pode deixar o mapa ilegível e lento. Continuar?`,
+                  )
                 )
-              )
-                return;
-              p.onExpandAll(true);
-            }}
-          >
-            Símbolos
-          </button>
+                  return;
+                p.onLevel(id);
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <p className="side-hint">
-          {p.expandAll
-            ? 'Funções, classes e métodos de todos os arquivos.'
-            : 'Dê dois cliques em um arquivo marcado com + para ver as funções e classes dele.'}
-        </p>
+        <p className="side-hint">{LEVEL_HINTS[p.level]}</p>
+        <label className="field">
+          <span>Organização</span>
+          <select
+            className="select"
+            value={p.layout}
+            onChange={(e) => p.onLayout(e.target.value as LayoutMode)}
+          >
+            <option value="hierarchical">Hierárquica (fluxo de dependências)</option>
+            <option value="organic">Orgânica (por proximidade)</option>
+          </select>
+        </label>
       </section>
 
       <section className="side-section">

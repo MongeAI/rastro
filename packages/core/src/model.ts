@@ -111,7 +111,8 @@ export type UnresolvedReason =
   | 'symbol-not-found'
   | 'indirect-call'
   | 'dynamic-import'
-  | 'unknown-base-class';
+  | 'unknown-base-class'
+  | 'not-analyzed';
 
 export interface GraphNode {
   /** Identificador estável e legível, ex.: `fn:src/math.ts#sum`. */

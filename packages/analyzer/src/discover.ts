@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ignore, { type Ignore } from 'ignore';
 import type { Diagnostic, Language } from '@teia/core';
+import { compareStrings } from '@teia/core';
 
 /** Diretórios que quase sempre contêm código gerado, dependências ou dados de ferramentas. */
 export const DEFAULT_EXCLUDED_DIRS = [
@@ -117,7 +118,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
       });
       continue;
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    entries.sort((a, b) => compareStrings(a.name, b.name));
     const subdirs: string[] = [];
     for (const entry of entries) {
       const abs = path.join(dir, entry.name);
@@ -166,6 +167,6 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
     stack.push(...subdirs.reverse());
   }
 
-  files.sort((a, b) => a.relative.localeCompare(b.relative));
+  files.sort((a, b) => compareStrings(a.relative, b.relative));
   return { root: toPosix(root), files, diagnostics };
 }

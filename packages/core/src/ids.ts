@@ -8,7 +8,8 @@ export const nodeId = {
   class: (file: string, name: string) => `class:${file}#${name}`,
   method: (file: string, className: string, member: string) =>
     `method:${file}#${className}.${member}`,
-  route: (file: string, httpMethod: string, path: string) => `route:${file}#${httpMethod} ${path}`,
+  route: (file: string, receiver: string, httpMethod: string, path: string) =>
+    `route:${file}#${receiver} ${httpMethod} ${path}`,
   package: (name: string) => `pkg:${name}`,
   unresolved: (file: string, kind: 'import' | 'call' | 'extends', reference: string) =>
     `unresolved:${file}#${kind}:${reference}`,

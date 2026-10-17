@@ -1,4 +1,5 @@
 import {
+  compareStrings,
   edgeId,
   nodeId,
   type DiscoveryMethod,
@@ -137,11 +138,11 @@ export class GraphBuilder {
     this.deriveModuleDependencies();
     const importCycles = this.markImportCycles();
 
-    const nodes = [...this.nodes.values()].sort((a, b) => a.id.localeCompare(b.id));
-    const edges = [...this.edges.values()].sort((a, b) => a.id.localeCompare(b.id));
+    const nodes = [...this.nodes.values()].sort((a, b) => compareStrings(a.id, b.id));
+    const edges = [...this.edges.values()].sort((a, b) => compareStrings(a.id, b.id));
     for (const edge of edges) {
       edge.evidence.sort(
-        (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column,
+        (a, b) => compareStrings(a.file, b.file) || a.line - b.line || a.column - b.column,
       );
     }
 
@@ -184,7 +185,9 @@ export class GraphBuilder {
   private markImportCycles(): string[][] {
     const adjacency = new Map<string, string[]>();
     for (const edge of this.edges.values()) {
-      if (edge.kind !== 'imports' || edge.resolution !== 'resolved') continue;
+      // imports só de tipo somem na execução: não formam ciclos reais
+      if (edge.kind !== 'imports' || edge.resolution !== 'resolved' || edge.meta?.typeOnly)
+        continue;
       if (!adjacency.has(edge.source)) adjacency.set(edge.source, []);
       adjacency.get(edge.source)!.push(edge.target);
     }
@@ -197,6 +200,6 @@ export class GraphBuilder {
         if (node) node.meta = { ...node.meta, inCycle: true };
       }
     }
-    return cycles.map((c) => [...c].sort()).sort((a, b) => a[0]!.localeCompare(b[0]!));
+    return cycles.map((c) => [...c].sort()).sort((a, b) => compareStrings(a[0]!, b[0]!));
   }
 }

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { Node, Project, SyntaxKind, ts, type SourceFile } from 'ts-morph';
+import { Node, Project, SyntaxKind, ts, type KindToNodeMappings, type SourceFile } from 'ts-morph';
 import {
   nodeId,
   SCHEMA_VERSION,
@@ -16,7 +16,7 @@ import {
 } from '@teia/core';
 import { GraphBuilder } from '@teia/graph';
 import { discoverFiles, toPosix, type DiscoverOptions, type DiscoveredFile } from './discover.js';
-import { loadCompilerOptions, ModuleResolver } from './resolve.js';
+import { loadCompilerOptions, ModuleResolver, packageNameOf } from './resolve.js';
 import { detectExpressRoutes } from './routes.js';
 
 export interface AnalyzeOptions extends DiscoverOptions {
@@ -76,7 +76,16 @@ export async function analyzeProject(
   for (const file of discovered.files) project.addSourceFileAtPath(file.absolute);
 
   progress('Construindo o modelo do compilador...');
-  const program = project.getProgram().compilerObject;
+  let program: ts.Program;
+  try {
+    program = project.getProgram().compilerObject;
+  } catch (err) {
+    throw new Error(
+      `O compilador TypeScript não conseguiu montar o projeto (${(err as Error).message}). ` +
+        'Tente excluir pastas geradas com --exclude.',
+      { cause: err },
+    );
+  }
   const ctx: Ctx = {
     root,
     builder: new GraphBuilder(),
@@ -97,9 +106,10 @@ export async function analyzeProject(
   progress('Extraindo arquivos, funções, classes e métodos...');
   let syntaxErrors = 0;
   for (const [file, sf] of sourceFiles) {
-    ctx.lines.set(file.relative, sf.getFullText().split(/\r?\n/));
+    // mesmas quebras de linha que o TypeScript usa para numerar linhas
+    ctx.lines.set(file.relative, sf.getFullText().split(/\r\n|[\r\n\u2028\u2029]/));
     addFileNode(ctx, file, sf);
-    extractEntities(ctx, file, sf);
+    safely(ctx, file, 'entidades', () => extractEntities(ctx, file, sf));
     for (const diag of program.getSyntacticDiagnostics(sf.compilerNode)) {
       if (syntaxErrors++ >= MAX_SYNTAX_DIAGNOSTICS) break;
       const line =
@@ -115,16 +125,17 @@ export async function analyzeProject(
       });
     }
   }
-  for (const [file, sf] of sourceFiles) detectExpressRoutes(ctx, file, sf);
+  for (const [file, sf] of sourceFiles)
+    safely(ctx, file, 'rotas', () => detectExpressRoutes(ctx, file, sf));
 
   // Passo 2: relações (imports, exports, chamadas, herança)
   progress('Resolvendo imports, exports e chamadas...');
   for (const [file, sf] of sourceFiles) {
-    extractImports(ctx, file, sf);
-    extractExports(ctx, file, sf);
-    extractCalls(ctx, file, sf);
-    extractJsxUsages(ctx, file, sf);
-    extractHeritage(ctx, file, sf);
+    safely(ctx, file, 'imports', () => extractImports(ctx, file, sf));
+    safely(ctx, file, 'exports', () => extractExports(ctx, file, sf));
+    safely(ctx, file, 'chamadas', () => extractCalls(ctx, file, sf));
+    safely(ctx, file, 'JSX', () => extractJsxUsages(ctx, file, sf));
+    safely(ctx, file, 'herança', () => extractHeritage(ctx, file, sf));
   }
 
   progress('Montando o grafo...');
@@ -178,6 +189,41 @@ export async function analyzeProject(
 
 export type AnalyzerContext = Ctx;
 
+/**
+ * Executa uma etapa da análise de um arquivo sem derrubar a análise inteira:
+ * arquivos patológicos (ex.: expressões aninhadas milhares de vezes) viram um aviso.
+ */
+function safely(ctx: Ctx, file: DiscoveredFile, step: string, run: () => void): void {
+  try {
+    run();
+  } catch (err) {
+    const reason =
+      err instanceof RangeError
+        ? 'estrutura aninhada demais para analisar'
+        : (err as Error).message || String(err);
+    ctx.diagnostics.push({
+      level: 'warning',
+      code: 'analysis-failed',
+      message: `Parte da análise (${step}) falhou neste arquivo: ${reason}. As relações dele podem estar incompletas.`,
+      file: file.relative,
+    });
+  }
+}
+
+const descendantsCache = new WeakMap<SourceFile, Map<SyntaxKind, Node[]>>();
+
+/** `getDescendantsOfKind` com cache por arquivo (cada tipo é buscado uma vez só). */
+export function descendantsOfKind<K extends SyntaxKind>(
+  sf: SourceFile,
+  kind: K,
+): KindToNodeMappings[K][] {
+  let byKind = descendantsCache.get(sf);
+  if (!byKind) descendantsCache.set(sf, (byKind = new Map()));
+  let nodes = byKind.get(kind);
+  if (!nodes) byKind.set(kind, (nodes = sf.getDescendantsOfKind(kind)));
+  return nodes as KindToNodeMappings[K][];
+}
+
 // ---------------------------------------------------------------------------
 // utilidades
 
@@ -224,7 +270,11 @@ function addFileNode(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   const dir = path.posix.dirname(file.relative);
   const moduleId = ctx.builder.ensureModule(dir === '.' ? '' : dir);
   const fileId = nodeId.file(file.relative);
-  const lines = ctx.lines.get(file.relative)?.length ?? sf.getEndLineNumber();
+  const all = ctx.lines.get(file.relative);
+  // um arquivo que termina com quebra de linha não tem uma linha a mais
+  const lines = all
+    ? Math.max(1, all.length - (all.length > 1 && all[all.length - 1] === '' ? 1 : 0))
+    : sf.getEndLineNumber();
   ctx.builder.addNode({
     id: fileId,
     kind: 'file',
@@ -285,6 +335,41 @@ function unwrap(node: Node | undefined): Node | undefined {
     current = current.getExpression();
   }
   return current;
+}
+
+/**
+ * Funções que só "embrulham" outra função e devolvem algo equivalente a ela.
+ * Uma lista explícita evita transformar `const dobro = lista.map(x => ...)` em função.
+ */
+const FUNCTION_WRAPPERS = new Set([
+  'memo',
+  'forwardRef',
+  'observer',
+  'defineComponent',
+  'withRouter',
+  'asyncHandler',
+  'catchAsync',
+  'debounce',
+  'throttle',
+  'once',
+  'memoize',
+  'useCallback',
+]);
+
+/** Para `memo(() => ...)` e afins, devolve a função embrulhada. */
+function wrappedFunction(call: Node): Node | undefined {
+  if (!Node.isCallExpression(call)) return undefined;
+  const callee = unwrap(call.getExpression());
+  const name = Node.isIdentifier(callee)
+    ? callee.getText()
+    : Node.isPropertyAccessExpression(callee)
+      ? callee.getName()
+      : undefined;
+  if (!name || !FUNCTION_WRAPPERS.has(name)) return undefined;
+  return call
+    .getArguments()
+    .map((a) => unwrap(a))
+    .find((a) => isFunctionLike(a));
 }
 
 const isFunctionLike = (n: Node | undefined) =>
@@ -376,10 +461,7 @@ function extractEntities(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           });
         } else if (init && Node.isCallExpression(init)) {
           // função embrulhada: `const Card = memo(() => ...)`, `forwardRef(function Card() {...})`
-          const inner = init
-            .getArguments()
-            .map((a) => unwrap(a))
-            .find((a) => isFunctionLike(a));
+          const inner = wrappedFunction(init);
           if (inner) {
             addFunction(nameNode.getText(), decl, [inner.compilerNode], {
               exported: statement.isExported(),
@@ -399,6 +481,16 @@ function extractEntities(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           exported: true,
           defaultExport: true,
         });
+      } else if (expr && Node.isCallExpression(expr)) {
+        // `export default memo(function Card() {...})`
+        const inner = wrappedFunction(expr);
+        if (inner) {
+          const ownName = Node.isFunctionExpression(inner) ? inner.getName() : undefined;
+          addFunction(ownName ?? 'default', expr, [statement.compilerNode, inner.compilerNode], {
+            exported: true,
+            defaultExport: true,
+          });
+        }
       }
     } else if (Node.isExpressionStatement(statement)) {
       extractCommonJsExport(statement.getExpression(), addFunction, addClass);
@@ -553,7 +645,7 @@ function collectImports(sf: SourceFile): { found: ImportFound[]; dynamic: Node[]
       meta: { importKind: 're-export', names, ...(decl.isTypeOnly() ? { typeOnly: true } : {}) },
     });
   }
-  for (const decl of sf.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
+  for (const decl of descendantsOfKind(sf, SyntaxKind.ImportEqualsDeclaration)) {
     const ref = decl.getModuleReference();
     if (Node.isExternalModuleReference(ref)) {
       const expr = ref.getExpression();
@@ -566,7 +658,7 @@ function collectImports(sf: SourceFile): { found: ImportFound[]; dynamic: Node[]
       }
     }
   }
-  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+  for (const call of descendantsOfKind(sf, SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     const isDynamicImport = callee.getKind() === SyntaxKind.ImportKeyword;
     const isRequire = Node.isIdentifier(callee) && callee.getText() === 'require';
@@ -623,7 +715,7 @@ function extractImports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   const { found, dynamic } = collectImports(sf);
 
   for (const imp of found) {
-    const target = ctx.resolver.resolve(imp.specifier, file.absolute);
+    let target = ctx.resolver.resolve(imp.specifier, file.absolute);
     const evidence = evidenceAt(ctx, file.relative, imp.node);
     const meta: EdgeMeta = { specifier: imp.specifier, ...imp.meta };
     if (
@@ -644,6 +736,16 @@ function extractImports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
         });
         continue;
       }
+    }
+    const bare = !imp.specifier.startsWith('.') && !path.isAbsolute(imp.specifier);
+    if (
+      (target.kind === 'file' || target.kind === 'asset') &&
+      bare &&
+      !ctx.filesByAbs.has(target.absolute)
+    ) {
+      // pacote do workspace sem código-fonte correspondente: tratamos como pacote
+      const name = packageNameOf(imp.specifier);
+      target = { kind: 'package', name, builtin: false, declared: true };
     }
     if (target.kind === 'file' || target.kind === 'asset') {
       const rel = toPosix(path.relative(ctx.root, target.absolute));
@@ -809,13 +911,23 @@ function exportStatementEvidence(
   sf: SourceFile,
   name: string,
 ): Evidence | undefined {
-  for (const decl of sf.getExportDeclarations()) {
-    if (!decl.getModuleSpecifierValue()) continue;
-    if (
-      decl.isNamespaceExport() ||
-      decl.getNamedExports().some((n) => (n.getAliasNode()?.getText() ?? n.getName()) === name)
-    ) {
+  const reexports = sf.getExportDeclarations().filter((d) => !!d.getModuleSpecifierValue());
+  // primeiro os nomes explícitos: `export { x as y } from`
+  for (const decl of reexports) {
+    if (decl.getNamedExports().some((n) => (n.getAliasNode()?.getText() ?? n.getName()) === name))
       return evidenceAt(ctx, file.relative, decl);
+  }
+  // depois `export * from`: o módulo de origem precisa realmente exportar o nome
+  for (const decl of reexports) {
+    if (!decl.isNamespaceExport()) continue;
+    const specifier = decl.getModuleSpecifier();
+    const moduleSymbol = specifier && ctx.checker.getSymbolAtLocation(specifier.compilerNode);
+    if (!moduleSymbol) continue;
+    try {
+      if (ctx.checker.getExportsOfModule(moduleSymbol).some((s) => s.name === name))
+        return evidenceAt(ctx, file.relative, decl);
+    } catch {
+      // módulo sem exports conhecidos
     }
   }
   return undefined;
@@ -835,12 +947,14 @@ function entityForDeclaration(ctx: Ctx, decl: ts.Node): string | undefined {
 // ---------------------------------------------------------------------------
 // Passo 2: chamadas
 
-type SymbolTarget =
+export type SymbolTarget =
   /** `mapped`: a ligação passou por um .d.ts compilado mapeado de volta para o código-fonte. */
   | { kind: 'entity'; id: string; mapped?: boolean }
   | { kind: 'external' }
   /** função declarada dentro de outra (escopo local), que não vira nó no grafo */
   | { kind: 'local' }
+  /** declarada em arquivo do projeto que não foi analisado */
+  | { kind: 'not-analyzed' }
   | { kind: 'indirect' }
   | { kind: 'missing' };
 
@@ -884,7 +998,11 @@ export function resolveSymbolTargets(
     const declFile = toPosix(decl.getSourceFile().fileName);
     if (!ctx.filesByAbs.has(declFile)) {
       const mapped = entityFromDeclarationFile(ctx, decl, declFile);
-      targets.push(mapped ? { kind: 'entity', id: mapped, mapped: true } : { kind: 'external' });
+      if (mapped) targets.push({ kind: 'entity', id: mapped, mapped: true });
+      // declarado em um arquivo do projeto que ficou fora da análise (excluído, grande demais...)
+      else if (isInsideProject(ctx, declFile) && !DECLARATION_FILE.test(declFile))
+        targets.push({ kind: 'not-analyzed' });
+      else targets.push({ kind: 'external' });
       continue;
     }
     if (ts.isShorthandPropertyAssignment(decl)) {
@@ -897,13 +1015,22 @@ export function resolveSymbolTargets(
       );
       continue;
     }
-    if (ts.isPropertyAssignment(decl) && ts.isIdentifier(decl.initializer)) {
+    if (
+      ts.isPropertyAssignment(decl) &&
+      ts.isIdentifier(decl.initializer) &&
+      isConstObjectLiteralProperty(decl)
+    ) {
       targets.push(
         ...resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1),
       );
       continue;
     }
-    if (ts.isVariableDeclaration(decl) && decl.initializer && ts.isIdentifier(decl.initializer)) {
+    if (
+      ts.isVariableDeclaration(decl) &&
+      decl.initializer &&
+      ts.isIdentifier(decl.initializer) &&
+      isConstDeclaration(decl)
+    ) {
       // const alias = outraFuncao;
       targets.push(
         ...resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1),
@@ -942,15 +1069,39 @@ function unwrapExpression(n: ts.Expression): ts.Expression {
   return current;
 }
 
+function isInsideProject(ctx: Ctx, absolute: string): boolean {
+  return absolute.startsWith(`${ctx.root}/`) && !absolute.includes('/node_modules/');
+}
+
+/** `const x = ...` (um `let`/`var` pode ser reatribuído, então o alvo não é garantido). */
+function isConstDeclaration(decl: ts.VariableDeclaration): boolean {
+  return (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0;
+}
+
+/** Propriedade de um objeto literal atribuído a `const` ou a `module.exports`. */
+function isConstObjectLiteralProperty(decl: ts.PropertyAssignment): boolean {
+  const literal = decl.parent;
+  const owner = literal?.parent;
+  if (!owner) return false;
+  if (ts.isVariableDeclaration(owner)) return isConstDeclaration(owner);
+  return ts.isBinaryExpression(owner) || ts.isExportAssignment(owner);
+}
+
 /** Função declarada dentro de outra: `function aux() {}`, `const aux = () => {}`, `const f = useCallback(() => {})`. */
 function isLocalFunction(decl: ts.Node): boolean {
-  if (ts.isFunctionDeclaration(decl)) return true;
+  if (!isInsideFunction(decl)) return false;
+  if (ts.isFunctionDeclaration(decl)) return !!decl.body;
   if (!ts.isVariableDeclaration(decl) || !decl.initializer) return false;
   const init = unwrapExpression(decl.initializer);
   return (
     isFunctionExpression(init) ||
     (ts.isCallExpression(init) && init.arguments.some(isFunctionExpression))
   );
+}
+
+function isInsideFunction(node: ts.Node): boolean {
+  for (let cur = node.parent; cur; cur = cur.parent) if (ts.isFunctionLike(cur)) return true;
+  return false;
 }
 
 /** A variável recebe o resultado de uma chamada a código externo (ex.: `useState`, `express()`). */
@@ -1037,6 +1188,20 @@ function entityFromDeclarationFile(ctx: Ctx, decl: ts.Node, declFile: string): s
       candidates.push(nodeId.method(rel, cls, `set ${nameOf(decl)}`));
     else if (ts.isMethodDeclaration(decl) || ts.isPropertyDeclaration(decl))
       candidates.push(nodeId.method(rel, cls, nameOf(decl) ?? ''));
+    // membros com o mesmo nome (estático e de instância) recebem sufixo ~2, ~3...:
+    // escolhemos pelo modificador static, e desistimos se continuar ambíguo
+    const base = candidates[0];
+    if (base) {
+      const isStatic =
+        (ts.getCombinedModifierFlags(decl as ts.Declaration) & ts.ModifierFlags.Static) !== 0;
+      const sameName = [base, `${base}~2`, `${base}~3`, `${base}~4`].filter((id) =>
+        ctx.builder.hasNode(id),
+      );
+      const matching = sameName.filter(
+        (id) => !!ctx.builder.getNode(id)?.meta?.static === isStatic,
+      );
+      return matching.length === 1 ? matching[0] : undefined;
+    }
   }
   return candidates.find((id) => ctx.builder.hasNode(id));
 }
@@ -1070,6 +1235,12 @@ function moduleSpecifierOfAlias(decl: ts.Node): string | undefined {
   return undefined;
 }
 
+export function unresolvedReason(targets: SymbolTarget[]): UnresolvedReason {
+  if (targets.some((t) => t.kind === 'not-analyzed')) return 'not-analyzed';
+  if (targets.some((t) => t.kind === 'indirect')) return 'indirect-call';
+  return 'symbol-not-found';
+}
+
 /** Entidade mais próxima que envolve um nó (ou o próprio arquivo, para código no topo). */
 function enclosingEntity(ctx: Ctx, node: ts.Node, fileId: string): string {
   let current: ts.Node | undefined = node.parent;
@@ -1084,8 +1255,8 @@ function enclosingEntity(ctx: Ctx, node: ts.Node, fileId: string): string {
 function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   const fileId = nodeId.file(file.relative);
   const calls = [
-    ...sf.getDescendantsOfKind(SyntaxKind.CallExpression),
-    ...sf.getDescendantsOfKind(SyntaxKind.NewExpression),
+    ...descendantsOfKind(sf, SyntaxKind.CallExpression),
+    ...descendantsOfKind(sf, SyntaxKind.NewExpression),
   ];
 
   for (const call of calls) {
@@ -1172,9 +1343,7 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       ctx.counters.localCalls++;
       continue;
     }
-    const reason: UnresolvedReason = targets.some((t) => t.kind === 'indirect')
-      ? 'indirect-call'
-      : 'symbol-not-found';
+    const reason = unresolvedReason(targets);
     // em JS sem tipos, `obj.metodo()` sem declaração conhecida é só ruído: contamos e seguimos
     if (reason === 'symbol-not-found' && !Node.isIdentifier(callee) && !receiverIsThis) {
       ctx.counters.unknownReceiverCalls++;
@@ -1195,11 +1364,10 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
 
 /** Uso de componentes JSX (`<Card />`) é registrado como chamada do tipo `jsx`. */
 function extractJsxUsages(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
-  if (file.language !== 'tsx' && file.language !== 'jsx') return;
   const fileId = nodeId.file(file.relative);
   const elements = [
-    ...sf.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
-    ...sf.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
+    ...descendantsOfKind(sf, SyntaxKind.JsxOpeningElement),
+    ...descendantsOfKind(sf, SyntaxKind.JsxSelfClosingElement),
   ];
   for (const element of elements) {
     const tag = element.getTagNameNode();
@@ -1233,9 +1401,7 @@ function extractJsxUsages(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void 
     } else if (targets.every((t) => t.kind === 'local')) {
       ctx.counters.localCalls++;
     } else {
-      const reason: UnresolvedReason = targets.some((t) => t.kind === 'indirect')
-        ? 'indirect-call'
-        : 'symbol-not-found';
+      const reason = unresolvedReason(targets);
       const target = addUnresolvedNode(ctx, file.relative, 'call', `<${text}>`, reason, element);
       ctx.builder.addEdge({
         kind: 'calls',
@@ -1255,8 +1421,8 @@ function extractJsxUsages(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void 
 
 function extractHeritage(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   const classes = [
-    ...sf.getDescendantsOfKind(SyntaxKind.ClassDeclaration),
-    ...sf.getDescendantsOfKind(SyntaxKind.ClassExpression),
+    ...descendantsOfKind(sf, SyntaxKind.ClassDeclaration),
+    ...descendantsOfKind(sf, SyntaxKind.ClassExpression),
   ];
   for (const cls of classes) {
     const classId = ctx.entities.get(cls.compilerNode);

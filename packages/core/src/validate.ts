@@ -39,7 +39,24 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
   if (!Array.isArray(input.nodes)) fail('nodes deve ser uma lista.');
   if (!Array.isArray(input.edges)) fail('edges deve ser uma lista.');
   if (!isObject(input.stats)) fail('stats é obrigatório.');
+  else {
+    const stats = input.stats;
+    for (const key of ['nodesByKind', 'edgesByKind', 'edgesByResolution'])
+      if (!isObject(stats[key]) || !Object.values(stats[key]).every((v) => Number.isInteger(v)))
+        fail(`stats.${key} deve ser um objeto de contagens.`);
+    if (!Array.isArray(stats.importCycles) || !stats.importCycles.every((c) => Array.isArray(c)))
+      fail('stats.importCycles deve ser uma lista de listas.');
+    for (const key of ['files', 'externalCallsSkipped', 'unknownReceiverCalls', 'computedCalls'])
+      if (!Number.isInteger(stats[key]) || (stats[key] as number) < 0)
+        fail(`stats.${key} deve ser um inteiro não negativo.`);
+  }
   if (!Array.isArray(input.diagnostics)) fail('diagnostics deve ser uma lista.');
+  else
+    for (const [i, d] of input.diagnostics.entries())
+      if (!isObject(d) || typeof d.code !== 'string' || typeof d.message !== 'string')
+        fail(`diagnostics[${i}] inválido.`);
+  if (!isObject(input.project) || !Array.isArray(input.project.languages))
+    fail('project.languages deve ser uma lista.');
   if (errors.length) return { valid: false, errors };
 
   const graph = input as unknown as TeiaGraph;
@@ -57,6 +74,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     else ids.add(node.id);
     if (!nodeKinds.has(node.kind)) fail(`${at}.kind inválido: ${String(node.kind)}`);
     if (typeof node.name !== 'string') fail(`${at}.name ausente.`);
+    if (node.meta !== undefined && !isObject(node.meta)) fail(`${at}.meta deve ser um objeto.`);
     if (node.location !== undefined) {
       const loc = node.location;
       if (
@@ -64,15 +82,33 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
         typeof loc.file !== 'string' ||
         !isPositiveInt(loc.startLine) ||
         !isPositiveInt(loc.endLine) ||
+        !isPositiveInt(loc.startColumn) ||
+        !isPositiveInt(loc.endColumn) ||
         loc.endLine < loc.startLine
       )
         fail(`${at}.location inválida em ${node.id}.`);
     }
   }
 
+  const parentOf = new Map<string, string>();
   for (const [i, node] of graph.nodes.entries()) {
-    if (isObject(node) && node.parent !== undefined && !ids.has(node.parent))
+    if (!isObject(node) || node.parent === undefined) continue;
+    if (!ids.has(node.parent))
       fail(`nodes[${i}].parent aponta para nó inexistente: ${node.parent}`);
+    else parentOf.set(node.id, node.parent);
+  }
+  // a hierarquia precisa ser uma árvore: um ciclo de "parent" travaria quem percorre ancestrais
+  const checked = new Set<string>();
+  for (const start of parentOf.keys()) {
+    const path = new Set<string>();
+    for (let cur: string | undefined = start; cur && !checked.has(cur); cur = parentOf.get(cur)) {
+      if (path.has(cur)) {
+        fail(`ciclo na hierarquia (parent) envolvendo ${cur}.`);
+        break;
+      }
+      path.add(cur);
+    }
+    for (const id of path) checked.add(id);
   }
 
   const edgeIds = new Set<string>();
@@ -90,6 +126,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     else if (edgeIds.has(edge.id)) fail(`${at}.id duplicado: ${edge.id}`);
     else edgeIds.add(edge.id);
     if (!edgeKinds.has(edge.kind)) fail(`${at}.kind inválido: ${String(edge.kind)}`);
+    if (edge.meta !== undefined && !isObject(edge.meta)) fail(`${at}.meta deve ser um objeto.`);
     if (!ids.has(edge.source)) fail(`${at}.source inexistente: ${edge.source}`);
     if (!ids.has(edge.target)) fail(`${at}.target inexistente: ${edge.target}`);
     if (!resolutions.has(edge.resolution))
@@ -99,7 +136,12 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     if (!Array.isArray(edge.evidence)) fail(`${at}.evidence deve ser uma lista.`);
     else
       for (const ev of edge.evidence)
-        if (!isObject(ev) || typeof ev.file !== 'string' || !isPositiveInt(ev.line))
+        if (
+          !isObject(ev) ||
+          typeof ev.file !== 'string' ||
+          !isPositiveInt(ev.line) ||
+          !isPositiveInt(ev.column)
+        )
           fail(`${at}.evidence contém item inválido (${edge.id}).`);
   }
 

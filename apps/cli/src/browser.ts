@@ -6,7 +6,7 @@ export function openBrowser(url: string): void {
     process.platform === 'darwin'
       ? ['open', [url]]
       : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '""', url]]
+        ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
         : ['xdg-open', [url]];
   try {
     const child = spawn(command, args as string[], { stdio: 'ignore', detached: true });

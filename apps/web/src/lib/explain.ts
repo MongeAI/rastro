@@ -10,6 +10,8 @@ export const REASON_TEXT: Record<UnresolvedReason, string> = {
   'dynamic-import':
     'O caminho do módulo é calculado em tempo de execução, então não pode ser resolvido estaticamente.',
   'unknown-base-class': 'A classe base não pôde ser localizada.',
+  'not-analyzed':
+    'O alvo está em um arquivo do projeto que ficou fora da análise (excluído, ignorado pelo .gitignore ou grande demais).',
 };
 
 export const DISCOVERY_TEXT: Record<DiscoveryMethod, string> = {

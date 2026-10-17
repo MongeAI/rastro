@@ -43,7 +43,7 @@ Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`.
 | `function`   | `fn:<arquivo>#<nome>`                                       | `fn:src/math.ts#sum`                                     |
 | `class`      | `class:<arquivo>#<nome>`                                    | `class:src/models/user.ts#User`                          |
 | `method`     | `method:<arquivo>#<Classe>.<membro>`                        | `method:src/services/user-service.ts#UserService.create` |
-| `route`      | `route:<arquivo>#<MÉTODO> <caminho>`                        | `route:src/server.js#GET /users`                         |
+| `route`      | `route:<arquivo>#<receptor> <MÉTODO> <caminho>`             | `route:src/server.js#app GET /users`                     |
 | `package`    | `pkg:<nome>`                                                | `pkg:react`, `pkg:node:fs`                               |
 | `unresolved` | `unresolved:<arquivo>#<import\|call\|extends>:<referência>` | `unresolved:src/index.ts#import:./missing`               |
 
@@ -53,14 +53,15 @@ Se dois símbolos geram o mesmo id no mesmo arquivo, o segundo recebe o sufixo `
 
 Motivos de `unresolved` (`meta.reason`):
 
-| Motivo               | Significado                                                                                           |
-| -------------------- | ----------------------------------------------------------------------------------------------------- |
-| `module-not-found`   | Import relativo/absoluto para um arquivo que não existe                                               |
-| `undeclared-package` | Especificador de pacote que não está no `package.json` nem em `node_modules` (ou alias não resolvido) |
-| `symbol-not-found`   | Nome chamado que não tem declaração conhecida                                                         |
-| `indirect-call`      | Chamada via parâmetro, propriedade ou interface: o alvo só existe em execução                         |
-| `dynamic-import`     | `require(variavel)` / `import(variavel)`                                                              |
-| `unknown-base-class` | Classe base não localizada                                                                            |
+| Motivo               | Significado                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `module-not-found`   | Import relativo/absoluto para um arquivo que não existe                                                       |
+| `undeclared-package` | Especificador de pacote que não está no `package.json` nem em `node_modules` (ou alias não resolvido)         |
+| `symbol-not-found`   | Nome chamado que não tem declaração conhecida                                                                 |
+| `indirect-call`      | Chamada via parâmetro, propriedade ou interface: o alvo só existe em execução                                 |
+| `dynamic-import`     | `require(variavel)` / `import(variavel)`                                                                      |
+| `unknown-base-class` | Classe base não localizada                                                                                    |
+| `not-analyzed`       | O alvo existe, mas em um arquivo do projeto que ficou fora da análise (excluído, `.gitignore`, grande demais) |
 
 ## Relações (`edges`)
 
@@ -88,7 +89,7 @@ Semântica de cada tipo:
 
 ## Estatísticas (`stats`)
 
-`files`, `nodesByKind`, `edgesByKind`, `edgesByResolution`, `importCycles` (listas de ids de arquivo), `durationMs` e contadores do que ficou **fora do grafo por cautela**:
+`files`, `nodesByKind`, `edgesByKind`, `edgesByResolution`, `importCycles` (listas de ids de arquivo; imports só de tipo não formam ciclo, pois somem na execução), `durationMs` e contadores do que ficou **fora do grafo por cautela**:
 
 - `externalCallsSkipped`: chamadas para bibliotecas e APIs nativas (ex.: `console.log`, `array.map`).
 - `unknownReceiverCalls`: `obj.metodo()` em que o tipo de `obj` é desconhecido.
@@ -97,7 +98,7 @@ Semântica de cada tipo:
 
 ## Diagnósticos (`diagnostics`)
 
-`{ level: "info" | "warning" | "error", code, message, file?, line? }`. Códigos atuais: `symlink-skipped`, `file-too-large`, `max-files-reached`, `unreadable-directory`, `invalid-config`, `syntax-error`, `no-source-files`.
+`{ level: "info" | "warning" | "error", code, message, file?, line? }`. Códigos atuais: `symlink-skipped`, `file-too-large`, `max-files-reached`, `unreadable-directory`, `invalid-config`, `syntax-error`, `no-source-files`, `analysis-failed` (uma etapa falhou em um arquivo, por exemplo por aninhamento extremo; o resto da análise continua).
 
 ## Exemplo
 

@@ -14,6 +14,7 @@ Teia ${TEIA_VERSION} — mapa navegável de projetos JavaScript/TypeScript
 
 Uso:
   teia <caminho>                  analisa o projeto e abre o mapa no navegador
+                                  (equivale a "teia open <caminho>")
   teia analyze <caminho>          só analisa e salva o grafo em JSON
   teia serve <grafo.json>         abre o mapa de um JSON salvo anteriormente
   teia validate <grafo.json>      confere se um JSON exportado é válido
@@ -101,7 +102,8 @@ async function serve(graph: TeiaGraph, port: number, open: boolean): Promise<voi
   }
   const server = await startServer({ graph, webRoot: root, port });
   process.stderr.write(
-    `${bold('Teia')} pronto em ${cyan(server.url)}  ${dim('(Ctrl+C para encerrar)')}\n`,
+    `${bold('Teia')} pronto em ${cyan(server.url)}  ${dim('(Ctrl+C para encerrar)')}\n` +
+      dim('  O endereço inclui um token de acesso válido só nesta execução.\n'),
   );
   if (open) openBrowser(server.url);
   const stop = () => {
@@ -140,12 +142,24 @@ async function main(argv: string[]): Promise<void> {
 
   const commands = ['open', 'analyze', 'serve', 'validate'];
   const [first, ...rest] = positionals;
-  const command = commands.includes(first!) ? first! : 'open';
-  const target = commands.includes(first!) ? rest[0] : first;
-  if (!target) fail(`informe o caminho para "${command}".`);
+  // "teia analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho
+  const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
+  const command = isCommand ? first! : 'open';
+  const target = isCommand ? rest[0] : first;
+  if (!target) fail(`informe o caminho para "${command}". Exemplo: teia ${command} ./meu-projeto`);
 
+  const servesUi = command === 'open' || command === 'serve';
+  if (values.port !== undefined && (!servesUi || !/^\d+$/.test(values.port)))
+    fail(
+      servesUi
+        ? '--port precisa ser um número entre 0 e 65535.'
+        : `--port não se aplica a "${command}".`,
+    );
   const port = values.port !== undefined ? Number(values.port) : 4321;
-  if (!Number.isInteger(port) || port < 0 || port > 65535) fail('porta inválida.');
+  if (port > 65535) fail('--port precisa ser um número entre 0 e 65535.');
+  if (values.stdout && command !== 'analyze') fail('--stdout só funciona com "teia analyze".');
+  if (values.out && command !== 'analyze' && command !== 'open')
+    fail(`--out não se aplica a "${command}".`);
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1))
     fail('--max-files precisa ser um inteiro positivo.');
@@ -179,6 +193,11 @@ async function main(argv: string[]): Promise<void> {
       fail((err as Error).message);
     }
     printSummary(graph);
+    if (!fs.existsSync(graph.project.root)) {
+      process.stderr.write(
+        `${yellow('aviso:')} a pasta analisada (${graph.project.root}) não existe nesta máquina; o código-fonte não poderá ser exibido.\n`,
+      );
+    }
     return serve(graph, port, !values['no-open']);
   }
 

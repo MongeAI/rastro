@@ -267,21 +267,26 @@ describe('API Express (express-api)', () => {
     const routes = g.nodes.filter((n) => n.kind === 'route').map((n) => n.name);
     expect(routes).toEqual(['DELETE /users/:id', 'GET /users', 'GET /users/:id', 'POST /users']);
     expect(
-      edge(g, 'calls', 'route:src/server.js#GET /users', 'fn:src/handlers/users.js#listUsers'),
+      edge(g, 'calls', 'route:src/server.js#app GET /users', 'fn:src/handlers/users.js#listUsers'),
     ).toMatchObject({
       discovery: 'framework-rule',
       meta: { callKind: 'route-handler' },
     });
     // handler inline: chamadas dentro dele pertencem à rota
     expect(
-      edge(g, 'calls', 'route:src/server.js#POST /users', 'fn:src/handlers/users.js#createUser'),
+      edge(
+        g,
+        'calls',
+        'route:src/server.js#app POST /users',
+        'fn:src/handlers/users.js#createUser',
+      ),
     ).toBeDefined();
     // handler que não existe
     expect(
       edge(
         g,
         'calls',
-        'route:src/server.js#DELETE /users/:id',
+        'route:src/server.js#app DELETE /users/:id',
         'unresolved:src/server.js#call:removeUser',
       )?.resolution,
     ).toBe('unresolved');
@@ -370,5 +375,208 @@ describe('componentes React (js-mixed/src/esm/counter.jsx)', () => {
     );
     expect(unresolvedHere).toEqual([]);
     expect(g.stats.localCalls).toBeGreaterThanOrEqual(1); // label(count)
+  });
+});
+
+/** Cria um projeto temporário com os arquivos indicados. */
+function makeProject(files: Record<string, string>): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teia-case-'));
+  for (const [rel, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), content);
+  }
+  return root;
+}
+
+describe('regressões da revisão de código', () => {
+  it('Express: não inventa rotas em clientes HTTP nem em objetos comuns', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5","axios":"1"}}',
+      'server.js':
+        "const express = require('express');\nconst app = express();\napp.get('/ok', (req, res) => res.end());",
+      'client/api.js':
+        "import axios from 'axios';\nconst api = axios.create();\nexport const load = () => api.get('/users', { params: {} });",
+      'fake.js': "const router = { post() {} };\nrouter.post('/login', { user: 1 });",
+    });
+    const g = await analyzeProject(root);
+    expect(g.nodes.filter((n) => n.kind === 'route').map((n) => n.id)).toEqual([
+      'route:server.js#app GET /ok',
+    ]);
+  });
+
+  it('Express: rotas iguais em roteradores diferentes não se misturam', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'server.js': [
+        "const express = require('express');",
+        'const app = express();',
+        'const admin = express.Router();',
+        'function listUsers() {}',
+        'function listAdmins() {}',
+        "app.get('/list', listUsers);",
+        "admin.get('/list', listAdmins);",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(
+      edge(g, 'calls', 'route:server.js#app GET /list', 'fn:server.js#listUsers'),
+    ).toBeDefined();
+    expect(
+      edge(g, 'calls', 'route:server.js#admin GET /list', 'fn:server.js#listAdmins'),
+    ).toBeDefined();
+    expect(
+      edge(g, 'calls', 'route:server.js#app GET /list', 'fn:server.js#listAdmins'),
+    ).toBeUndefined();
+  });
+
+  it('um arquivo patológico vira aviso, sem derrubar a análise', async () => {
+    const deep = `export const s = ${Array.from({ length: 8000 }, (_, i) => `'p${i}'`).join(' + ')};\n`;
+    const root = makeProject({ 'deep.ts': deep, 'ok.ts': 'export function ok() { return 1; }' });
+    const g = await analyzeProject(root);
+    expect(node(g, 'fn:ok.ts#ok')).toBeDefined();
+    expect(validateGraph(g).valid).toBe(true);
+  });
+
+  it('só segue aliases de const (let/var podem ser reatribuídos)', async () => {
+    const root = makeProject({
+      'a.ts': [
+        'export function foo() {}',
+        'export function bar() {}',
+        'export function run() {',
+        '  let h = foo;',
+        '  h = bar;',
+        '  h();',
+        '  const k = foo;',
+        '  k();',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const calls = g.edges.filter((e) => e.kind === 'calls' && e.source === 'fn:a.ts#run');
+    expect(calls.map((e) => [e.target, e.resolution])).toEqual([
+      ['fn:a.ts#foo', 'resolved'],
+      ['unresolved:a.ts#call:h', 'unresolved'],
+    ]);
+  });
+
+  it('evidência de export * aponta para o export certo', async () => {
+    const root = makeProject({
+      'a.ts': 'export function foo() {}',
+      'b.ts': 'export function baz() {}',
+      'index.ts': "export * from './a';\nexport * from './b';",
+    });
+    const g = await analyzeProject(root);
+    expect(edge(g, 'exports', 'file:index.ts', 'fn:b.ts#baz')?.evidence[0]?.line).toBe(2);
+    expect(edge(g, 'exports', 'file:index.ts', 'fn:a.ts#foo')?.evidence[0]?.line).toBe(1);
+  });
+
+  it('pasta do projeto com nome de módulo nativo não vira pacote do Node', async () => {
+    const root = makeProject({
+      'tsconfig.json':
+        '{"compilerOptions":{"baseUrl":"src","moduleResolution":"Bundler","module":"ESNext"}}',
+      'src/constants/index.ts': 'export function k() {}',
+      'src/main.ts': "import { k } from 'constants';\nimport fs from 'node:fs';\nk();",
+    });
+    const g = await analyzeProject(root);
+    expect(edge(g, 'imports', 'file:src/main.ts', 'file:src/constants/index.ts')).toBeDefined();
+    expect(edge(g, 'imports', 'file:src/main.ts', 'pkg:node:fs')).toBeDefined();
+  });
+
+  it('JSX em .js, export default memo(...) e só funções de verdade viram nós', async () => {
+    const root = makeProject({
+      'App.js': [
+        "import { memo } from 'react';",
+        'export default memo(function Card() { return <div />; });',
+        'export function App() { return <Inner />; }',
+        'const Inner = memo(() => <span />);',
+        'function helper(x) { return x; }',
+        'export const doubled = [1, 2].map((x) => helper(x));',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(node(g, 'fn:App.js#Card')?.meta?.defaultExport).toBe(true);
+    expect(edge(g, 'calls', 'fn:App.js#App', 'fn:App.js#Inner')?.meta?.callKind).toBe('jsx');
+    expect(node(g, 'fn:App.js#doubled')).toBeUndefined();
+    // a chamada no topo do arquivo é atribuída ao arquivo, não a uma "função" inventada
+    expect(edge(g, 'calls', 'file:App.js', 'fn:App.js#helper')).toBeDefined();
+  });
+
+  it('chamada para arquivo excluído da análise é "não analisado", não "externa"', async () => {
+    const root = makeProject({
+      '.gitignore': 'generated/\n',
+      'generated/api.ts': 'export function gen() {}',
+      'main.ts': "import { gen } from './generated/api';\nexport function run() { gen(); }",
+    });
+    const g = await analyzeProject(root);
+    const target = g.edges.find((e) => e.kind === 'calls' && e.source === 'fn:main.ts#run')?.target;
+    expect(node(g, target!)?.meta?.reason).toBe('not-analyzed');
+  });
+
+  it('lê paths de tsconfig com references (padrão do Vite)', async () => {
+    const root = makeProject({
+      'tsconfig.json': '{"files":[],"references":[{"path":"./tsconfig.app.json"}]}',
+      'tsconfig.app.json':
+        '{"compilerOptions":{"baseUrl":".","paths":{"~/*":["src/*"]},"jsx":"preserve","moduleResolution":"Bundler","module":"ESNext"},"include":["src"]}',
+      'src/components/Button.tsx': 'export function Button() { return <button />; }',
+      'src/main.tsx':
+        "import { Button } from '~/components/Button';\nexport function Main() { return <Button />; }",
+    });
+    const g = await analyzeProject(root);
+    expect(edge(g, 'imports', 'file:src/main.tsx', 'file:src/components/Button.tsx')).toBeDefined();
+    expect(
+      edge(g, 'calls', 'fn:src/main.tsx#Main', 'fn:src/components/Button.tsx#Button'),
+    ).toBeDefined();
+    expect(g.project.tsconfig).toContain('tsconfig.app.json');
+  });
+
+  it('pacotes do workspace ligados por node_modules apontam para o código-fonte', async () => {
+    const root = makeProject({
+      'package.json': '{"workspaces":["packages/*"]}',
+      'packages/util/package.json':
+        '{"name":"@demo/util","types":"dist/index.d.ts","main":"dist/index.js"}',
+      'packages/util/src/index.ts': 'export function hello() {}',
+      'packages/util/dist/index.d.ts': 'export declare function hello(): void;',
+      'packages/app/package.json': '{"name":"app","dependencies":{"@demo/util":"*"}}',
+      'packages/app/src/main.ts':
+        "import { hello } from '@demo/util';\nexport function run() { hello(); }",
+    });
+    fs.mkdirSync(path.join(root, 'node_modules/@demo'), { recursive: true });
+    fs.symlinkSync(path.join(root, 'packages/util'), path.join(root, 'node_modules/@demo/util'));
+    const g = await analyzeProject(root);
+    expect(
+      edge(g, 'imports', 'file:packages/app/src/main.ts', 'file:packages/util/src/index.ts')?.meta
+        ?.viaDeclaration,
+    ).toBe(true);
+    expect(
+      edge(g, 'calls', 'fn:packages/app/src/main.ts#run', 'fn:packages/util/src/index.ts#hello'),
+    ).toBeDefined();
+    expect(g.nodes.some((n) => n.id === 'pkg:@demo/util')).toBe(false);
+  });
+
+  it('dependências declaradas no package.json do subpacote contam como declaradas', async () => {
+    const root = makeProject({
+      'package.json': '{"workspaces":["packages/*"]}',
+      'packages/app/package.json': '{"dependencies":{"left-pad":"1"}}',
+      'packages/app/main.ts': "import pad from 'left-pad';\nexport const p = pad;",
+    });
+    const g = await analyzeProject(root);
+    expect(node(g, 'pkg:left-pad')?.meta?.declared).toBe(true);
+  });
+
+  it('ciclos formados só por imports de tipo não contam', async () => {
+    const root = makeProject({
+      'a.ts':
+        "import type { B } from './b';\nexport interface A { b?: B }\nexport function fa() {}",
+      'b.ts': "import { fa } from './a';\nexport interface B { x: number }\nfa();",
+    });
+    const g = await analyzeProject(root);
+    expect(g.stats.importCycles).toEqual([]);
+  });
+
+  it('numera linhas como o TypeScript, mesmo com separadores Unicode', async () => {
+    const root = makeProject({ 'a.ts': "const s = 'x\u2028y';\nexport function f() {}\n" });
+    const g = await analyzeProject(root);
+    const f = node(g, 'fn:a.ts#f')!;
+    expect(f.location?.startLine).toBeLessThanOrEqual(node(g, 'file:a.ts')!.meta!.lines!);
   });
 });

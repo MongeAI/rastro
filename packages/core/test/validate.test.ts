@@ -89,6 +89,28 @@ describe('validateGraph', () => {
   });
 });
 
+describe('validateGraph — integridade extra', () => {
+  it('rejeita ciclos na hierarquia (parent), que travariam quem percorre ancestrais', () => {
+    const g = minimalGraph();
+    g.nodes[0]!.parent = g.nodes[1]!.id; // arquivo dentro da função que está dentro do arquivo
+    expect(validateGraph(g).errors.join()).toContain('ciclo na hierarquia');
+  });
+
+  it('rejeita colunas inválidas, meta que não é objeto e stats incompletas', () => {
+    const g = minimalGraph();
+    (g.nodes[1]!.location as unknown as { startColumn: unknown }).startColumn = 'zz';
+    (g.edges[0]!.evidence[0] as unknown as { column: number }).column = -5;
+    (g.nodes[0] as unknown as { meta: unknown }).meta = 'x';
+    const errors = validateGraph(g).errors.join('\n');
+    expect(errors).toContain('location inválida');
+    expect(errors).toContain('evidence contém item inválido');
+    expect(errors).toContain('meta deve ser um objeto');
+    const noStats = minimalGraph();
+    (noStats as unknown as { stats: Record<string, unknown> }).stats.nodesByKind = undefined;
+    expect(validateGraph(noStats).errors.join()).toContain('stats.nodesByKind');
+  });
+});
+
 describe('parseGraph', () => {
   it('lê JSON válido', () => {
     expect(parseGraph(JSON.stringify(minimalGraph())).project.name).toBe('demo');

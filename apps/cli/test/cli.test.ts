@@ -14,11 +14,13 @@ const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const fixture = path.join(repo, 'fixtures', 'ts-basic');
 
 /** GET cru, permitindo forjar o cabeçalho Host. */
+let cookie = '';
+
 function get(port: number, urlPath: string, host = `127.0.0.1:${port}`, method = 'GET') {
   return new Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }>(
     (resolve, reject) => {
       const req = http.request(
-        { host: '127.0.0.1', port, path: urlPath, method, headers: { Host: host } },
+        { host: '127.0.0.1', port, path: urlPath, method, headers: { Host: host, Cookie: cookie } },
         (res) => {
           let body = '';
           res.on('data', (c) => (body += c));
@@ -65,8 +67,23 @@ describe('servidor local', () => {
   });
   afterAll(() => server.close());
 
-  it('escuta apenas em 127.0.0.1', () => {
-    expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+  it('escuta apenas em 127.0.0.1 e gera um token por execução', () => {
+    expect(server.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    expect(server.token).toMatch(/^[\w-]{32}$/);
+    expect(server.url).toBe(`${server.baseUrl}?token=${server.token}`);
+  });
+
+  it('exige o token para a API e o troca por um cookie HttpOnly', async () => {
+    cookie = '';
+    expect((await get(server.port, '/api/graph')).status).toBe(401);
+    expect((await get(server.port, '/?token=errado')).status).toBe(401);
+    const login = await get(server.port, `/?token=${server.token}`);
+    expect(login.status).toBe(302);
+    expect(login.headers.location).toBe('/');
+    const setCookie = String(login.headers['set-cookie']);
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Strict');
+    cookie = setCookie.split(';')[0]!;
   });
 
   it('entrega o grafo e a interface', async () => {
@@ -79,7 +96,9 @@ describe('servidor local', () => {
   });
 
   it('recusa Host desconhecido (DNS rebinding) e métodos de escrita', async () => {
-    expect((await get(server.port, '/api/graph', 'evil.example:80')).status).toBe(403);
+    const evil = await get(server.port, '/api/graph', 'evil.example:80');
+    expect(evil.status).toBe(403);
+    expect(evil.body).toContain(`127.0.0.1:${server.port}`);
     expect((await get(server.port, '/api/graph', undefined, 'POST')).status).toBe(405);
   });
 
@@ -100,6 +119,13 @@ describe('servidor local', () => {
 });
 
 describe('readSource', () => {
+  it('não confia em caminhos absolutos ou extensões estranhas vindos de um JSON adulterado', () => {
+    const evil = new Set(['/etc/passwd', 'a/../../x.ts', 'package.json']);
+    expect(readSource(fixture, '/etc/passwd', evil).status).toBe(403);
+    expect(readSource(fixture, 'a/../../x.ts', evil).status).toBe(403);
+    expect(readSource(fixture, 'package.json', evil).status).toBe(403);
+  });
+
   it('bloqueia caminhos fora da raiz mesmo se estiverem na lista', () => {
     const res = readSource(fixture, '../outside.ts', new Set(['../outside.ts']));
     expect(res.status).toBe(403);

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { highlightLine } from '../lib/highlight';
+import { useEffect, useRef, useState } from 'react';
+import { highlightLines } from '../lib/highlight';
 
 interface Props {
   file: string;
@@ -7,6 +7,8 @@ interface Props {
   endLine: number;
   /** A interface foi aberta pela CLI (há servidor para ler o código). */
   available: boolean;
+  /** Destaca as linhas do intervalo (desligado para arquivos inteiros). */
+  highlightRange?: boolean;
 }
 
 type State =
@@ -32,9 +34,15 @@ function fetchSource(file: string): Promise<string[]> {
 const CONTEXT = 3;
 const MAX_LINES = 80;
 
-export function SourceView({ file, startLine, endLine, available }: Props) {
+export function SourceView({ file, startLine, endLine, available, highlightRange = true }: Props) {
   const [state, setState] = useState<State>({ status: 'loading' });
   const [showAll, setShowAll] = useState(false);
+  const firstHighlight = useRef<HTMLDivElement>(null);
+
+  // ao abrir o arquivo inteiro, mantém o trecho selecionado à vista
+  useEffect(() => {
+    if (showAll) firstHighlight.current?.scrollIntoView({ block: 'center' });
+  }, [showAll]);
 
   useEffect(() => {
     setShowAll(false);
@@ -65,7 +73,8 @@ export function SourceView({ file, startLine, endLine, available }: Props) {
   const total = state.lines.length;
   const from = showAll ? 1 : Math.max(1, startLine - CONTEXT);
   const to = showAll ? total : Math.min(total, endLine + CONTEXT, from + MAX_LINES - 1);
-  const truncated = !showAll && (to < Math.min(total, endLine + CONTEXT) || from > 1 || to < total);
+  const truncated = !showAll && (from > 1 || to < total);
+  const tokens = highlightLines(state.lines.slice(0, to));
   const width = String(to).length;
 
   return (
@@ -73,12 +82,16 @@ export function SourceView({ file, startLine, endLine, available }: Props) {
       <pre className="source" tabIndex={0} aria-label={`Código de ${file}, linhas ${from} a ${to}`}>
         {state.lines.slice(from - 1, to).map((line, i) => {
           const n = from + i;
-          const inRange = n >= startLine && n <= endLine;
+          const inRange = highlightRange && n >= startLine && n <= endLine;
           return (
-            <div key={n} className={`src-line${inRange ? ' hl' : ''}`}>
+            <div
+              key={n}
+              className={`src-line${inRange ? ' hl' : ''}`}
+              ref={n === startLine && inRange ? firstHighlight : undefined}
+            >
               <span className="src-num">{String(n).padStart(width, ' ')}</span>
               <code>
-                {highlightLine(line).map((t, j) => (
+                {(tokens[n - 1] ?? []).map((t, j) => (
                   <span key={j} className={t.cls ? `t-${t.cls}` : undefined}>
                     {t.text}
                   </span>

@@ -55,6 +55,35 @@ export function loadCompilerOptions(root: string): LoadedCompilerOptions {
     const host: ts.ParseConfigHost = { ...ts.sys, readDirectory: () => [] };
     const parsed = ts.parseJsonConfigFileContent(read.config, host, root, undefined, file);
     const options: ts.CompilerOptions = { ...parsed.options };
+    // tsconfig "solução" (padrão do Vite): `files: []` + `references` para tsconfig.app.json etc.
+    // As opções de resolução (paths, baseUrl, jsx) ficam nos arquivos referenciados.
+    const referenced: string[] = [];
+    for (const ref of parsed.projectReferences ?? []) {
+      const refFile = ts.resolveProjectReferencePath(ref);
+      if (!refFile.startsWith(`${root}${path.sep}`) && !refFile.startsWith(`${root}/`)) continue;
+      if (!fs.existsSync(refFile) || fs.lstatSync(refFile).isSymbolicLink()) continue;
+      const refRead = ts.readConfigFile(refFile, ts.sys.readFile);
+      if (refRead.error) continue;
+      const refParsed = ts.parseJsonConfigFileContent(
+        refRead.config,
+        host,
+        path.dirname(refFile),
+        undefined,
+        refFile,
+      );
+      const { paths, baseUrl, pathsBasePath, jsx, moduleResolution, module, rootDirs } =
+        refParsed.options as ts.CompilerOptions & { pathsBasePath?: string };
+      if (paths) {
+        options.paths = { ...paths, ...options.paths };
+        (options as { pathsBasePath?: string }).pathsBasePath ??= pathsBasePath;
+        options.baseUrl ??= baseUrl;
+      }
+      options.jsx ??= jsx;
+      options.moduleResolution ??= moduleResolution;
+      options.module ??= module;
+      options.rootDirs ??= rootDirs;
+      referenced.push(path.relative(root, refFile));
+    }
     // projetos sem moduleResolution moderna resolvem pior extensões e index; usamos Bundler
     const mr = options.moduleResolution;
     if (mr === undefined || mr === ts.ModuleResolutionKind.Classic) {
@@ -62,7 +91,8 @@ export function loadCompilerOptions(root: string): LoadedCompilerOptions {
       if (options.module === undefined || options.module === ts.ModuleKind.CommonJS)
         options.module = ts.ModuleKind.ESNext;
     }
-    return { options: { ...defaults, ...options, ...enforced }, configFile: name, diagnostics };
+    const configFile = referenced.length ? `${name} (+ ${referenced.join(', ')})` : name;
+    return { options: { ...defaults, ...options, ...enforced }, configFile, diagnostics };
   }
   return { options: { ...defaults, ...enforced }, diagnostics };
 }
@@ -90,39 +120,53 @@ export type ResolvedTarget =
 /** Resolve especificadores de módulo usando o algoritmo do próprio compilador TypeScript. */
 export class ModuleResolver {
   private readonly cache: ts.ModuleResolutionCache;
-  private readonly declared: Set<string>;
+  private readonly declaredByDir = new Map<string, Set<string>>();
 
   constructor(
     private readonly root: string,
     private readonly options: ts.CompilerOptions,
   ) {
     this.cache = ts.createModuleResolutionCache(root, (f) => f, options);
-    this.declared = readDeclaredDependencies(root);
   }
 
   resolve(specifier: string, fromAbsolute: string): ResolvedTarget {
-    if (isBuiltinModule(specifier)) {
-      const name = specifier.startsWith('node:') ? specifier : `node:${packageNameOf(specifier)}`;
-      return { kind: 'package', name, builtin: true, declared: true };
-    }
+    const builtin = (): ResolvedTarget => ({
+      kind: 'package',
+      name: specifier.startsWith('node:') ? specifier : `node:${packageNameOf(specifier)}`,
+      builtin: true,
+      declared: true,
+    });
+    // `node:fs` é sempre nativo; já `constants`/`events` podem ser pastas do projeto (baseUrl)
+    if (specifier.startsWith('node:')) return builtin();
     const result = ts.resolveModuleName(specifier, fromAbsolute, this.options, ts.sys, this.cache);
     const resolved = result.resolvedModule;
     if (resolved) {
       const file = toPosix(resolved.resolvedFileName);
-      const insideRoot = file === this.root || file.startsWith(`${this.root}/`);
-      if (resolved.isExternalLibraryImport || file.includes('/node_modules/')) {
+      const insideRoot = file.startsWith(`${this.root}/`);
+      const inNodeModules = file.includes('/node_modules/');
+      if (isBuiltinModule(specifier) && (!insideRoot || inNodeModules)) return builtin();
+      // pacotes do workspace chegam via link em node_modules (isExternalLibraryImport = true),
+      // mas o caminho real fica dentro do projeto: decidimos pelo caminho real
+      if (inNodeModules || (resolved.isExternalLibraryImport && !insideRoot)) {
         const name = packageNameOf(specifier);
-        return { kind: 'package', name, builtin: false, declared: this.declared.has(name) };
+        return {
+          kind: 'package',
+          name,
+          builtin: false,
+          declared: this.isDeclared(name, fromAbsolute),
+        };
       }
       if (insideRoot) return { kind: 'file', absolute: file };
+      // fora da raiz analisada: identificado pelo caminho, para não juntar destinos diferentes
       return {
         kind: 'package',
-        name: specifier,
+        name: toPosix(path.relative(this.root, file)),
         builtin: false,
         declared: false,
         outsideRoot: true,
       };
     }
+    if (isBuiltinModule(specifier)) return builtin();
     if (isRelativeOrAbsolute(specifier)) {
       // arquivos que não são código (css, svg, imagens...) existem, mas não são analisados
       const candidate = path.resolve(path.dirname(fromAbsolute), specifier);
@@ -137,8 +181,21 @@ export class ModuleResolver {
       return { kind: 'unresolved', reason: 'module-not-found' };
     }
     const name = packageNameOf(specifier);
-    if (this.declared.has(name)) return { kind: 'package', name, builtin: false, declared: true };
+    if (this.isDeclared(name, fromAbsolute))
+      return { kind: 'package', name, builtin: false, declared: true };
     return { kind: 'unresolved', reason: 'undeclared-package' };
+  }
+
+  /** O pacote está declarado no package.json mais próximo do arquivo (ou em algum acima, até a raiz)? */
+  private isDeclared(name: string, fromAbsolute: string): boolean {
+    for (let dir = path.dirname(fromAbsolute); ; dir = path.dirname(dir)) {
+      const posix = toPosix(dir);
+      if (posix !== this.root && !posix.startsWith(`${this.root}/`)) return false;
+      let deps = this.declaredByDir.get(posix);
+      if (!deps) this.declaredByDir.set(posix, (deps = readDeclaredDependencies(dir)));
+      if (deps.has(name)) return true;
+      if (posix === this.root || path.dirname(dir) === dir) return false;
+    }
   }
 }
 

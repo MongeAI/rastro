@@ -92,12 +92,12 @@
         "file": "src/cycle/a.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 6,
+        "endLine": 5,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 6,
+        "lines": 5,
         "exportNames": [
           "ping"
         ],
@@ -114,12 +114,12 @@
         "file": "src/cycle/b.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 6,
+        "endLine": 5,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 6,
+        "lines": 5,
         "exportNames": [
           "pong"
         ],
@@ -136,12 +136,12 @@
         "file": "src/index.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 29,
+        "endLine": 28,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 29,
+        "lines": 28,
         "exportNames": [
           "main"
         ]
@@ -157,12 +157,12 @@
         "file": "src/lib/index.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 3,
+        "endLine": 2,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 3,
+        "lines": 2,
         "exportNames": [
           "add",
           "slugify"
@@ -179,12 +179,12 @@
         "file": "src/lib/strings.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 8,
+        "endLine": 7,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 8,
+        "lines": 7,
         "exportNames": [
           "slugify"
         ]
@@ -200,12 +200,12 @@
         "file": "src/math.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 15,
+        "endLine": 14,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 15,
+        "lines": 14,
         "exportNames": [
           "average",
           "double",
@@ -223,12 +223,12 @@
         "file": "src/models/user.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 19,
+        "endLine": 18,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 19,
+        "lines": 18,
         "exportNames": [
           "BaseModel",
           "User"
@@ -245,12 +245,12 @@
         "file": "src/services/user-service.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 35,
+        "endLine": 34,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 35,
+        "lines": 34,
         "exportNames": [
           "UserService"
         ]
@@ -266,12 +266,12 @@
         "file": "src/side-effect.ts",
         "startLine": 1,
         "startColumn": 1,
-        "endLine": 5,
+        "endLine": 4,
         "endColumn": 1
       },
       "meta": {
         "language": "ts",
-        "lines": 5
+        "lines": 4
       }
     },
     {
@@ -1906,9 +1906,9 @@
       "evidence": [
         {
           "file": "src/lib/index.ts",
-          "line": 1,
+          "line": 2,
           "column": 1,
-          "snippet": "export * from './strings';"
+          "snippet": "export { sum as add } from '../math';"
         }
       ],
       "meta": {

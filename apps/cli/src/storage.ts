@@ -37,8 +37,20 @@ export function saveGraph(graph: TeiaGraph, file: string): string {
   const target = path.resolve(file);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(graph, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(tmp, target);
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(graph, null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    const code = (err as NodeJS.ErrnoException).code;
+    const why =
+      code === 'EISDIR'
+        ? 'o destino é uma pasta; informe um nome de arquivo, ex.: -o grafo.json'
+        : code === 'EACCES' || code === 'EPERM'
+          ? 'sem permissão para gravar nesse local'
+          : (err as Error).message;
+    throw new Error(`Não foi possível salvar o grafo em ${target}: ${why}`, { cause: err });
+  }
   return target;
 }
 
