@@ -99,7 +99,7 @@ describe('armazenamento', () => {
   it('recusa JSON inválido ao carregar', () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-bad-')), 'bad.json');
     fs.writeFileSync(file, '{"schemaVersion":"0.1.0","nodes":[]}');
-    expect(() => loadGraph(file)).toThrow(/Grafo inválido/);
+    expect(() => loadGraph(file)).toThrow(/grafo inválido/);
   });
 });
 

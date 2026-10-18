@@ -17,6 +17,7 @@ import {
   type RastroGraph,
 } from '@rastro/core';
 import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
+import { argsErrorMessage } from './args.js';
 import { openBrowser } from './browser.js';
 import { formatDiff } from './compare.js';
 import {
@@ -33,11 +34,17 @@ import {
   UsageError,
   writeExport,
 } from './export.js';
-import { collectChanges, GitError } from './git.js';
+import { checkGit, collectChanges, GitError } from './git.js';
 import { getLang, langArg, parseLang, setLang, t } from './i18n.js';
 import { startServer, type RunningServer } from './server.js';
 import { watchProject } from './watch.js';
-import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
+import {
+  checkGraphTarget,
+  defaultGraphPath,
+  loadGraph,
+  readGraphJson,
+  saveGraph,
+} from './storage.js';
 import { bold, cyan, dim, fail, red, safeText, tildify, yellow } from './term.js';
 
 /** Mostra uma etapa da análise no idioma da CLI. */
@@ -124,6 +131,16 @@ async function serve(graph: RastroGraph, port: number, open: boolean): Promise<R
   return server;
 }
 
+/** Endereço http:// ou https:// válido (base dos links do `impact --link`). */
+function isWebUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   // o idioma vem antes de tudo: até os erros de opções saem nele
   const langValue = langArg(argv);
@@ -165,7 +182,7 @@ async function main(argv: string[]): Promise<void> {
       },
     });
   } catch (err) {
-    fail(`${(err as Error).message}\n${u.seeHelp}`);
+    fail(`${argsErrorMessage(err)}\n${u.seeHelp}`);
   }
   const { values, positionals } = parsed;
   if (values.version) return void process.stdout.write(`${RASTRO_VERSION}\n`);
@@ -178,7 +195,14 @@ async function main(argv: string[]): Promise<void> {
   const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
   const command = isCommand ? first! : 'open';
   const target = isCommand ? rest[0] : first;
-  if (!target) fail(u.needPath(command));
+  if (!target)
+    fail(
+      command === 'compare'
+        ? u.compareNeedsTwo
+        : command === 'serve' || command === 'validate'
+          ? u.needGraph(command)
+          : u.needPath(command),
+    );
 
   const servesUi = command === 'open' || command === 'serve';
   if (values.port !== undefined && (!servesUi || !/^\d+$/.test(values.port)))
@@ -186,6 +210,7 @@ async function main(argv: string[]): Promise<void> {
   const port = values.port !== undefined ? Number(values.port) : 4321;
   if (port > 65535) fail(u.portRange);
   if (values.stdout && command !== 'analyze') fail(u.onlyWith('--stdout', 'analyze'));
+  if (values.stdout && values.out !== undefined) fail(u.notTogether('--stdout', '--out'));
   if (
     values.out &&
     command !== 'analyze' &&
@@ -206,6 +231,8 @@ async function main(argv: string[]): Promise<void> {
     const impactOnly = (['tests', 'link'] as const).find((k) => values[k] !== undefined);
     if (impactOnly) fail(u.onlyWith(`--${impactOnly}`, 'impact'));
   }
+  // os links vão para um comentário de PR: só endereços web (nada de javascript: ou file:)
+  if (values.link !== undefined && !isWebUrl(values.link)) fail(t().impact.badLink(values.link));
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1)) fail(u.maxFiles);
   // opções que nunca teriam efeito falham, em vez de serem ignoradas em silêncio
@@ -225,6 +252,15 @@ async function main(argv: string[]): Promise<void> {
   ).find(([k]) => values[k] !== undefined)?.[1];
   if (analysisFlag && (command === 'validate' || command === 'compare' || command === 'serve'))
     fail(u.needsFolder(analysisFlag, command));
+  if (values.out !== undefined) {
+    try {
+      if (command === 'analyze' || command === 'open') checkGraphTarget(values.out);
+      else if (fs.statSync(values.out, { throwIfNoEntry: false })?.isDirectory())
+        fail(t().export.writeFailed(path.resolve(values.out), t().export.isDir));
+    } catch (err) {
+      fail((err as Error).message);
+    }
+  }
   /** Como descobrir os arquivos do projeto (análise e modo ao vivo usam as mesmas regras). */
   const discover: DiscoverOptions = {
     ...(values.exclude ? { exclude: values.exclude } : {}),
@@ -235,13 +271,12 @@ async function main(argv: string[]): Promise<void> {
   if (command === 'validate') {
     let data: unknown;
     try {
-      data = JSON.parse(fs.readFileSync(path.resolve(target), 'utf8'));
+      data = readGraphJson(target);
     } catch (err) {
-      fail(t().validate.cannotRead((err as Error).message));
+      fail((err as Error).message);
     }
-    const result = validateGraph(data);
+    const result = validateGraph(data, { lang: getLang() });
     if (!result.valid) {
-      // os detalhes vêm do validador de @rastro/core (em português, como na interface)
       process.stderr.write(
         `${red(t().validate.invalid)}\n${result.errors.map((e) => `  • ${safeText(e)}`).join('\n')}\n`,
       );
@@ -253,6 +288,21 @@ async function main(argv: string[]): Promise<void> {
     );
     return;
   }
+
+  /**
+   * Confere o git antes da análise (que pode demorar) quando as mudanças são obrigatórias:
+   * pasta fora de um repositório ou referência desconhecida falham na hora.
+   */
+  const precheckGit = (root: string) => {
+    try {
+      checkGit(root, {
+        ...(values.since ? { since: values.since } : {}),
+        trustConfig: !!values['trust-git-config'],
+      });
+    } catch (err) {
+      fail(t().impact.gitFailed(safeText((err as Error).message)));
+    }
+  };
 
   /** Anexa as mudanças do git ao grafo quando `--changes`/`--since` foram pedidos. */
   const attachChanges = (graph: RastroGraph, root: string, warn: boolean) => {
@@ -311,6 +361,7 @@ async function main(argv: string[]): Promise<void> {
     const fromFolder = fs.statSync(source).isDirectory();
     if (!fromFolder && analysisFlag) fail(u.needsFolder(analysisFlag, command));
     if (fromFolder) {
+      if (values.changes || values.since) precheckGit(source);
       graph = await analyzeProject(source, { ...discover, onProgress: showProgress });
       attachChanges(graph, source, true);
     } else {
@@ -355,6 +406,7 @@ async function main(argv: string[]): Promise<void> {
     if (!fromFolder && analysisFlag) fail(u.needsFolder(analysisFlag, command));
     let graph: RastroGraph;
     if (fromFolder) {
+      precheckGit(source);
       // só o texto mostra o progresso: markdown, json e --tests costumam ir para arquivos e CI
       const progress = format === 'text' && !values.tests;
       graph = await analyzeProject(source, {
@@ -368,7 +420,7 @@ async function main(argv: string[]): Promise<void> {
           trustConfig: !!values['trust-git-config'],
         });
       } catch (err) {
-        fail(t().impact.gitFailed((err as Error).message));
+        fail(t().impact.gitFailed(safeText((err as Error).message)));
       }
     } else {
       try {
@@ -432,6 +484,8 @@ async function main(argv: string[]): Promise<void> {
   const root = path.resolve(target);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) fail(u.dirNotFound(root));
   const quiet = command === 'analyze' && values.stdout;
+  // analyze com --changes/--since falha sem as mudanças; ao abrir o mapa, só avisa (depois)
+  if (command === 'analyze' && (values.changes || values.since)) precheckGit(root);
 
   /**
    * Analisa o projeto (e as mudanças do git, se pedidas). No modo --watch, a sessão mantém o

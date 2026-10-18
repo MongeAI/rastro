@@ -82,9 +82,83 @@ function git(cwd: string, args: string[]): string {
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string };
     if (e.code === 'ENOENT') throw new GitError(t().git.notFound);
-    // a primeira linha do próprio git (no idioma do git)
-    throw new GitError((e.stderr ?? e.message).toString().trim().split('\n')[0] || t().git.failed);
+    // a primeira linha do próprio git (no idioma do git), sem o prefixo "fatal:"/"error:"
+    const first = (e.stderr ?? e.message)
+      .toString()
+      .trim()
+      .split('\n')[0]!
+      .replace(/^(fatal|error):\s*/i, '');
+    throw new GitError(first || t().git.failed);
   }
+}
+
+/** Se `dir` (ou uma pasta acima) tem um `.git`: distingue "não é repositório" de outros erros. */
+function insideRepo(dir: string): boolean {
+  if (process.env.GIT_DIR) return true;
+  for (let cur = path.resolve(dir); ; cur = path.dirname(cur)) {
+    if (fs.existsSync(path.join(cur, '.git'))) return true;
+    if (path.dirname(cur) === cur) return false;
+  }
+}
+
+interface GitBase {
+  top: string;
+  prefix: string;
+  base: string;
+  baseLabel: string;
+}
+
+/**
+ * Raiz do repositório e o commit base da comparação, com erros claros: pasta fora de um
+ * repositório, configuração arriscada, referência desconhecida. Só chamadas rápidas do git.
+ */
+function resolveBase(root: string, options: CollectOptions): GitBase {
+  let top: string;
+  try {
+    top = git(root, ['rev-parse', '--show-toplevel']).trim();
+  } catch (err) {
+    if (err instanceof GitError && err.message !== t().git.notFound && !insideRepo(root))
+      throw new GitError(t().git.notRepo(root));
+    throw err;
+  }
+  const prefix = git(root, ['rev-parse', '--show-prefix']).trim();
+
+  if (!options.trustConfig) {
+    const risky = riskyGitConfig(root);
+    if (risky.length) throw new GitError(t().git.riskyConfig(risky.join(', ')));
+  }
+
+  if (options.since) {
+    const since = options.since;
+    if (since.startsWith('-')) throw new GitError(t().git.badRef(since));
+    try {
+      git(root, ['rev-parse', '--verify', '--quiet', `${since}^{commit}`]);
+    } catch {
+      throw new GitError(t().git.unknownRef(since));
+    }
+    let base: string;
+    try {
+      base = git(root, ['merge-base', since, 'HEAD']).trim();
+    } catch {
+      throw new GitError(t().git.noMergeBase(since));
+    }
+    return { top, prefix, base, baseLabel: since };
+  }
+  let base: string;
+  try {
+    base = git(root, ['rev-parse', '--verify', '--quiet', 'HEAD']).trim();
+  } catch {
+    base = EMPTY_TREE; // repositório sem commits: tudo é novo
+  }
+  return { top, prefix, base, baseLabel: 'HEAD' };
+}
+
+/**
+ * Confere, antes da análise (que pode demorar), se as mudanças do git poderão ser lidas:
+ * repositório, configuração e referência de `since`. Lança `GitError` com a mensagem pronta.
+ */
+export function checkGit(root: string, options: CollectOptions = {}): void {
+  resolveBase(root, options);
 }
 
 /**
@@ -208,28 +282,7 @@ export interface CollectOptions {
  * ponto em que a branch saiu de `since`. Inclui arquivos novos não versionados. Só leitura.
  */
 export function collectChanges(root: string, options: CollectOptions = {}): ChangeSet {
-  const top = git(root, ['rev-parse', '--show-toplevel']).trim();
-  const prefix = git(root, ['rev-parse', '--show-prefix']).trim();
-
-  if (!options.trustConfig) {
-    const risky = riskyGitConfig(root);
-    if (risky.length) throw new GitError(t().git.riskyConfig(risky.join(', ')));
-  }
-
-  let base: string;
-  let baseLabel: string;
-  if (options.since) {
-    if (options.since.startsWith('-')) throw new GitError(t().git.badRef(options.since));
-    base = git(root, ['merge-base', options.since, 'HEAD']).trim();
-    baseLabel = options.since;
-  } else {
-    try {
-      base = git(root, ['rev-parse', '--verify', '--quiet', 'HEAD']).trim();
-    } catch {
-      base = EMPTY_TREE; // repositório sem commits: tudo é novo
-    }
-    baseLabel = 'HEAD';
-  }
+  const { top, prefix, base, baseLabel } = resolveBase(root, options);
 
   const scope = prefix ? prefix : '.';
   const diff = git(top, ['diff', ...DIFF_FLAGS, base, '--', scope]);
