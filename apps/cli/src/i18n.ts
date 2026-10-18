@@ -25,17 +25,17 @@ Rastro ${version} — siga o rastro do seu código (mapa navegável de projetos 
 
 Uso:
   rastro <caminho>                  analisa o projeto e abre o mapa no navegador
-                                  (equivale a "rastro open <caminho>")
+                                    (equivale a "rastro open <caminho>")
   rastro analyze <caminho>          só analisa e salva o grafo em JSON
   rastro serve <grafo.json>         abre o mapa de um JSON salvo anteriormente
   rastro validate <grafo.json>      confere se um JSON exportado é válido
   rastro export <caminho|grafo.json> --format <formato>
-                                  exporta o mapa: mermaid, dot, graphml, json ou html
-                                  (html = relatório navegável num arquivo só, offline)
+                                    exporta o mapa: mermaid, dot, graphml, json ou html
+                                    (html = relatório navegável num arquivo só, offline)
   rastro compare <a.json> <b.json>  o que entrou, saiu e mudou entre duas análises
   rastro impact <caminho|grafo.json>
-                                  o impacto das mudanças do git: o que mudou, quem pode ser
-                                  afetado, rotas e testes (texto, markdown ou json)
+                                    o impacto das mudanças do git: o que mudou, quem pode ser
+                                    afetado, rotas e testes (texto, markdown ou json)
 
 Opções:
   -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário); no export,
@@ -76,6 +76,14 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     badLang: (value: string) => `idioma desconhecido: "${value}". Use en ou pt.`,
     needPath: (command: string) =>
       `informe o caminho para "${command}". Exemplo: rastro ${command} ./meu-projeto`,
+    needGraph: (command: string) =>
+      `informe o arquivo JSON do grafo para "${command}". Exemplo: rastro ${command} grafo.json`,
+    unknownOption: (option: string) => `opção desconhecida: ${option}`,
+    needsValue: (flag: string) => `${flag} precisa de um valor`,
+    dashValue: (flag: string) =>
+      `${flag} precisa de um valor (para um valor que começa com "-", escreva ${flag}=<valor>)`,
+    takesNoValue: (flag: string) => `${flag} não aceita valor`,
+    unexpectedArg: (arg: string) => `argumento inesperado: ${arg}`,
     portRange: '--port precisa ser um número entre 0 e 65535.',
     notApplicable: (flag: string, command: string) => `${flag} não se aplica a "${command}".`,
     onlyWith: (flag: string, command: string) => `${flag} só funciona com "rastro ${command}".`,
@@ -156,6 +164,8 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
       'este grafo não tem mudanças do git. Gere com "rastro analyze <pasta> --changes" (ou --since <ref>), ou rode "rastro impact <pasta>".',
     gitFailed: (reason: string) => `não foi possível ler as mudanças do git: ${reason}`,
     linkNeedsMarkdown: '--link só vale com --format markdown.',
+    badLink: (value: string) =>
+      `--link precisa ser um endereço http:// ou https:// (recebido: "${value}").`,
     oddTest: (file: string) =>
       `arquivo de teste com caracteres de controle no nome ficou de fora: ${file}`,
   },
@@ -182,7 +192,6 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
       'No Linux, o limite vem de fs.inotify.max_user_watches e max_user_instances (sysctl); aumentá-los devolve o modo instantâneo.',
   },
   validate: {
-    cannotRead: (error: string) => `não foi possível ler o JSON: ${error}`,
     invalid: 'inválido',
     valid: (nodes: number, edges: number, schema: string) =>
       `válido — ${n(nodes, 'nó', 'nós')}, ${n(edges, 'relação', 'relações')} (schema ${schema})`,
@@ -194,6 +203,9 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
       `a configuração do git deste repositório (.git/config ou .git/config.worktree) define comandos que o git executaria (${keys}). ` +
       'Por segurança o Rastro não roda o git aqui. Se você confia no repositório, use --trust-git-config.',
     badRef: (ref: string) => `referência inválida: ${ref}`,
+    notRepo: (dir: string) => `a pasta não está num repositório git (${dir})`,
+    unknownRef: (ref: string) => `referência desconhecida: ${ref}`,
+    noMergeBase: (ref: string) => `${ref} e HEAD não têm um commit em comum`,
   },
   export: {
     needFormat: (formats: string) =>
@@ -211,17 +223,23 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     saved: (format: string) => `${format} salvo em`,
     htmlHint:
       'Abra no navegador: o mapa funciona offline, sem servidor (o código-fonte não vai junto).',
-    writeFailed: (target: string, why: string) => `Não foi possível gravar ${target}: ${why}`,
+    writeFailed: (target: string, why: string) => `não foi possível gravar ${target}: ${why}`,
     isDir: 'o destino é uma pasta; informe um nome de arquivo',
   },
   storage: {
     saveFailed: (target: string, why: string) =>
-      `Não foi possível salvar o grafo em ${target}: ${why}`,
+      `não foi possível salvar o grafo em ${target}: ${why}`,
     isDir: 'o destino é uma pasta; informe um nome de arquivo, ex.: -o grafo.json',
-    noPermission: 'sem permissão para gravar nesse local',
-    fileNotFound: (target: string) => `Arquivo não encontrado: ${target}`,
+    notRegular:
+      'o destino não é um arquivo comum (é um dispositivo, pipe ou socket); informe um nome de arquivo, ex.: -o grafo.json',
+    noPermission: (where: string) => `sem permissão para gravar em ${where}`,
+    fileNotFound: (target: string) => `arquivo não encontrado: ${target}`,
+    isFolder: (target: string, arg: string) =>
+      `${target} é uma pasta, e aqui é esperado o arquivo JSON de um grafo. ` +
+      `Para analisar a pasta, rode "rastro ${arg}" ou "rastro analyze ${arg}".`,
+    cannotRead: (target: string, error: string) => `não foi possível ler ${target}: ${error}`,
     invalidJson: (error: string) => `JSON inválido: ${error}`,
-    invalidGraph: (errors: readonly string[]) => `Grafo inválido:\n- ${errors.join('\n- ')}`,
+    invalidGraph: (errors: readonly string[]) => `grafo inválido:\n- ${errors.join('\n- ')}`,
   },
   compare: {
     title: 'Comparação',
@@ -278,7 +296,7 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
       'A interface web não foi encontrada. Rode "npm run build" na raiz do repositório do Rastro.',
     internalError: 'Erro interno do servidor do Rastro.',
     portFailed: (port: number, reason: string) =>
-      `Não foi possível abrir a interface a partir da porta ${port} (${reason}). ` +
+      `não foi possível abrir a interface a partir da porta ${port} (${reason}). ` +
       'Tente outra com --port, por exemplo --port 5050.',
     portsNoPermission: 'sem permissão para usar essas portas',
     portsBusy: 'todas estão ocupadas',
@@ -313,17 +331,17 @@ Rastro ${version} — follow the trail of your code (an explorable map of JS/TS 
 
 Usage:
   rastro <path>                     analyze the project and open the map in the browser
-                                  (same as "rastro open <path>")
+                                    (same as "rastro open <path>")
   rastro analyze <path>             only analyze and save the graph as JSON
   rastro serve <graph.json>         open the map of a previously saved JSON
   rastro validate <graph.json>      check that an exported JSON is valid
   rastro export <path|graph.json> --format <format>
-                                  export the map: mermaid, dot, graphml, json or html
-                                  (html = a single-file, offline, explorable report)
+                                    export the map: mermaid, dot, graphml, json or html
+                                    (html = a single-file, offline, explorable report)
   rastro compare <a.json> <b.json>  what was added, removed or changed between two analyses
   rastro impact <path|graph.json>
-                                  the impact of the git changes: what changed, what could be
-                                  affected, routes and tests (text, markdown or json)
+                                    the impact of the git changes: what changed, what could be
+                                    affected, routes and tests (text, markdown or json)
 
 Options:
   -o, --out <file>          where to save the JSON (default: user cache); with export,
@@ -379,6 +397,14 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     seeHelp: 'Run "rastro --help" to see the options.',
     badLang: (value) => `unknown language: "${value}". Use en or pt.`,
     needPath: (command) => `missing path for "${command}". Example: rastro ${command} ./my-project`,
+    needGraph: (command) =>
+      `missing graph JSON file for "${command}". Example: rastro ${command} graph.json`,
+    unknownOption: (option) => `unknown option: ${option}`,
+    needsValue: (flag) => `${flag} needs a value`,
+    dashValue: (flag) =>
+      `${flag} needs a value (for a value that starts with "-", write ${flag}=<value>)`,
+    takesNoValue: (flag) => `${flag} does not take a value`,
+    unexpectedArg: (arg) => `unexpected argument: ${arg}`,
     portRange: '--port must be a number between 0 and 65535.',
     notApplicable: (flag, command) => `${flag} does not apply to "${command}".`,
     onlyWith: (flag, command) => `${flag} only works with "rastro ${command}".`,
@@ -456,6 +482,7 @@ sends anything over the network. The interface is only served on 127.0.0.1.
       'this graph has no git changes. Create it with "rastro analyze <folder> --changes" (or --since <ref>), or run "rastro impact <folder>".',
     gitFailed: (reason) => `could not read the git changes: ${reason}`,
     linkNeedsMarkdown: '--link only applies to --format markdown.',
+    badLink: (value) => `--link must be an http:// or https:// address (got: "${value}").`,
     oddTest: (file) => `test file left out because its name has control characters: ${file}`,
   },
   serve: {
@@ -479,7 +506,6 @@ sends anything over the network. The interface is only served on 127.0.0.1.
       'On Linux, the limit comes from fs.inotify.max_user_watches and max_user_instances (sysctl); raising them restores instant updates.',
   },
   validate: {
-    cannotRead: (error) => `could not read the JSON: ${error}`,
     invalid: 'invalid',
     valid: (nodes, edges, schema) =>
       `valid — ${n(nodes, 'node', 'nodes')}, ${n(edges, 'relationship', 'relationships')} (schema ${schema})`,
@@ -491,6 +517,9 @@ sends anything over the network. The interface is only served on 127.0.0.1.
       `this repository's git configuration (.git/config or .git/config.worktree) defines commands that git would run (${keys}). ` +
       'For safety, Rastro does not run git here. If you trust the repository, use --trust-git-config.',
     badRef: (ref) => `invalid reference: ${ref}`,
+    notRepo: (dir) => `not a git repository (${dir})`,
+    unknownRef: (ref) => `unknown reference: ${ref}`,
+    noMergeBase: (ref) => `${ref} and HEAD have no commit in common`,
   },
   export: {
     needFormat: (formats) =>
@@ -506,16 +535,22 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     saved: (format) => `${format} saved to`,
     htmlHint:
       'Open it in a browser: the map works offline, with no server (source code is not included).',
-    writeFailed: (target, why) => `Could not write ${target}: ${why}`,
+    writeFailed: (target, why) => `could not write ${target}: ${why}`,
     isDir: 'the destination is a folder; give a file name',
   },
   storage: {
-    saveFailed: (target, why) => `Could not save the graph to ${target}: ${why}`,
+    saveFailed: (target, why) => `could not save the graph to ${target}: ${why}`,
     isDir: 'the destination is a folder; give a file name, e.g. -o graph.json',
-    noPermission: 'no permission to write to that location',
-    fileNotFound: (target) => `File not found: ${target}`,
-    invalidJson: (error) => `Invalid JSON: ${error}`,
-    invalidGraph: (errors) => `Invalid graph:\n- ${errors.join('\n- ')}`,
+    notRegular:
+      'the destination is not a regular file (it is a device, pipe or socket); give a file name, e.g. -o graph.json',
+    noPermission: (where) => `no permission to write to ${where}`,
+    fileNotFound: (target) => `file not found: ${target}`,
+    isFolder: (target, arg) =>
+      `${target} is a folder, but a graph JSON file is expected here. ` +
+      `To analyze the folder, run "rastro ${arg}" or "rastro analyze ${arg}".`,
+    cannotRead: (target, error) => `could not read ${target}: ${error}`,
+    invalidJson: (error) => `invalid JSON: ${error}`,
+    invalidGraph: (errors) => `invalid graph:\n- ${errors.join('\n- ')}`,
   },
   compare: {
     title: 'Comparison',
@@ -572,7 +607,7 @@ sends anything over the network. The interface is only served on 127.0.0.1.
       'The web interface was not found. Run "npm run build" at the root of the Rastro repository.',
     internalError: 'Internal error in the Rastro server.',
     portFailed: (port, reason) =>
-      `Could not open the interface starting at port ${port} (${reason}). ` +
+      `could not open the interface starting at port ${port} (${reason}). ` +
       'Try another one with --port, e.g. --port 5050.',
     portsNoPermission: 'no permission to use those ports',
     portsBusy: 'they are all in use',

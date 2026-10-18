@@ -6,10 +6,128 @@ import {
   SCHEMA_VERSION,
   type RastroGraph,
 } from './model.js';
+import type { Lang } from './labels.js';
 
 export interface ValidationResult {
   valid: boolean;
+  /** Os problemas encontrados, em texto (português por padrão; veja `ValidateOptions.lang`). */
   errors: string[];
+}
+
+/**
+ * Textos dos problemas de validação em português e inglês, montados a partir do código e dos
+ * parâmetros. `field` é o caminho do campo no JSON (ex.: `nodes[3].kind`), igual nos dois
+ * idiomas. Quem precisa trocar de idioma depois (a interface) guarda os problemas de
+ * `graphIssues` e chama `validationText`.
+ */
+const VALIDATION_TEXTS = {
+  'not-object-graph': {
+    pt: () => 'O grafo precisa ser um objeto JSON.',
+    en: () => 'The graph must be a JSON object.',
+  },
+  'schema-version': {
+    pt: (p) => `schemaVersion deve ser "${p.expected}" (recebido: ${p.received}).`,
+    en: (p) => `schemaVersion must be "${p.expected}" (got: ${p.received}).`,
+  },
+  required: {
+    pt: (p) => `${p.field} é obrigatório.`,
+    en: (p) => `${p.field} is required.`,
+  },
+  'not-list': {
+    pt: (p) => `${p.field} deve ser uma lista.`,
+    en: (p) => `${p.field} must be a list.`,
+  },
+  'not-counts': {
+    pt: (p) => `${p.field} deve ser um objeto de contagens.`,
+    en: (p) => `${p.field} must be an object of counts.`,
+  },
+  'not-list-of-lists': {
+    pt: (p) => `${p.field} deve ser uma lista de listas.`,
+    en: (p) => `${p.field} must be a list of lists.`,
+  },
+  'not-non-negative-int': {
+    pt: (p) => `${p.field} deve ser um inteiro não negativo.`,
+    en: (p) => `${p.field} must be a non-negative integer.`,
+  },
+  'invalid-item': {
+    pt: (p) => `${p.field} inválido.`,
+    en: (p) => `${p.field} is invalid.`,
+  },
+  'invalid-changes': {
+    pt: () => 'changes inválido (precisa de base, baseLabel, includesUntracked e files).',
+    en: () => 'changes is invalid (it needs base, baseLabel, includesUntracked and files).',
+  },
+  'not-object': {
+    pt: (p) => `${p.field} não é um objeto.`,
+    en: (p) => `${p.field} is not an object.`,
+  },
+  missing: {
+    pt: (p) => `${p.field} ausente.`,
+    en: (p) => `${p.field} is missing.`,
+  },
+  'duplicate-id': {
+    pt: (p) => `${p.field} duplicado: ${p.id}`,
+    en: (p) => `duplicate ${p.field}: ${p.id}`,
+  },
+  'invalid-value': {
+    pt: (p) => `${p.field} inválido: ${p.value}`,
+    en: (p) => `invalid ${p.field}: ${p.value}`,
+  },
+  'invalid-resolution': {
+    pt: (p) => `${p.field} inválida: ${p.value}`,
+    en: (p) => `invalid ${p.field}: ${p.value}`,
+  },
+  'must-be-object': {
+    pt: (p) => `${p.field} deve ser um objeto.`,
+    en: (p) => `${p.field} must be an object.`,
+  },
+  'invalid-location': {
+    pt: (p) => `${p.field} inválida em ${p.id}.`,
+    en: (p) => `invalid ${p.field} in ${p.id}.`,
+  },
+  'not-string-list': {
+    pt: (p) => `${p.field} deve ser uma lista de textos.`,
+    en: (p) => `${p.field} must be a list of strings.`,
+  },
+  'missing-node': {
+    pt: (p) => `${p.field} aponta para nó inexistente: ${p.id}`,
+    en: (p) => `${p.field} points to a node that does not exist: ${p.id}`,
+  },
+  'parent-cycle': {
+    pt: (p) => `ciclo na hierarquia (parent) envolvendo ${p.id}.`,
+    en: (p) => `cycle in the hierarchy (parent) involving ${p.id}.`,
+  },
+  'missing-endpoint': {
+    pt: (p) => `${p.field} inexistente: ${p.id}`,
+    en: (p) => `${p.field} does not exist: ${p.id}`,
+  },
+  'invalid-evidence': {
+    pt: (p) => `${p.field} contém item inválido (${p.id}).`,
+    en: (p) => `${p.field} has an invalid item (${p.id}).`,
+  },
+} satisfies Record<string, Record<Lang, (p: Record<string, string | number>) => string>>;
+
+export type ValidationCode = keyof typeof VALIDATION_TEXTS;
+
+/** Um problema encontrado pela validação, independente de idioma. */
+export interface ValidationIssue {
+  code: ValidationCode;
+  params: Record<string, string | number>;
+}
+
+/** Texto de um problema de validação no idioma pedido. */
+export function validationText(issue: ValidationIssue, lang: Lang): string {
+  const texts = Object.hasOwn(VALIDATION_TEXTS, issue.code)
+    ? VALIDATION_TEXTS[issue.code]
+    : undefined;
+  return texts ? texts[lang](issue.params) : issue.code;
+}
+
+export interface ValidateOptions {
+  /** Máximo de problemas guardados (padrão: 50). */
+  maxErrors?: number;
+  /** Idioma de `errors` (padrão: português, como sempre foi). */
+  lang?: Lang;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -24,36 +142,41 @@ const CHANGE_STATUSES = new Set(['added', 'modified', 'deleted', 'renamed']);
  * Valida a estrutura de um grafo e sua integridade referencial
  * (toda relação aponta para nós existentes, ids são únicos, localizações são coerentes).
  * Complementa o JSON Schema em `schema/rastro-graph.schema.json`, que não consegue
- * expressar regras entre nós e relações.
+ * expressar regras entre nós e relações. Devolve os problemas como códigos e parâmetros;
+ * `validateGraph` devolve os mesmos problemas já em texto.
  */
-export function validateGraph(input: unknown, maxErrors = 50): ValidationResult {
-  const errors: string[] = [];
-  const fail = (msg: string) => {
-    if (errors.length < maxErrors) errors.push(msg);
+export function graphIssues(
+  input: unknown,
+  maxErrors = 50,
+): { valid: boolean; issues: ValidationIssue[] } {
+  const issues: ValidationIssue[] = [];
+  const fail = (code: ValidationCode, params: Record<string, string | number> = {}) => {
+    if (issues.length < maxErrors) issues.push({ code, params });
   };
 
-  if (!isObject(input)) return { valid: false, errors: ['O grafo precisa ser um objeto JSON.'] };
+  if (!isObject(input)) return { valid: false, issues: [{ code: 'not-object-graph', params: {} }] };
   if (input.schemaVersion !== SCHEMA_VERSION)
-    fail(
-      `schemaVersion deve ser "${SCHEMA_VERSION}" (recebido: ${JSON.stringify(input.schemaVersion)}).`,
-    );
+    fail('schema-version', {
+      expected: SCHEMA_VERSION,
+      received: String(JSON.stringify(input.schemaVersion)),
+    });
   if (!isObject(input.project) || typeof input.project.root !== 'string')
-    fail('project.root é obrigatório.');
-  if (!Array.isArray(input.nodes)) fail('nodes deve ser uma lista.');
-  if (!Array.isArray(input.edges)) fail('edges deve ser uma lista.');
-  if (!isObject(input.stats)) fail('stats é obrigatório.');
+    fail('required', { field: 'project.root' });
+  if (!Array.isArray(input.nodes)) fail('not-list', { field: 'nodes' });
+  if (!Array.isArray(input.edges)) fail('not-list', { field: 'edges' });
+  if (!isObject(input.stats)) fail('required', { field: 'stats' });
   else {
     const stats = input.stats;
     for (const key of ['nodesByKind', 'edgesByKind', 'edgesByResolution'])
       if (!isObject(stats[key]) || !Object.values(stats[key]).every((v) => Number.isInteger(v)))
-        fail(`stats.${key} deve ser um objeto de contagens.`);
+        fail('not-counts', { field: `stats.${key}` });
     if (!Array.isArray(stats.importCycles) || !stats.importCycles.every((c) => Array.isArray(c)))
-      fail('stats.importCycles deve ser uma lista de listas.');
+      fail('not-list-of-lists', { field: 'stats.importCycles' });
     for (const key of ['files', 'externalCallsSkipped', 'unknownReceiverCalls', 'computedCalls'])
       if (!Number.isInteger(stats[key]) || (stats[key] as number) < 0)
-        fail(`stats.${key} deve ser um inteiro não negativo.`);
+        fail('not-non-negative-int', { field: `stats.${key}` });
   }
-  if (!Array.isArray(input.diagnostics)) fail('diagnostics deve ser uma lista.');
+  if (!Array.isArray(input.diagnostics)) fail('not-list', { field: 'diagnostics' });
   else
     for (const [i, d] of input.diagnostics.entries())
       if (
@@ -65,7 +188,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
           (!isObject(d.params) ||
             !Object.values(d.params).every((v) => typeof v === 'string' || typeof v === 'number')))
       )
-        fail(`diagnostics[${i}] inválido.`);
+        fail('invalid-item', { field: `diagnostics[${i}]` });
   if (input.changes !== undefined) {
     const changes = input.changes;
     if (
@@ -75,7 +198,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
       typeof changes.includesUntracked !== 'boolean' ||
       !Array.isArray(changes.files)
     )
-      fail('changes inválido (precisa de base, baseLabel, includesUntracked e files).');
+      fail('invalid-changes');
     else
       for (const [i, f] of changes.files.entries())
         if (
@@ -95,11 +218,11 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
           (f.deletionsAt !== undefined &&
             (!Array.isArray(f.deletionsAt) || !f.deletionsAt.every(isPositiveInt)))
         )
-          fail(`changes.files[${i}] inválido.`);
+          fail('invalid-item', { field: `changes.files[${i}]` });
   }
   if (!isObject(input.project) || !Array.isArray(input.project.languages))
-    fail('project.languages deve ser uma lista.');
-  if (errors.length) return { valid: false, errors };
+    fail('not-list', { field: 'project.languages' });
+  if (issues.length) return { valid: false, issues };
 
   const graph = input as unknown as RastroGraph;
   const ids = new Set<string>();
@@ -108,15 +231,17 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
   for (const [i, node] of graph.nodes.entries()) {
     const at = `nodes[${i}]`;
     if (!isObject(node)) {
-      fail(`${at} não é um objeto.`);
+      fail('not-object', { field: at });
       continue;
     }
-    if (typeof node.id !== 'string' || !node.id) fail(`${at}.id ausente.`);
-    else if (ids.has(node.id)) fail(`${at}.id duplicado: ${node.id}`);
+    if (typeof node.id !== 'string' || !node.id) fail('missing', { field: `${at}.id` });
+    else if (ids.has(node.id)) fail('duplicate-id', { field: `${at}.id`, id: node.id });
     else ids.add(node.id);
-    if (!nodeKinds.has(node.kind)) fail(`${at}.kind inválido: ${String(node.kind)}`);
-    if (typeof node.name !== 'string') fail(`${at}.name ausente.`);
-    if (node.meta !== undefined && !isObject(node.meta)) fail(`${at}.meta deve ser um objeto.`);
+    if (!nodeKinds.has(node.kind))
+      fail('invalid-value', { field: `${at}.kind`, value: String(node.kind) });
+    if (typeof node.name !== 'string') fail('missing', { field: `${at}.name` });
+    if (node.meta !== undefined && !isObject(node.meta))
+      fail('must-be-object', { field: `${at}.meta` });
     if (node.location !== undefined) {
       const loc = node.location;
       if (
@@ -128,7 +253,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
         !isPositiveInt(loc.endColumn) ||
         loc.endLine < loc.startLine
       )
-        fail(`${at}.location inválida em ${node.id}.`);
+        fail('invalid-location', { field: `${at}.location`, id: String(node.id) });
     }
   }
 
@@ -138,18 +263,18 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     for (const key of ['candidates', 'implements'] as const) {
       const list = node.meta[key];
       if (list !== undefined && (!Array.isArray(list) || !list.every((c) => typeof c === 'string')))
-        fail(`nodes[${i}].meta.${key} deve ser uma lista de textos.`);
+        fail('not-string-list', { field: `nodes[${i}].meta.${key}` });
     }
     for (const candidate of Array.isArray(node.meta.candidates) ? node.meta.candidates : [])
       if (typeof candidate === 'string' && !ids.has(candidate))
-        fail(`nodes[${i}].meta.candidates aponta para nó inexistente: ${candidate}`);
+        fail('missing-node', { field: `nodes[${i}].meta.candidates`, id: candidate });
   }
 
   const parentOf = new Map<string, string>();
   for (const [i, node] of graph.nodes.entries()) {
     if (!isObject(node) || node.parent === undefined) continue;
     if (!ids.has(node.parent))
-      fail(`nodes[${i}].parent aponta para nó inexistente: ${node.parent}`);
+      fail('missing-node', { field: `nodes[${i}].parent`, id: String(node.parent) });
     else parentOf.set(node.id, node.parent);
   }
   // a hierarquia precisa ser uma árvore: um ciclo de "parent" travaria quem percorre ancestrais
@@ -158,7 +283,7 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     const path = new Set<string>();
     for (let cur: string | undefined = start; cur && !checked.has(cur); cur = parentOf.get(cur)) {
       if (path.has(cur)) {
-        fail(`ciclo na hierarquia (parent) envolvendo ${cur}.`);
+        fail('parent-cycle', { id: cur });
         break;
       }
       path.add(cur);
@@ -174,21 +299,25 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
   for (const [i, edge] of graph.edges.entries()) {
     const at = `edges[${i}]`;
     if (!isObject(edge)) {
-      fail(`${at} não é um objeto.`);
+      fail('not-object', { field: at });
       continue;
     }
-    if (typeof edge.id !== 'string' || !edge.id) fail(`${at}.id ausente.`);
-    else if (edgeIds.has(edge.id)) fail(`${at}.id duplicado: ${edge.id}`);
+    if (typeof edge.id !== 'string' || !edge.id) fail('missing', { field: `${at}.id` });
+    else if (edgeIds.has(edge.id)) fail('duplicate-id', { field: `${at}.id`, id: edge.id });
     else edgeIds.add(edge.id);
-    if (!edgeKinds.has(edge.kind)) fail(`${at}.kind inválido: ${String(edge.kind)}`);
-    if (edge.meta !== undefined && !isObject(edge.meta)) fail(`${at}.meta deve ser um objeto.`);
-    if (!ids.has(edge.source)) fail(`${at}.source inexistente: ${edge.source}`);
-    if (!ids.has(edge.target)) fail(`${at}.target inexistente: ${edge.target}`);
+    if (!edgeKinds.has(edge.kind))
+      fail('invalid-value', { field: `${at}.kind`, value: String(edge.kind) });
+    if (edge.meta !== undefined && !isObject(edge.meta))
+      fail('must-be-object', { field: `${at}.meta` });
+    if (!ids.has(edge.source))
+      fail('missing-endpoint', { field: `${at}.source`, id: String(edge.source) });
+    if (!ids.has(edge.target))
+      fail('missing-endpoint', { field: `${at}.target`, id: String(edge.target) });
     if (!resolutions.has(edge.resolution))
-      fail(`${at}.resolution inválida: ${String(edge.resolution)}`);
+      fail('invalid-resolution', { field: `${at}.resolution`, value: String(edge.resolution) });
     if (!discoveries.has(edge.discovery))
-      fail(`${at}.discovery inválido: ${String(edge.discovery)}`);
-    if (!Array.isArray(edge.evidence)) fail(`${at}.evidence deve ser uma lista.`);
+      fail('invalid-value', { field: `${at}.discovery`, value: String(edge.discovery) });
+    if (!Array.isArray(edge.evidence)) fail('not-list', { field: `${at}.evidence` });
     else
       for (const ev of edge.evidence)
         if (
@@ -197,10 +326,24 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
           !isPositiveInt(ev.line) ||
           !isPositiveInt(ev.column)
         )
-          fail(`${at}.evidence contém item inválido (${edge.id}).`);
+          fail('invalid-evidence', { field: `${at}.evidence`, id: String(edge.id) });
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: issues.length === 0, issues };
+}
+
+/**
+ * Valida um grafo (veja `graphIssues`) e devolve os problemas em texto. O segundo argumento
+ * aceita o máximo de problemas (como antes) ou `{ maxErrors, lang }`.
+ */
+export function validateGraph(
+  input: unknown,
+  options: number | ValidateOptions = {},
+): ValidationResult {
+  const { maxErrors = 50, lang = 'pt' } =
+    typeof options === 'number' ? { maxErrors: options } : options;
+  const { valid, issues } = graphIssues(input, maxErrors);
+  return { valid, errors: issues.map((issue) => validationText(issue, lang)) };
 }
 
 /** Lê e valida um grafo vindo de JSON, lançando erro descritivo se for inválido. */

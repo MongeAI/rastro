@@ -143,7 +143,7 @@ export function writeExport(file: string, content: string): string {
       code === 'EISDIR'
         ? t().export.isDir
         : code === 'EACCES' || code === 'EPERM'
-          ? t().storage.noPermission
+          ? t().storage.noPermission((err as NodeJS.ErrnoException).path ?? target)
           : (err as Error).message;
     throw new Error(t().export.writeFailed(target, why), { cause: err });
   }

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   edgeId,
+  graphIssues,
   nodeId,
   parseGraph,
   SCHEMA_VERSION,
   validateGraph,
+  validationText,
   type RastroGraph,
 } from '@rastro/core';
 
@@ -168,6 +170,74 @@ describe('validateGraph — integridade extra', () => {
     const badLevel = minimalGraph();
     badLevel.diagnostics.push({ level: 'fatal' as 'error', code: 'x', message: 'y' });
     expect(validateGraph(badLevel).errors.join()).toContain('diagnostics[0]');
+  });
+});
+
+describe('validateGraph — idiomas', () => {
+  /** Um grafo com um pouco de cada problema. */
+  function broken(): RastroGraph {
+    const g = minimalGraph();
+    g.nodes.push({ ...g.nodes[0]! });
+    (g.nodes[1] as { kind: string }).kind = 'banana';
+    g.nodes[1]!.location!.endLine = 0;
+    g.edges[0]!.target = 'fn:sumiu';
+    (g.edges[0] as { resolution: string }).resolution = 'talvez';
+    return g;
+  }
+
+  it('o português continua igual (compatibilidade com quem lê errors)', () => {
+    expect(validateGraph(broken()).errors).toEqual([
+      'nodes[1].kind inválido: banana',
+      'nodes[1].location inválida em fn:src/a.ts#run.',
+      'nodes[2].id duplicado: file:src/a.ts',
+      'edges[0].target inexistente: fn:sumiu',
+      'edges[0].resolution inválida: talvez',
+    ]);
+    expect(validateGraph(42).errors).toEqual(['O grafo precisa ser um objeto JSON.']);
+    expect(validateGraph({ ...minimalGraph(), schemaVersion: '9' }).errors).toEqual([
+      `schemaVersion deve ser "${SCHEMA_VERSION}" (recebido: "9").`,
+    ]);
+  });
+
+  it('em inglês com { lang: "en" }, com os mesmos campos', () => {
+    expect(validateGraph(broken(), { lang: 'en' }).errors).toEqual([
+      'invalid nodes[1].kind: banana',
+      'invalid nodes[1].location in fn:src/a.ts#run.',
+      'duplicate nodes[2].id: file:src/a.ts',
+      'edges[0].target does not exist: fn:sumiu',
+      'invalid edges[0].resolution: talvez',
+    ]);
+    expect(validateGraph(42, { lang: 'en' }).errors).toEqual(['The graph must be a JSON object.']);
+    expect(validateGraph({ schemaVersion: '9' }, { lang: 'en' }).errors).toContain(
+      `schemaVersion must be "${SCHEMA_VERSION}" (got: "9").`,
+    );
+  });
+
+  it('graphIssues devolve códigos e parâmetros; validationText traduz depois', () => {
+    const { valid, issues } = graphIssues(broken());
+    expect(valid).toBe(false);
+    expect(issues[0]).toEqual({
+      code: 'invalid-value',
+      params: { field: 'nodes[1].kind', value: 'banana' },
+    });
+    expect(issues.map((i) => validationText(i, 'pt'))).toEqual(validateGraph(broken()).errors);
+    expect(graphIssues(minimalGraph())).toEqual({ valid: true, issues: [] });
+    // o limite antigo (número no segundo argumento) continua valendo
+    expect(validateGraph(broken(), 2).errors).toHaveLength(2);
+    expect(validateGraph(broken(), { maxErrors: 1, lang: 'en' }).errors).toHaveLength(1);
+  });
+
+  it('nenhum texto em inglês sai em português', () => {
+    const bad = {
+      schemaVersion: 1,
+      project: {},
+      stats: { nodesByKind: 1, importCycles: 1, files: -1 },
+      diagnostics: [1],
+      changes: 1,
+    };
+    const en = validateGraph(bad, { lang: 'en' }).errors;
+    expect(en.length).toBeGreaterThan(5);
+    expect(en.join('\n')).not.toMatch(/[ãõçáéíóú]|\b(deve|lista|inválid|obrigatório)/);
   });
 });
 
