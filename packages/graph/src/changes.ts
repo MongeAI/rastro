@@ -283,8 +283,12 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
     const fileNode = index.node(nodeId.file(file));
     if (!fileNode || fileNode.meta?.analyzed === false || !CODE_EXT.test(file)) continue;
     const exported = new Set(fileNode.meta?.exportNames ?? []);
-    // CommonJS (`module.exports = ...`): os nomes dependem do valor, não dá para provar a falta
-    if (exported.has('module.exports')) continue;
+    // CommonJS (`module.exports = ...`): os nomes dependem do valor, não dá para provar a falta.
+    // Lista incompleta (`export *` de um módulo que a análise não vê, exports dinâmicos em
+    // CommonJS): um nome fora dela pode existir
+    if (exported.has('module.exports') || fileNode.meta?.exportsIncomplete) continue;
+    // de um módulo CommonJS, o import default recebe o `module.exports` inteiro
+    const commonjs = fileNode.meta?.commonjs === true;
     for (const edge of index.incoming(fileNode.id, ['imports'])) {
       const kind = edge.meta?.importKind;
       if (edge.resolution !== 'resolved' || edge.meta?.viaDeclaration) continue;
@@ -292,7 +296,7 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
       const importer = index.node(edge.source);
       if (!importer) continue;
       for (const name of edge.meta?.names ?? []) {
-        if (name === '*' || exported.has(name)) continue;
+        if (name === '*' || exported.has(name) || (commonjs && name === 'default')) continue;
         const evidence = evidenceFor(edge, name);
         found.push({
           from: importer,
@@ -344,6 +348,8 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
     let why: BrokenReference['why'] | undefined;
     const receiverFile = node.meta.receiverFile;
     if (receiverFile && changed.has(receiverFile)) {
+      // `M.x()` com `import * as M`: os membros são os exports, que podem estar incompletos
+      if (index.node(nodeId.file(receiverFile))?.meta?.exportsIncomplete) continue;
       target = receiverFile;
       why = 'member-missing';
     } else {

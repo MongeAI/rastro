@@ -91,6 +91,19 @@ export interface NodeMeta {
   lines?: number;
   /** Para arquivos: nomes exportados pelo módulo. */
   exportNames?: string[];
+  /**
+   * Para arquivos: a lista `exportNames` pode estar incompleta. O arquivo reexporta tudo
+   * (`export *`) de um módulo que a análise não vê (pacote não instalado, arquivo gerado
+   * ignorado) ou exporta de forma dinâmica em CommonJS (`__exportStar(require(...), exports)`,
+   * `Object.assign(module.exports, ...)`, `exports[nome] = ...`). Um nome fora da lista não
+   * prova que ele não é exportado.
+   */
+  exportsIncomplete?: boolean;
+  /**
+   * Para arquivos: módulo CommonJS (`module.exports`, `exports.x`, `require`). Um import
+   * default dele recebe o `module.exports` inteiro, mesmo sem um export chamado `default`.
+   */
+  commonjs?: boolean;
   /** Para arquivos e módulos: participa de um ciclo de importação. */
   inCycle?: boolean;
   /** Para pacotes: módulo nativo do Node.js. */

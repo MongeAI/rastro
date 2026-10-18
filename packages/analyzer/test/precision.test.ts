@@ -856,6 +856,41 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
       expect(node(g, `unresolved:src/use.ts#call:${name}`)?.meta?.undeclared).toBeUndefined();
   });
 
+  it('lista de exports incompleta: export * de módulo que não se vê e CommonJS dinâmico', async () => {
+    const root = makeProject({
+      'src/db.ts':
+        "export * from 'pacote-ausente';\nexport * from './gerado/api';\nexport const local = 1;\n",
+      'src/barrel.ts': "export * from './db';\n",
+      'src/ok.ts': "export * from './db2';\n",
+      'src/db2.ts': 'export const x = 1;\n',
+      'lib/star.js':
+        "var __exportStar = function (m, e) { for (var p in m) e[p] = m[p]; };\nObject.defineProperty(exports, '__esModule', { value: true });\n__exportStar(require('./inner'), exports);\nexports.own = 1;\n",
+      'lib/inner.js': 'exports.inner = 1;\n',
+      'lib/assign.js': 'Object.assign(module.exports, { a1: 1 });\n',
+      'lib/computed.js': "const k = 'x';\nexports[k] = 1;\n",
+      'lib/plain.js':
+        "exports.foo = function () {};\nObject.defineProperty(exports, 'baz', { get() { return 1; } });\n",
+      'lib/esm.js': 'export const e = 1;\n',
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    const meta = (rel: string) => node(g, `file:${rel}`)?.meta;
+    for (const rel of [
+      'src/db.ts',
+      'src/barrel.ts',
+      'lib/star.js',
+      'lib/assign.js',
+      'lib/computed.js',
+    ])
+      expect(meta(rel)?.exportsIncomplete, rel).toBe(true);
+    for (const rel of ['src/ok.ts', 'src/db2.ts', 'lib/plain.js', 'lib/inner.js', 'lib/esm.js'])
+      expect(meta(rel)?.exportsIncomplete, rel).toBeUndefined();
+    // CommonJS: um import default recebe o module.exports inteiro
+    for (const rel of ['lib/star.js', 'lib/plain.js', 'lib/inner.js', 'lib/assign.js'])
+      expect(meta(rel)?.commonjs, rel).toBe(true);
+    for (const rel of ['lib/esm.js', 'src/db.ts']) expect(meta(rel)?.commonjs, rel).toBeUndefined();
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');

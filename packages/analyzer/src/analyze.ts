@@ -55,6 +55,8 @@ interface Ctx {
   /** Linhas de cada arquivo, para montar trechos de evidência. */
   lines: Map<string, string[]>;
   diagnostics: Diagnostic[];
+  /** Arquivo (caminho do compilador) → a lista de exports dele pode estar incompleta. */
+  exportsIncomplete: Map<string, boolean>;
   counters: {
     externalCallsSkipped: number;
     unknownReceiverCalls: number;
@@ -198,6 +200,7 @@ async function runAnalysis(
     entities: new Map(),
     lines: new Map(),
     diagnostics,
+    exportsIncomplete: new Map(),
     counters: { externalCallsSkipped: 0, unknownReceiverCalls: 0, computedCalls: 0, localCalls: 0 },
   };
 
@@ -1396,20 +1399,34 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   const moduleSymbol =
     ctx.checker.getSymbolAtLocation(sf.compilerNode) ??
     (sf.compilerNode as unknown as { symbol?: ts.Symbol }).symbol;
+  const fileNode = ctx.builder.getNode(fileId);
+  if (fileNode) {
+    const incomplete = hasIncompleteExports(ctx, sf.compilerNode);
+    const commonjs = isCommonJsModule(
+      sf.compilerNode,
+      !!moduleSymbol && !!exportEqualsOf(moduleSymbol),
+    );
+    if (incomplete || commonjs)
+      fileNode.meta = {
+        ...fileNode.meta,
+        ...(incomplete ? { exportsIncomplete: true } : {}),
+        ...(commonjs ? { commonjs: true } : {}),
+      };
+  }
   if (!moduleSymbol) return;
   let exports: ts.Symbol[];
   try {
     exports = ctx.checker.getExportsOfModule(moduleSymbol);
     // `module.exports = X` / `export = X`: getExportsOfModule devolve os membros de X, não o próprio X
-    const exportEquals = moduleSymbol.exports?.get(ts.InternalSymbolName.ExportEquals);
+    const exportEquals = exportEqualsOf(moduleSymbol);
     if (exportEquals && !exports.includes(exportEquals)) exports = [exportEquals, ...exports];
   } catch {
     return;
   }
   const displayName = (s: ts.Symbol) => (s.name === 'export=' ? 'module.exports' : s.name);
   const names = [...new Set(exports.map(displayName))].sort();
-  const fileNode = ctx.builder.getNode(fileId);
   if (fileNode && names.length) fileNode.meta = { ...fileNode.meta, exportNames: names };
+
   // montado só na primeira reexportação: num barril com milhares de `export *`, procurar cada
   // nome em todos os módulos era quadrático
   let reexports: Map<string, Node> | undefined;
@@ -1446,6 +1463,98 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       });
     }
   }
+}
+
+const exportEqualsOf = (moduleSymbol: ts.Symbol) =>
+  moduleSymbol.exports?.get(ts.InternalSymbolName.ExportEquals);
+
+/**
+ * Módulo CommonJS: `module.exports`/`export =` ou, em JavaScript, `exports.x`/`require` (o
+ * compilador marca o arquivo). Um import default dele recebe o `module.exports` inteiro.
+ */
+function isCommonJsModule(sf: ts.SourceFile, exportEquals: boolean): boolean {
+  const indicators = sf as unknown as {
+    commonJsModuleIndicator?: unknown;
+    externalModuleIndicator?: unknown;
+  };
+  if (exportEquals || indicators.commonJsModuleIndicator) return true;
+  // JavaScript sem sintaxe ESM que usa `exports` sem atribuir (ex.: `Object.assign(module.exports, ...)`)
+  return (
+    /\.[cm]?jsx?$/.test(sf.fileName) &&
+    !indicators.externalModuleIndicator &&
+    /\bexports\b/.test(sf.text)
+  );
+}
+
+/** `exports` ou `module.exports`. */
+function isExportsObject(node: ts.Node): boolean {
+  while (ts.isParenthesizedExpression(node)) node = node.expression;
+  if (ts.isIdentifier(node)) return node.text === 'exports';
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'module' &&
+    node.name.text === 'exports'
+  );
+}
+
+/**
+ * A lista de exports do arquivo pode estar incompleta? `export *` de um módulo que o
+ * compilador não vê (pacote não instalado, arquivo gerado ignorado) ou de um arquivo que também
+ * está incompleto; em CommonJS, exports dinâmicos: `exports`/`module.exports` passado a uma
+ * função (`__exportStar(require('./x'), exports)`, `Object.assign(module.exports, ...)`; só
+ * `Object.defineProperty(exports, 'nome', ...)` com nome literal o compilador entende) ou
+ * `exports[nome] = ...` com nome calculado.
+ */
+function hasIncompleteExports(ctx: Ctx, sf: ts.SourceFile): boolean {
+  const cached = ctx.exportsIncomplete.get(sf.fileName);
+  if (cached !== undefined) return cached;
+  // num ciclo de `export *`, o arquivo em andamento conta como completo (o resto decide)
+  ctx.exportsIncomplete.set(sf.fileName, false);
+  let incomplete = false;
+  for (const statement of sf.statements) {
+    if (!ts.isExportDeclaration(statement) || statement.exportClause || !statement.moduleSpecifier)
+      continue;
+    const target = ctx.checker.getSymbolAtLocation(statement.moduleSpecifier);
+    const decl = target?.valueDeclaration ?? target?.declarations?.[0];
+    const targetFile = decl && ts.isSourceFile(decl) ? decl : undefined;
+    if (!target || (targetFile && hasIncompleteExports(ctx, targetFile))) {
+      incomplete = true;
+      break;
+    }
+  }
+  if (!incomplete && /\bexports\b/.test(sf.text)) {
+    const visit = (node: ts.Node): void => {
+      if (incomplete) return;
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const defineWithLiteral =
+          ts.isPropertyAccessExpression(callee) &&
+          ts.isIdentifier(callee.expression) &&
+          callee.expression.text === 'Object' &&
+          callee.name.text === 'defineProperty' &&
+          !!node.arguments[1] &&
+          ts.isStringLiteralLike(node.arguments[1]);
+        if (!defineWithLiteral && node.arguments.some(isExportsObject)) {
+          incomplete = true;
+          return;
+        }
+      }
+      if (
+        ts.isElementAccessExpression(node) &&
+        isExportsObject(node.expression) &&
+        !ts.isStringLiteralLike(node.argumentExpression) &&
+        !ts.isNumericLiteral(node.argumentExpression)
+      ) {
+        incomplete = true;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  ctx.exportsIncomplete.set(sf.fileName, incomplete);
+  return incomplete;
 }
 
 /**

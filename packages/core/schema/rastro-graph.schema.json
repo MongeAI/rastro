@@ -387,6 +387,14 @@
               "description": "Chamada não resolvida obj.x() em TypeScript: arquivo que declara o tipo de obj, sem o membro x.",
               "type": "string"
             },
+            "exportsIncomplete": {
+              "description": "Arquivo cuja lista exportNames pode estar incompleta (export * de módulo não visto, exports dinâmicos em CommonJS).",
+              "type": "boolean"
+            },
+            "commonjs": {
+              "description": "Arquivo CommonJS: um import default recebe o module.exports inteiro.",
+              "type": "boolean"
+            },
             "undeclared": {
               "description": "Chamada não resolvida nome() em TypeScript: nenhum valor com esse nome existe no escopo.",
               "type": "boolean"

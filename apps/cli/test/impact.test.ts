@@ -209,6 +209,12 @@ function gitProject(
   return root;
 }
 
+/** Escreve (criando as pastas) um arquivo do projeto de teste. */
+function writeFile(root: string, rel: string, content: string): void {
+  fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+  fs.writeFileSync(path.join(root, rel), content);
+}
+
 const MATH = 'export function sum(a: number, b: number) {\n  return a + b;\n}\n';
 const APP =
   "import { sum } from './math.js';\nimport { ghost } from './missing';\n\nexport function total() {\n  return sum(1, 2) + ghost();\n}\n";
@@ -337,6 +343,45 @@ describe('possivelmente quebrado pela mudança', () => {
     ]);
     const text = renderImpact(buildImpactReport(await graphWithChanges(root)), 'text');
     expect(text).toContain('calls sum, which is not declared or imported in src/math.ts');
+  });
+
+  it('export * de módulo que não se vê e CommonJS: a lista de exports não prova a falta', async () => {
+    setLang('en');
+    const root = gitProject(
+      {
+        '.gitignore': 'src/gerado/\n',
+        'src/gerado/api.ts': 'export class ApiClient {}\n',
+        'src/db.ts':
+          "export * from '@prisma/client';\nexport * from './gerado/api';\nexport const local = 1;\n",
+        'src/use.ts':
+          "import { PrismaClient, ApiClient, local } from './db';\nexport const c = [PrismaClient, ApiClient, local];\n",
+        'lib/cj.js': 'exports.foo = function foo() { return 1; };\n',
+        'lib/star.js':
+          "var __exportStar = function (m, e) { for (var p in m) e[p] = m[p]; };\n__exportStar(require('./inner'), exports);\nexports.own = 1;\n",
+        'lib/inner.js': 'exports.inner = function inner() { return 1; };\n',
+        'lib/assign.js': 'Object.assign(module.exports, { a1: 1 });\n',
+        'use.mjs':
+          "import cj from './lib/cj.js';\nimport { inner, own } from './lib/star.js';\nimport { a1 } from './lib/assign.js';\ncj.foo(); inner(); own; a1;\n",
+        'use2.ts': "import cj2 from './lib/cj.js';\nexport const v = cj2.foo();\n",
+      },
+      ({ write }) => {
+        write(
+          'src/db.ts',
+          "export * from '@prisma/client';\nexport * from './gerado/api';\nexport const local = 2;\n",
+        );
+        write('lib/cj.js', 'exports.foo = function foo() { return 2; };\n');
+        write('lib/star.js', "__exportStar(require('./inner'), exports);\nexports.own = 2;\n");
+        write('lib/assign.js', 'Object.assign(module.exports, { a1: 2 });\n');
+      },
+    );
+    expect(await brokenOf(root)).toEqual([]);
+    // o que a lista completa prova continua valendo: `foo` renomeado em CommonJS
+    writeFile(root, 'lib/cj.js', 'exports.bar = function bar() { return 1; };\n');
+    writeFile(root, 'use3.mjs', "import { foo } from './lib/cj.js';\nfoo();\n");
+    expect((await brokenOf(root)).map((b) => [b[0], b[1], b[2], b[4]])).toEqual([
+      ['import', 'use3.mjs', 'foo', 'not-exported'],
+      ['call', 'use3.mjs', 'foo', 'not-exported'],
+    ]);
   });
 
   it('nada quebrado: nenhuma seção nova', async () => {
