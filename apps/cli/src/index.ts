@@ -9,7 +9,13 @@ import {
   type DiscoverOptions,
   type ProgressEvent,
 } from '@rastro/analyzer';
-import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
+import {
+  diagnosticText,
+  RASTRO_VERSION,
+  validateGraph,
+  type NodeKind,
+  type RastroGraph,
+} from '@rastro/core';
 import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
 import { formatDiff } from './compare.js';
@@ -21,7 +27,7 @@ import {
   writeExport,
 } from './export.js';
 import { collectChanges, GitError } from './git.js';
-import { langArg, parseLang, setLang, t } from './i18n.js';
+import { getLang, langArg, parseLang, setLang, t } from './i18n.js';
 import { startServer, type RunningServer } from './server.js';
 import { watchProject } from './watch.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
@@ -82,7 +88,7 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
     out(`  ${yellow(m.warnings(warnings.length))}`);
     for (const d of warnings.slice(0, 5))
       out(
-        `    ${dim('•')} ${d.file ? `${safeText(d.file)}${d.line ? `:${d.line}` : ''} — ` : ''}${safeText(d.message)}`,
+        `    ${dim('•')} ${d.file ? `${safeText(d.file)}${d.line ? `:${d.line}` : ''} — ` : ''}${safeText(diagnosticText(d, getLang()))}`,
       );
     if (warnings.length > 5) out(dim(`    ${m.moreWarnings(warnings.length - 5)}`));
   }

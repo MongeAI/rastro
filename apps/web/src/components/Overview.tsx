@@ -1,4 +1,4 @@
-import type { NodeKind, RastroGraph } from '@rastro/core';
+import { diagnosticText, type NodeKind, type RastroGraph } from '@rastro/core';
 import type { GraphIndex } from '@rastro/graph';
 import { useI18n } from '../lib/i18n';
 import { displayPath } from '../lib/paths';
@@ -23,7 +23,7 @@ const CARD_KINDS: NodeKind[] = [
 /** Resumo da análise, exibido quando nada está selecionado. */
 export function Overview({ graph, index, onNavigate }: Props) {
   const { stats } = graph;
-  const { t, labels, locale } = useI18n();
+  const { t, labels, locale, lang } = useI18n();
   const o = t.overview;
   const r = stats.edgesByResolution;
   const total = (r.resolved ?? 0) + (r.external ?? 0) + (r.unresolved ?? 0) || 1;
@@ -175,7 +175,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
                     {d.line ? `:${d.line}` : ''}
                   </span>
                 )}{' '}
-                {d.message}
+                {diagnosticText(d, lang)}
               </li>
             ))}
           </ul>
