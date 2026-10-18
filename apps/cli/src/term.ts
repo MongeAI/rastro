@@ -13,9 +13,19 @@ export const green = color(32);
 export const yellow = color(33);
 export const cyan = color(36);
 
+/**
+ * Tira caracteres de controle (C0, DEL e C1, menos `\n` e `\t`) de textos que vêm do projeto
+ * ou de um JSON: nomes de arquivos e entidades, diagnósticos, erros. Um nome de arquivo com
+ * sequências ESC poderia mudar o título do terminal, apagar a tela ou esconder linhas.
+ */
+export function safeText(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
+}
+
 /** Mostra o erro em vermelho e encerra com código 1. */
 export function fail(message: string): never {
-  process.stderr.write(`${red(t().errorPrefix)} ${message}\n`);
+  process.stderr.write(`${red(t().errorPrefix)} ${safeText(message)}\n`);
   process.exit(1);
 }
 

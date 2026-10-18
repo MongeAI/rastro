@@ -253,8 +253,14 @@ describe('toMermaid', () => {
       if (m && !['subgraph', 'classDef', 'class', 'linkStyle'].includes(m[1]!))
         expect(m[1]).toMatch(/^[a-z]+_[A-Za-z0-9_]+$/);
     }
-    // nenhum rótulo leva aspas, < ou > crus para dentro do diagrama
-    for (const label of out.matchAll(/"([^"]*)"/g)) expect(label[1]).not.toMatch(/[<>]/);
+    // nenhum rótulo leva aspas, < ou > crus para dentro do diagrama: em cada linha, o rótulo
+    // vai da primeira aspa depois de ( [ { | até a última antes de ) ] } | (guloso), então uma
+    // aspa crua no meio dele também aparece aqui
+    const labels = out
+      .split('\n')
+      .flatMap((line) => [...line.matchAll(/[([{|]"(.*)"[)\]}|]/g)].map((m) => m[1]!));
+    expect(labels).toContain('diz #34;olá#34; #60;b#62;#38;\\ #35;1 ação');
+    for (const label of labels) expect(label).not.toMatch(/["<>]/);
     expect(mermaidLabel('a\nb`c')).toBe('a b#96;c');
   });
 

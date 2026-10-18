@@ -319,3 +319,30 @@ describe.skipIf(!fs.existsSync(bundled))('idioma da CLI empacotada', () => {
     expect(res.stdout).toContain('- src/math.ts#double');
   });
 });
+
+describe('bin/rastro.js sem o bundle', () => {
+  it('avisa que falta compilar no idioma certo (roda antes do catálogo)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-bin-'));
+    fs.mkdirSync(path.join(dir, 'bin'));
+    const copy = path.join(dir, 'bin', 'rastro.js');
+    fs.copyFileSync(bin, copy);
+    const runCopy = (args: string[], env: NodeJS.ProcessEnv) =>
+      spawnSync(process.execPath, [copy, ...args], { encoding: 'utf8', env });
+
+    const en = runCopy(['--help'], cleanEnv());
+    expect(en.status).toBe(1);
+    expect(en.stderr).toContain('Rastro has not been built yet');
+    expect(runCopy([], cleanEnv({ LANG: 'pt_BR.UTF-8' })).stderr).toContain(
+      'O Rastro ainda não foi compilado',
+    );
+    expect(runCopy([], cleanEnv({ LANG: 'pt_BR.UTF-8', RASTRO_LANG: 'en' })).stderr).toContain(
+      'Rastro has not been built yet',
+    );
+    expect(runCopy(['--lang', 'pt'], cleanEnv({ RASTRO_LANG: 'en' })).stderr).toContain(
+      'O Rastro ainda não foi compilado',
+    );
+    expect(runCopy([], cleanEnv({ LC_ALL: 'de_DE.UTF-8', LANG: 'pt_BR' })).stderr).toContain(
+      'Rastro has not been built yet',
+    );
+  });
+});

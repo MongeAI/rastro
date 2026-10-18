@@ -34,6 +34,50 @@ function get(port: number, urlPath: string, host = `127.0.0.1:${port}`, method =
   );
 }
 
+/** Conexão com /api/events: `next(nome)` espera o próximo evento com esse nome e devolve o `data`. */
+function openEvents(port: number) {
+  const received: Array<{ event: string; data: string }> = [];
+  let wake = () => {};
+  let buffer = '';
+  const req = http.request(
+    { host: '127.0.0.1', port, path: '/api/events', headers: { Cookie: cookie } },
+    (res) => {
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/event-stream');
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        buffer += chunk;
+        let end: number;
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+          const event = /^event: (.*)$/m.exec(block)?.[1];
+          const data = /^data: (.*)$/m.exec(block)?.[1];
+          if (event && data !== undefined) received.push({ event, data });
+        }
+        wake();
+      });
+    },
+  );
+  req.on('error', () => {});
+  req.end();
+  return {
+    async next(event: string): Promise<string> {
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const i = received.findIndex((e) => e.event === event);
+        if (i >= 0) return received.splice(i, 1)[0]!.data;
+        if (Date.now() > deadline) throw new Error(`evento "${event}" não chegou`);
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+          setTimeout(resolve, 100);
+        });
+      }
+    },
+    close: () => req.destroy(),
+  };
+}
+
 let graph: RastroGraph;
 beforeAll(async () => {
   setLang('pt');
@@ -119,6 +163,39 @@ describe('servidor local', () => {
       const res = await get(server.port, `/api/source?file=${encodeURIComponent(file)}`);
       expect(res.status, file).toBe(404);
     }
+  });
+
+  it('/api/events: exige o cookie, diz a versão no hello e avisa cada update()', async () => {
+    const saved = cookie;
+    cookie = '';
+    const denied = await get(server.port, '/api/events');
+    expect(denied.status).toBe(401);
+    expect(denied.headers['content-type']).toContain('application/json');
+    cookie = saved;
+
+    const stream = openEvents(server.port);
+    try {
+      const hello = await stream.next('hello');
+      const start = (JSON.parse(hello) as { version: number }).version;
+      // nenhum update() ainda neste servidor: a versão começa em 1
+      expect(start).toBe(1);
+      expect((await get(server.port, '/api/graph')).headers['x-rastro-version']).toBe(
+        String(start),
+      );
+
+      server.update(graph);
+      expect(JSON.parse(await stream.next('graph'))).toEqual({ version: start + 1 });
+      const res = await get(server.port, '/api/graph');
+      expect(res.headers['x-rastro-version']).toBe(String(start + 1));
+      expect(validateGraph(JSON.parse(res.body)).valid).toBe(true);
+
+      server.update(graph);
+      expect(JSON.parse(await stream.next('graph'))).toEqual({ version: start + 2 });
+    } finally {
+      stream.close();
+    }
+    // Host estranho continua recusado também aqui
+    expect((await get(server.port, '/api/events', 'evil.example:80')).status).toBe(403);
   });
 
   it('não sai da pasta da interface ao servir arquivos estáticos', async () => {

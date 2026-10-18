@@ -1,13 +1,16 @@
 import { kindLabels, type Lang } from '@rastro/core';
 import type { ComparedStat, DiffEdge, DiffNode, GraphDiff } from '@rastro/graph';
 import { getLang, MESSAGES, type Messages } from './i18n.js';
-import { bold, cyan, dim, green, red, yellow } from './term.js';
+import { bold, cyan, dim, green, red, safeText, yellow } from './term.js';
 
 /** Itens mostrados por grupo antes do "… e mais N". */
 const LIST_LIMIT = 15;
 
-/** `fn:src/a.ts#run` → `src/a.ts#run` (o prefixo do tipo já aparece no título do grupo). */
-const shortId = (id: string) => id.slice(id.indexOf(':') + 1);
+/**
+ * `fn:src/a.ts#run` → `src/a.ts#run` (o prefixo do tipo já aparece no título do grupo). Ids e
+ * nomes vêm do JSON comparado: saem sem caracteres de controle.
+ */
+const shortId = (id: string) => safeText(id.slice(id.indexOf(':') + 1));
 
 function groupBy<T, K extends string>(items: T[], key: (item: T) => K): Map<K, T[]> {
   const groups = new Map<K, T[]>();
@@ -31,7 +34,7 @@ function capped<T>(
 
 const nodeLine = (sign: string) => (n: DiffNode) => {
   const label = n.kind === 'file' || n.kind === 'module' ? (n.file ?? n.name) : shortId(n.id);
-  return `    ${sign} ${label}`;
+  return `    ${sign} ${safeText(label)}`;
 };
 
 const edgeLine = (sign: string, m: Messages['compare']) => (e: DiffEdge) =>
@@ -44,9 +47,10 @@ export function formatDiff(diff: GraphDiff, lang: Lang = getLang()): string {
   const m = MESSAGES[lang].compare;
   const edgeLabels = kindLabels(lang).edge;
   const out: string[] = [];
-  const when = (iso: string) => (iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : '?');
+  const when = (iso: string) =>
+    iso ? safeText(iso.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')) : '?';
   out.push(
-    `${bold(m.title)} ${diff.before.project} ${dim(`(${when(diff.before.generatedAt)})`)} ${dim('→')} ${diff.after.project} ${dim(`(${when(diff.after.generatedAt)})`)}`,
+    `${bold(m.title)} ${safeText(diff.before.project)} ${dim(`(${when(diff.before.generatedAt)})`)} ${dim('→')} ${safeText(diff.after.project)} ${dim(`(${when(diff.after.generatedAt)})`)}`,
   );
   if (diff.before.root !== diff.after.root) out.push(dim(`  ${m.differentRoots}`));
   out.push('');

@@ -68,6 +68,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   let { graph } = options;
   const webRoot = path.resolve(options.webRoot);
   let graphJson = JSON.stringify(graph);
+  /**
+   * Versão do grafo servido: começa em 1 e sobe a cada `update()`. Vai no cabeçalho
+   * `X-Rastro-Version` de /api/graph e no JSON `{"version": n}` dos eventos `hello` e `graph`.
+   */
   let version = 1;
   /** Navegadores conectados em /api/events (Server-Sent Events). */
   const listeners = new Set<http.ServerResponse>();
@@ -137,7 +141,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           return json(401, { error: m.accessDenied });
         }
         if (url.pathname === '/api/health') return json(200, { ok: true });
-        if (url.pathname === '/api/graph') return send(200, graphJson, MIME['.json']);
+        // a versão vai junto: a interface compara com a dos eventos e ignora respostas velhas
+        if (url.pathname === '/api/graph')
+          return send(200, graphJson, MIME['.json'], { 'X-Rastro-Version': String(version) });
         if (url.pathname === '/api/events') {
           // canal de avisos: o navegador é avisado quando o grafo muda (modo --watch)
           res.writeHead(200, {
@@ -146,7 +152,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
             'Cache-Control': 'no-store',
             Connection: 'keep-alive',
           });
-          res.write(`event: hello\ndata: {"version":${version}}\n\n`);
+          res.write(`event: hello\ndata: ${JSON.stringify({ version })}\n\n`);
           listeners.add(res);
           req.on('close', () => listeners.delete(res));
           return;
@@ -219,7 +225,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       graphJson = JSON.stringify(next);
       analyzedFiles = filesOf(next);
       version++;
-      for (const res of listeners) res.write(`event: graph\ndata: {"version":${version}}\n\n`);
+      const event = `event: graph\ndata: ${JSON.stringify({ version })}\n\n`;
+      for (const res of listeners) res.write(event);
     },
     close: () =>
       new Promise<void>((resolve) => {
