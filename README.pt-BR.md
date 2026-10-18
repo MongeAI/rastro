@@ -152,7 +152,7 @@ A aba **Insights** lista as funções mais chamadas, os orquestradores, os arqui
 
 ### Navegue na velocidade do pensamento
 
-<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> abre uma **paleta de comandos** que encontra entidades e umas 30 ações de contexto (trocar o nível, focar, traçar caminho, exportar, tema, idioma…). As setas levam ao nó mais próximo naquela direção, <kbd>Alt</kbd>+<kbd>↑</kbd> sobe para quem contém a seleção, <kbd>Backspace</kbd> volta e <kbd>?</kbd> lista todos os atalhos. Há também um **minimapa** e um **breadcrumb** (pasta › arquivo › classe › método).
+<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> abre uma **paleta de comandos** que encontra entidades e mais de 20 ações de contexto (trocar o nível, focar, traçar caminho, exportar, tema, idioma…). As setas levam ao nó mais próximo naquela direção, <kbd>Alt</kbd>+<kbd>↑</kbd> sobe para quem contém a seleção, <kbd>Backspace</kbd> volta e <kbd>?</kbd> lista todos os atalhos. Há também um **minimapa** e um **breadcrumb** (pasta › arquivo › classe › método).
 
 <p align="center"><img src="docs/assets/pt/palette.png" alt="Paleta de comandos com as ações da classe selecionada" width="900" /></p>
 
@@ -176,7 +176,7 @@ A lista completa está no [changelog](CHANGELOG.md).
 
 ### Da arquitetura ao detalhe, em três níveis
 
-Comece em **Pastas** (cada pasta é um bloco e as linhas somam os imports entre elas), desça para **Arquivos** e chegue em **Símbolos**. O duplo clique abre uma pasta ou mostra as funções de um arquivo. O layout hierárquico desenha o fluxo de dependências da esquerda para a direita; quando o projeto inteiro está numa pasta só (como `src/`), ela já abre sozinha.
+Projetos grandes começam em **Pastas** (cada pasta é um bloco e as linhas somam os imports entre elas), os pequenos em **Arquivos**; dali, desça até **Símbolos**. O duplo clique abre uma pasta ou mostra as funções de um arquivo. O layout hierárquico desenha o fluxo de dependências da esquerda para a direita; quando o projeto inteiro está numa pasta só (como `src/`), ela já abre sozinha.
 
 <p align="center"><img src="docs/assets/pt/folders.png" alt="Nível de pastas: a arquitetura do projeto em blocos" width="900" /></p>
 
@@ -302,6 +302,8 @@ rastro export . --format html --since main                   # um relatório off
 | `--external`       | Inclui pacotes externos (npm, módulos nativos do Node.js)                                   |
 | `--no-unresolved`  | Deixa de fora as referências não resolvidas                                                 |
 
+`--level`, `--edges`, `--external` e `--no-unresolved` valem para `mermaid`, `dot` e `graphml`; `--folder` vale para todos os formatos.
+
 - **Mermaid** usa subgrafos para pastas (e para arquivos e classes no nível `symbols`), nós e linhas vermelhos tracejados para referências não resolvidas e cinza tracejados para pacotes externos. Diagramas com mais de 400 nós são recusados com uma dica (`--level modules` ou `--folder`), porque o Mermaid deixa de ser legível e o GitHub recusa diagramas grandes.
 - **DOT** (Graphviz) e **GraphML** não têm limite de tamanho. O GraphML guarda `kind`, `resolution`, `count`, `file` e `line` como atributos.
 - **HTML** é um **arquivo único e offline** com o mapa interativo completo: JavaScript, estilos, fontes e o grafo vão embutidos, ele abre direto do disco (sem servidor, sem internet) e uma Content Security Policy bloqueia qualquer acesso à rede. Com `--changes` ou `--since`, inclui a aba **Mudanças**. O código-fonte não vai junto, e a pasta pessoal no caminho do projeto vira `~`. Ótimo para mandar ao time ou anexar a um PR.
@@ -332,6 +334,7 @@ Tudo o que vem do projeto analisado (nomes, caminhos) entra no Markdown como có
 | `base`           | a base do pull request | Branch para comparar                                                |
 | `exclude`        |                        | Caminhos a ignorar, um por linha (sintaxe do `.gitignore`)          |
 | `comment`        | `true`                 | Comenta no pull request                                             |
+| `github-token`   | `${{ github.token }}`  | Token usado para comentar no pull request                           |
 | `comment-author` | `github-actions[bot]`  | Login que publica o comentário (troque se usar outro token)         |
 | `report`         | `true`                 | Envia o relatório HTML offline                                      |
 | `artifact-name`  | `rastro-report`        | Nome do artefato (um por chamada, se usar a action mais de uma vez) |
@@ -368,7 +371,7 @@ Pull requests de forks recebem um token só de leitura, então o comentário é 
 | <kbd>Esc</kbd>                                      | Fechar, limpar a seleção ou sair do foco                  |
 | <kbd>?</kbd>                                        | Listar todos os atalhos                                   |
 
-A URL guarda a seleção (`#n=…`), então dá para compartilhar o link de uma entidade.
+A URL guarda a seleção (`#n=…`). Com `rastro <caminho>`, o link funciona na mesma sessão do navegador (o token do servidor vale por uma execução); no relatório HTML (`rastro export --format html`), funciona sempre.
 
 ## Desempenho
 
@@ -379,6 +382,8 @@ Medido em projetos sintéticos (`npm run bench`, também conferido no CI):
 | 100      | 712    | 2.594    | 0,4 s   | 216 MB          |
 | 1.000    | 7.041  | 26.692   | 1,0 s   | 303 MB          |
 | 5.000    | 35.140 | 133.745  | 3,3 s   | 661 MB          |
+
+Projetos reais com muita inferência de tipos levam mais tempo que o benchmark sintético: projetos de 450 a 1 000 arquivos (Hono, tRPC, Excalidraw) levaram de 9 a 11 s na nossa máquina.
 
 No modo `--watch`, reanalisar um projeto de 5 000 arquivos depois de salvar leva cerca de 2,5 s. Mapas muito grandes passam a um estilo de desenho mais leve (linhas retas, uma imagem enquanto você arrasta) para continuar responsivos.
 

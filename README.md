@@ -152,7 +152,7 @@ The **Insights** tab ranks the most called functions, the orchestrators, the cen
 
 ### Navigate at the speed of thought
 
-<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> opens a **command palette** that finds entities and about 30 context actions (change level, focus, trace a path, export, theme, language…). Arrow keys move to the nearest node in that direction, <kbd>Alt</kbd>+<kbd>↑</kbd> goes to the parent, <kbd>Backspace</kbd> goes back and <kbd>?</kbd> lists every shortcut. There is a **minimap** and a **breadcrumb** (folder › file › class › method).
+<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> opens a **command palette** that finds entities and 20+ context actions (change level, focus, trace a path, export, theme, language…). Arrow keys move to the nearest node in that direction, <kbd>Alt</kbd>+<kbd>↑</kbd> goes to the parent, <kbd>Backspace</kbd> goes back and <kbd>?</kbd> lists every shortcut. There is a **minimap** and a **breadcrumb** (folder › file › class › method).
 
 <p align="center"><img src="docs/assets/en/palette.png" alt="Command palette with the actions for the selected class" width="900" /></p>
 
@@ -176,7 +176,7 @@ The full list is in the [changelog](CHANGELOG.md).
 
 ### From architecture to detail, in three levels
 
-Start at **Folders** (each folder is a block and the lines add up the imports between them), go down to **Files** and reach **Symbols**. Double-click opens a folder or reveals a file's functions. The hierarchical layout draws the dependency flow from left to right; when the whole project lives in one folder (like `src/`), it opens by itself.
+Big projects start at **Folders** (each folder is a block and the lines add up the imports between them), small ones at **Files**; from there, go down to **Symbols**. Double-click opens a folder or reveals a file's functions. The hierarchical layout draws the dependency flow from left to right; when the whole project lives in one folder (like `src/`), it opens by itself.
 
 <p align="center"><img src="docs/assets/en/folders.png" alt="Folders level: the project's architecture as blocks" width="900" /></p>
 
@@ -302,6 +302,8 @@ rastro export . --format html --since main                   # an offline report
 | `--external`       | Include external packages (npm, Node.js built-ins)                                              |
 | `--no-unresolved`  | Leave out unresolved references                                                                 |
 
+`--level`, `--edges`, `--external` and `--no-unresolved` apply to `mermaid`, `dot` and `graphml`; `--folder` applies to every format.
+
 - **Mermaid** uses subgraphs for folders (and for files and classes at the `symbols` level), dashed red nodes and lines for unresolved references and dashed grey ones for external packages. Diagrams above 400 nodes are refused with a hint (`--level modules` or `--folder`), since Mermaid stops being readable and GitHub refuses large diagrams.
 - **DOT** (Graphviz) and **GraphML** have no size limit. GraphML keeps `kind`, `resolution`, `count`, `file` and `line` as attributes.
 - **HTML** is a **single offline file** with the full interactive map: JavaScript, styles, fonts and the graph are embedded, it opens straight from disk (no server, no internet) and a Content Security Policy blocks any network access. With `--changes` or `--since`, it includes the **Changes** tab. Source code is not included, and your home folder in the project path is shortened to `~`. Handy to send to the team or attach to a PR.
@@ -332,6 +334,7 @@ Everything that comes from the analyzed project (names, paths) goes into Markdow
 | `base`           | the pull request's base | Branch to compare against                                           |
 | `exclude`        |                         | Paths to ignore, one per line (`.gitignore` syntax)                 |
 | `comment`        | `true`                  | Comment on the pull request                                         |
+| `github-token`   | `${{ github.token }}`   | Token used to comment on the pull request                           |
 | `comment-author` | `github-actions[bot]`   | Login that posts the comment (change it with a custom token)        |
 | `report`         | `true`                  | Upload the offline HTML report                                      |
 | `artifact-name`  | `rastro-report`         | Artifact name (one per call when running the action more than once) |
@@ -368,7 +371,7 @@ Pull requests from forks get a read-only token, so the comment is skipped with a
 | <kbd>Esc</kbd>                                      | Close, clear the selection or leave focus                    |
 | <kbd>?</kbd>                                        | List every shortcut                                          |
 
-The URL keeps the selection (`#n=…`), so you can share a link to an entity.
+The URL keeps the selection (`#n=…`). With `rastro <path>`, the link works in the same browser session (the server token is valid for one run); in the HTML report (`rastro export --format html`), it always works.
 
 ## Performance
 
@@ -379,6 +382,8 @@ Measured on synthetic projects (`npm run bench`, also checked in CI):
 | 100   | 712    | 2,594         | 0.4 s    | 216 MB      |
 | 1,000 | 7,041  | 26,692        | 1.0 s    | 303 MB      |
 | 5,000 | 35,140 | 133,745       | 3.3 s    | 661 MB      |
+
+Real projects with heavy type inference take longer than the synthetic benchmark: 450–1,000-file projects (Hono, tRPC, Excalidraw) took 9–11 s on our machine.
 
 In `--watch` mode, re-analyzing a 5,000-file project after a save takes about 2.5 s. Very large maps switch to a lighter drawing style (straight lines, an image while panning) to stay responsive.
 
