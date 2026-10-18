@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { validateGraph, type GraphEdge, type RastroGraph } from '@rastro/core';
 import { analyzeProject, discoverFiles } from '@rastro/analyzer';
+import { computeInsights, GraphIndex } from '@rastro/graph';
 
 const fixtures = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
 const fixture = (name: string) => path.join(fixtures, name);
@@ -705,5 +706,45 @@ describe('regressões da segunda revisão', () => {
       typeOnly: true,
       count: 1,
     });
+  });
+});
+
+describe('insights (0.2)', () => {
+  it('aponta código possivelmente sem uso sem acusar callbacks nem métodos implícitos', async () => {
+    const root = makeProject({
+      'a.ts': [
+        'function usado() { return 1; }',
+        'function comoCallback(x: number) { return x * 2; }',
+        'function esquecido() { return 3; }',
+        'export function api() { return usado() + [1].map(comoCallback)[0]!; }',
+        'export class Modelo {',
+        '  toJSON() { return {}; }',
+        '  metodoSemUso() { return 4; }',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const insights = computeInsights(new GraphIndex(g));
+    expect(insights.unused.internal.map((n) => n.id)).toEqual(['fn:a.ts#esquecido']);
+    // a classe exportada nunca é usada; toJSON é implícito e não aparece
+    expect(insights.unused.exported.map((n) => n.id)).toEqual([
+      'class:a.ts#Modelo',
+      'fn:a.ts#api',
+      'method:a.ts#Modelo.metodoSemUso',
+    ]);
+  });
+
+  it('ranqueia os mais chamados e os arquivos mais importados', async () => {
+    const g = await analyzeProject(fixture('ts-basic'));
+    const insights = computeInsights(new GraphIndex(g));
+    // create é chamado por main, onCreate e withSeed
+    expect(insights.mostCalled[0]).toMatchObject({
+      node: { id: 'method:src/services/user-service.ts#UserService.create' },
+      value: 3,
+    });
+    expect(insights.mostCalled.find((r) => r.node.id === 'fn:src/math.ts#sum')?.value).toBe(2);
+    expect(insights.mostImported.map((r) => r.node.id)).toContain('file:src/lib/strings.ts');
+    expect(insights.largestFiles[0]!.value).toBeGreaterThan(0);
+    expect(insights.coupledModules.length).toBeGreaterThan(0);
   });
 });

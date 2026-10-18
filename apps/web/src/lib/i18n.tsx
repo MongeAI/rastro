@@ -216,6 +216,35 @@ const pt = {
     analyzedAt: (date: string, ms: number, ts: string) =>
       `Analisado em ${date} · ${ms} ms · TypeScript ${ts}`,
   },
+  insights: {
+    tabSummary: 'Resumo',
+    tabInsights: 'Insights',
+    title: 'Onde olhar primeiro',
+    intro: 'Rankings calculados só com relações comprovadas. Clique para ir ao mapa.',
+    mostCalled: 'Mais chamados',
+    mostCalledHint: 'Funções e métodos usados por mais lugares: mudanças aqui têm impacto amplo.',
+    mostCalling: 'Que mais chamam',
+    mostCallingHint: 'Orquestradores: dependem de muitas outras partes.',
+    mostImported: 'Arquivos centrais',
+    mostImportedHint: 'Importados por mais arquivos.',
+    mostDependencies: 'Arquivos com mais dependências',
+    mostDependenciesHint: 'Importam mais arquivos do projeto.',
+    largestFiles: 'Maiores arquivos',
+    coupled: 'Pastas mais acopladas',
+    coupledHint: 'Pares de pastas com mais imports entre si.',
+    unusedInternal: 'Possivelmente sem uso',
+    unusedExported: 'Exportados sem uso no projeto',
+    unusedHint:
+      'Ninguém chama e o nome só aparece na declaração. Confira antes de apagar: o código pode ser usado de forma dinâmica.',
+    unusedExportedHint:
+      'Podem ser API pública usada por quem instala o pacote, ou realmente sobras.',
+    callers: (count: number) => n(count, 'chamador', 'chamadores'),
+    callees: (count: number) => n(count, 'chamada', 'chamadas'),
+    importers: (count: number) => n(count, 'arquivo', 'arquivos'),
+    lines: (count: number) => n(count, 'linha', 'linhas'),
+    imports: (count: number) => n(count, 'import', 'imports'),
+    none: 'Nada a mostrar aqui.',
+  },
   source: {
     unavailable:
       'O código não está disponível neste modo (grafo aberto a partir de um arquivo JSON). Use o caminho e as linhas acima para localizar o trecho no editor.',
@@ -453,6 +482,36 @@ const en: Messages = {
       'Dashed red lines are references that could not be resolved.',
     ],
     analyzedAt: (date, ms, ts) => `Analyzed on ${date} · ${ms} ms · TypeScript ${ts}`,
+  },
+  insights: {
+    tabSummary: 'Summary',
+    tabInsights: 'Insights',
+    title: 'Where to look first',
+    intro: 'Rankings computed from proven relationships only. Click to jump to the map.',
+    mostCalled: 'Most called',
+    mostCalledHint:
+      'Functions and methods used from the most places: changes here have wide impact.',
+    mostCalling: 'Calling the most',
+    mostCallingHint: 'Orchestrators: they depend on many other parts.',
+    mostImported: 'Central files',
+    mostImportedHint: 'Imported by the most files.',
+    mostDependencies: 'Files with the most dependencies',
+    mostDependenciesHint: 'They import the most project files.',
+    largestFiles: 'Largest files',
+    coupled: 'Most coupled folders',
+    coupledHint: 'Folder pairs with the most imports between them.',
+    unusedInternal: 'Possibly unused',
+    unusedExported: 'Exported but unused in the project',
+    unusedHint:
+      'Nothing calls it and its name only appears in its declaration. Double-check before deleting: it may be used dynamically.',
+    unusedExportedHint:
+      'They may be public API used by whoever installs the package, or real leftovers.',
+    callers: (count) => n(count, 'caller', 'callers'),
+    callees: (count) => n(count, 'callee', 'callees'),
+    importers: (count) => n(count, 'file', 'files'),
+    lines: (count) => n(count, 'line', 'lines'),
+    imports: (count) => n(count, 'import', 'imports'),
+    none: 'Nothing to show here.',
   },
   source: {
     unavailable:

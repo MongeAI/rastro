@@ -24,6 +24,7 @@ import {
   IconSun,
   Logo,
 } from './components/Icons';
+import { Insights } from './components/Insights';
 import { Overview } from './components/Overview';
 import { Search } from './components/Search';
 import { NODE_KIND_ORDER, Sidebar } from './components/Sidebar';
@@ -212,6 +213,7 @@ function Explorer({
     () => readPref<'shown' | 'hidden'>('sidebar', 'shown', ['shown', 'hidden']) === 'hidden',
   );
   const [history, setHistory] = useState<string[]>([]);
+  const [panelTab, setPanelTab] = useState<'summary' | 'insights'>('summary');
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedId;
 
@@ -493,6 +495,7 @@ function Explorer({
             onClick={() => {
               setSelectedId(null);
               setSelectedEdgeId(null);
+              setPanelTab('summary');
             }}
             title={t.top.summaryTitle}
             aria-label={t.top.summaryTitle}
@@ -715,7 +718,27 @@ function Explorer({
             onClose={() => setSelectedId(null)}
           />
         ) : (
-          <Overview graph={graph} index={index} onNavigate={(id) => navigate(id)} />
+          <>
+            <div className="panel-tabs" role="tablist">
+              {(['summary', 'insights'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={panelTab === tab}
+                  className={panelTab === tab ? 'on' : ''}
+                  onClick={() => setPanelTab(tab)}
+                >
+                  {tab === 'summary' ? t.insights.tabSummary : t.insights.tabInsights}
+                </button>
+              ))}
+            </div>
+            {panelTab === 'summary' ? (
+              <Overview graph={graph} index={index} onNavigate={(id) => navigate(id)} />
+            ) : (
+              <Insights index={index} onNavigate={(id) => navigate(id)} />
+            )}
+          </>
         )}
       </aside>
     </div>

@@ -157,6 +157,8 @@ export async function analyzeProject(
     release(sf);
   }
 
+  countMentions(ctx);
+
   progress('Montando o grafo...');
   const finalized = ctx.builder.finalize();
   const languages = [...new Set(discovered.files.map((f) => f.language))].sort();
@@ -232,6 +234,30 @@ function describeError(err: unknown): string {
     return 'estrutura aninhada demais para analisar';
   if ((err as NodeJS.ErrnoException)?.code === 'EACCES') return 'sem permissão de leitura';
   return message;
+}
+
+/**
+ * Conta, em todo o código analisado, quantas vezes o nome de cada função, classe ou método
+ * aparece como palavra. É uma medida textual (inclui comentários e textos), usada de forma
+ * conservadora: só um nome citado uma única vez indica que nada mais o menciona.
+ */
+function countMentions(ctx: Ctx): void {
+  const counts = new Map<string, number>();
+  const word = /[A-Za-z_$][\w$]*/g;
+  for (const lines of ctx.lines.values()) {
+    for (const line of lines) {
+      for (const match of line.matchAll(word))
+        counts.set(match[0], (counts.get(match[0]) ?? 0) + 1);
+    }
+  }
+  for (const id of new Set(ctx.entities.values())) {
+    const node = ctx.builder.getNode(id);
+    if (!node || (node.kind !== 'function' && node.kind !== 'class' && node.kind !== 'method'))
+      continue;
+    const name = node.name.replace(/^(get|set) /, '');
+    if (name === 'default' || name === 'constructor' || name === 'module.exports') continue;
+    node.meta = { ...node.meta, mentions: counts.get(name) ?? 0 };
+  }
 }
 
 /**

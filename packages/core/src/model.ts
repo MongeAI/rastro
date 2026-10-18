@@ -101,6 +101,12 @@ export interface NodeMeta {
   framework?: string;
   /** Para nós não resolvidos: por que não foi possível resolver. */
   reason?: UnresolvedReason;
+  /**
+   * Para funções, classes e métodos: quantas vezes o nome aparece como palavra no código
+   * analisado (incluindo a própria declaração). Base para "possivelmente sem uso": um nome
+   * citado uma única vez só existe na declaração.
+   */
+  mentions?: number;
   /** Para nós não resolvidos: o texto original da referência. */
   reference?: string;
 }

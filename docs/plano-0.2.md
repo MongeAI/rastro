@@ -25,9 +25,9 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 3. Insights: onde olhar primeiro
 
-- ⬜ Painel **Insights**: pontos críticos (mais chamados / mais dependências, fan-in e fan-out), arquivos maiores, ciclos, módulos mais acoplados.
-- ⬜ **Código possivelmente sem uso**: exports nunca importados e funções nunca chamadas (com o aviso honesto de que chamadas dinâmicas podem existir).
-- ⬜ Cada insight é clicável e leva ao mapa.
+- ✅ Painel **Insights**: pontos críticos (mais chamados / mais dependências, fan-in e fan-out), arquivos maiores, ciclos, módulos mais acoplados.
+- ✅ **Código possivelmente sem uso**: exports nunca importados e funções nunca chamadas (com o aviso honesto de que chamadas dinâmicas podem existir).
+- ✅ Cada insight é clicável e leva ao mapa.
 
 ### 4. Caminhos: "como A chega em B?"
 
