@@ -30,7 +30,7 @@ export function Search({ index, onPick, focusSignal }: Props) {
     inputRef.current?.focus();
   }, [focusSignal]);
 
-  // atalhos globais: "/" e Ctrl/Cmd+K focam a busca
+  // atalho global: "/" foca a busca (Ctrl/Cmd+K abre a paleta de comandos)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target;
@@ -38,7 +38,7 @@ export function Search({ index, onPick, focusSignal }: Props) {
         (t instanceof HTMLInputElement && !['checkbox', 'radio'].includes(t.type)) ||
         t instanceof HTMLTextAreaElement ||
         t instanceof HTMLSelectElement;
-      if ((e.key === '/' && !typing) || (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey))) {
+      if (e.key === '/' && !typing) {
         e.preventDefault();
         inputRef.current?.focus();
         inputRef.current?.select();

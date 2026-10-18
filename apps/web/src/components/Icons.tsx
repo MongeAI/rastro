@@ -157,3 +157,20 @@ export const Logo = ({ size = 22 }: { size?: number }) => (
     <circle cx="24.5" cy="9" r="3.2" fill="none" stroke="var(--bg)" strokeWidth="1.6" />
   </svg>
 );
+export const IconCommand = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" />
+  </svg>
+);
+export const IconMinimap = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <rect x="12" y="11" width="6" height="5" rx="1" />
+  </svg>
+);
+export const IconKeyboard = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M8 14h8" />
+  </svg>
+);

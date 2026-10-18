@@ -94,6 +94,12 @@ export function DetailsPanel(p: Props) {
             <IconClose />
           </button>
         </div>
+        <Breadcrumb
+          index={index}
+          node={node}
+          label={t.stage.breadcrumb}
+          onNavigate={p.onNavigate}
+        />
         <h2 className="details-name">
           {node.kind === 'method' ? (node.qualifiedName ?? node.name) : node.name}
         </h2>
@@ -451,5 +457,41 @@ function RelationList({
         </button>
       )}
     </>
+  );
+}
+
+/** pasta › arquivo › classe: onde a entidade fica; cada parte leva até ela. */
+function Breadcrumb({
+  index,
+  node,
+  label,
+  onNavigate,
+}: {
+  index: GraphIndex;
+  node: GraphNode;
+  label: string;
+  onNavigate(id: string): void;
+}) {
+  const chain = index.ancestors(node.id).reverse();
+  if (!chain.length) return null;
+  return (
+    <nav className="breadcrumb" aria-label={label}>
+      <ol>
+        {chain.map((a) => (
+          <li key={a.id}>
+            <button
+              type="button"
+              className="crumb"
+              onClick={() => onNavigate(a.id)}
+              title={a.qualifiedName ?? a.name}
+            >
+              <KindDot kind={a.kind} />
+              {/* a pasta raiz aparece com o nome do projeto */}
+              {a.kind === 'module' && !a.parent ? index.graph.project.name : a.name}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }

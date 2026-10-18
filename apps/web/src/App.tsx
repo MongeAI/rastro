@@ -14,17 +14,26 @@ import {
   groupableModules,
 } from '@rastro/graph';
 import { ChangesPanel } from './components/ChangesPanel';
+import { CommandPalette, type PaletteAction } from './components/CommandPalette';
 import { DetailsPanel } from './components/DetailsPanel';
 import { EdgeDetails } from './components/EdgeDetails';
-import { GraphCanvas, type GraphCanvasHandle, type LayoutMode } from './components/GraphCanvas';
+import {
+  GraphCanvas,
+  type Direction,
+  type GraphCanvasHandle,
+  type LayoutMode,
+} from './components/GraphCanvas';
 import {
   IconBack,
+  IconCommand,
   IconDownload,
   IconFit,
   IconImage,
   IconInfo,
+  IconKeyboard,
   IconLayout,
   IconMenu,
+  IconMinimap,
   IconMinus,
   IconMoon,
   IconPlus,
@@ -35,10 +44,11 @@ import { Insights } from './components/Insights';
 import { Overview } from './components/Overview';
 import { PathPanel } from './components/PathPanel';
 import { Search } from './components/Search';
+import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { clearSourceCache } from './components/SourceView';
 import { NODE_KIND_ORDER, Sidebar } from './components/Sidebar';
 import { downloadBlob, downloadText, slug } from './lib/download';
-import { EDITORS, readPref, writePref, type EditorId } from './lib/editor';
+import { copyText, EDITORS, readPref, writePref, type EditorId } from './lib/editor';
 import type { Level } from './lib/levels';
 import { detectLang, I18nProvider, useI18n, type Messages } from './lib/i18n';
 import { displayPath } from './lib/paths';
@@ -277,6 +287,11 @@ function Explorer({
   const [pathMode, setPathMode] = useState<{ from: string; to?: string } | null>(null);
   const [activePath, setActivePath] = useState(0);
   const [searchFocus, setSearchFocus] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [minimap, setMinimap] = useState(
+    () => readPref<'shown' | 'hidden'>('minimap', 'shown', ['shown', 'hidden']) === 'shown',
+  );
   const pathModeRef = useRef(pathMode);
   pathModeRef.current = pathMode;
   const selectedRef = useRef<string | null>(null);
@@ -289,6 +304,7 @@ function Explorer({
   useEffect(() => writePref('editor', editor), [editor]);
   useEffect(() => writePref('layout', layout), [layout]);
   useEffect(() => writePref('sidebar', sidebarCollapsed ? 'hidden' : 'shown'), [sidebarCollapsed]);
+  useEffect(() => writePref('minimap', minimap ? 'shown' : 'hidden'), [minimap]);
   useEffect(() => {
     document.title = `${graph.project.name} · Rastro`;
   }, [graph.project.name]);
@@ -471,27 +487,86 @@ function Explorer({
     setHideTypeOnly(false);
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target;
-      const typing =
-        (t instanceof HTMLInputElement && !['checkbox', 'radio', 'button'].includes(t.type)) ||
-        t instanceof HTMLSelectElement ||
-        t instanceof HTMLTextAreaElement;
-      if (typing) return;
-      if (e.key === 'Escape') {
-        if (sidebarOpen) setSidebarOpen(false);
-        else if (pathModeRef.current) setPathMode(null);
-        else if (selectedEdgeId) setSelectedEdgeId(null);
-        else if (selectedId) setSelectedId(null);
-        else if (focus) setFocus(null);
-      } else if (e.key === 'f' && !e.metaKey && !e.ctrlKey) {
-        canvas.current?.fit();
-      }
+  /** Setas: vai para o nó mais próximo naquela direção (ou o do centro, sem seleção). */
+  const moveSelection = (direction: Direction) => {
+    const next = canvas.current?.nearest(selectedId, direction);
+    if (!next) return;
+    navigate(next, false, false);
+    canvas.current?.reveal(next);
+  };
+  const goToParent = () => {
+    const parent = selectedId ? index.node(selectedId)?.parent : undefined;
+    if (parent) navigate(parent);
+  };
+
+  // atalhos globais; o manipulador muda a cada render, o ouvinte é registrado uma vez
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  onKeyRef.current = (e: KeyboardEvent) => {
+    if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey) && !e.altKey) {
+      e.preventDefault();
+      setShortcutsOpen(false);
+      setPaletteOpen((o) => !o);
+      return;
+    }
+    if (paletteOpen || shortcutsOpen) return;
+    const target = e.target;
+    const typing =
+      (target instanceof HTMLInputElement &&
+        !['checkbox', 'radio', 'button'].includes(target.type)) ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLElement && target.isContentEditable);
+    if (typing || e.ctrlKey || e.metaKey) return;
+    // setas e Enter têm significado próprio em listas, abas e botões; no mapa (ou sem foco) navegam
+    const onMap =
+      target === document.body ||
+      (target instanceof Element && !!target.closest('.graph-canvas, .stage'));
+    const arrowsFree =
+      !(target instanceof Element) || !target.closest('[role="listbox"], [role="tablist"], pre');
+    const picking = !!pathModeRef.current && !pathModeRef.current.to;
+    const arrows: Record<string, Direction> = {
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
     };
+
+    if (e.key === 'Escape') {
+      if (sidebarOpen) setSidebarOpen(false);
+      else if (pathModeRef.current) setPathMode(null);
+      else if (selectedEdgeId) setSelectedEdgeId(null);
+      else if (selectedId) setSelectedId(null);
+      else if (focus) setFocus(null);
+    } else if (e.key === 'ArrowUp' && e.altKey) {
+      e.preventDefault();
+      goToParent();
+    } else if (arrows[e.key] && !e.altKey && !e.shiftKey && arrowsFree && !picking) {
+      e.preventDefault();
+      moveSelection(arrows[e.key]!);
+    } else if (e.key === 'Enter' && onMap && selectedId) {
+      e.preventDefault();
+      activate(selectedId);
+    } else if (e.key === 'Backspace' && !e.altKey) {
+      if (history.length) {
+        e.preventDefault();
+        goBack();
+      }
+    } else if (e.key === '?') {
+      e.preventDefault();
+      setShortcutsOpen(true);
+    } else if (e.altKey || e.shiftKey) {
+      return;
+    } else if (e.key === 'f') {
+      canvas.current?.fit();
+    } else if (e.key === 'm') {
+      setMinimap((v) => !v);
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onKeyRef.current(e);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, selectedEdgeId, focus, sidebarOpen]);
+  }, []);
 
   const exportJson = () =>
     downloadText(`${slug(graph.project.name)}.rastro.json`, `${JSON.stringify(graph, null, 2)}\n`);
@@ -586,6 +661,239 @@ function Explorer({
     setCenterRequest((r) => ({ id: ids[0]!, seq: (r?.seq ?? 0) + 1, fitIds: ids }));
   }, [showChanges, changeImpact, index]);
 
+  /** Ações da paleta de comandos (só montadas com a paleta aberta). */
+  const paletteActions = (): PaletteAction[] => {
+    const g = t.palette.groups;
+    const kw = t.palette.keywords;
+    const showPanel = (tab: 'summary' | 'insights' | 'changes') => {
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+      setPathMode(null);
+      setPanelTab(tab);
+    };
+    const actions: PaletteAction[] = [];
+    const selected = selectedId ? index.node(selectedId) : undefined;
+    if (selected) {
+      const name =
+        selected.qualifiedName && selected.kind !== 'file' ? selected.qualifiedName : selected.name;
+      const group = `${g.selection} · ${name}`;
+      actions.push(
+        {
+          id: 'focus',
+          label: focus?.id === selected.id ? t.palette.leaveFocus : t.details.focus,
+          group,
+          icon: <IconFit />,
+          run: () =>
+            setFocus(
+              focus?.id === selected.id ? null : { id: selected.id, depth: focus?.depth ?? 1 },
+            ),
+        },
+        {
+          id: 'path',
+          label: t.paths.start,
+          group,
+          icon: <IconLayout />,
+          run: () => {
+            setPathMode({ from: selected.id });
+            setActivePath(0);
+            setSearchFocus((n) => n + 1);
+          },
+        },
+        {
+          id: 'expand',
+          label: t.details.expand,
+          group,
+          icon: <IconPlus />,
+          run: () => expandNeighbors(selected.id),
+        },
+      );
+      if (selected.kind === 'module' || (selected.kind === 'file' && level !== 'symbols'))
+        actions.push({
+          id: 'toggle',
+          label: t.palette.toggleOpen,
+          group,
+          shortcut: 'Enter',
+          icon: <IconPlus />,
+          run: () => activate(selected.id),
+        });
+      if (selected.parent)
+        actions.push({
+          id: 'parent',
+          label: t.palette.parent,
+          group,
+          shortcut: 'Alt ↑',
+          icon: <IconBack />,
+          run: goToParent,
+        });
+      actions.push(
+        {
+          id: 'link',
+          label: t.palette.copyLink,
+          group,
+          icon: <IconCommand />,
+          run: () => {
+            const url = `${window.location.href.split('#')[0]}#n=${encodeURIComponent(selected.id)}`;
+            void copyText(url);
+          },
+        },
+        {
+          id: 'clear',
+          label: t.palette.clearSelection,
+          group,
+          shortcut: 'Esc',
+          run: () => setSelectedId(null),
+        },
+      );
+    }
+    if (history.length)
+      actions.push({
+        id: 'back',
+        label: t.stage.backTitle,
+        group: g.selection,
+        shortcut: '⌫',
+        icon: <IconBack />,
+        run: goBack,
+      });
+    if (focus && focus.id !== selectedId)
+      actions.push({
+        id: 'unfocus',
+        label: t.palette.leaveFocus,
+        group: g.map,
+        run: () => setFocus(null),
+      });
+    if (pinned.size)
+      actions.push({
+        id: 'unpin',
+        label: t.palette.clearPinned,
+        group: g.map,
+        run: () => setPinned(new Set()),
+      });
+    for (const id of ['modules', 'files', 'symbols'] as const)
+      if (id !== level)
+        actions.push({
+          id: `level-${id}`,
+          label: t.palette.level(t.sidebar.levels[id]),
+          group: g.map,
+          keywords: kw.level,
+          icon: <IconLayout />,
+          run: () => {
+            if (
+              id === 'symbols' &&
+              symbolCount > 1000 &&
+              !confirm(t.sidebar.confirmSymbols(symbolCount))
+            )
+              return;
+            setLevel(id);
+          },
+        });
+    actions.push(
+      {
+        id: 'layout',
+        label: t.palette.layout(
+          layout === 'hierarchical' ? t.sidebar.organic : t.sidebar.hierarchical,
+        ),
+        group: g.map,
+        keywords: kw.layout,
+        icon: <IconLayout />,
+        run: () => setLayout(layout === 'hierarchical' ? 'organic' : 'hierarchical'),
+      },
+      {
+        id: 'fit',
+        label: t.stage.fit,
+        group: g.map,
+        shortcut: 'F',
+        icon: <IconFit />,
+        run: () => canvas.current?.fit(),
+      },
+      {
+        id: 'relayout',
+        label: t.palette.relayout,
+        group: g.map,
+        icon: <IconLayout />,
+        run: () => canvas.current?.relayout(),
+      },
+      {
+        id: 'minimap',
+        label: minimap ? t.stage.hideMinimap : t.stage.showMinimap,
+        group: g.map,
+        icon: <IconMinimap />,
+        run: () => setMinimap((v) => !v),
+      },
+      { id: 'reset', label: t.stage.reset, group: g.map, run: resetView },
+      {
+        id: 'summary',
+        label: t.palette.showSummary,
+        group: g.panel,
+        icon: <IconInfo />,
+        run: () => showPanel('summary'),
+      },
+      {
+        id: 'insights',
+        label: t.palette.showInsights,
+        group: g.panel,
+        icon: <IconInfo />,
+        run: () => showPanel('insights'),
+      },
+    );
+    if (changeImpact)
+      actions.push({
+        id: 'changes',
+        label: t.palette.showChanges,
+        group: g.panel,
+        icon: <IconInfo />,
+        run: () => showPanel('changes'),
+      });
+    actions.push(
+      {
+        id: 'sidebar',
+        label: sidebarVisible ? t.top.hideFilters : t.top.showFilters,
+        group: g.panel,
+        icon: <IconMenu />,
+        run: toggleSidebar,
+      },
+      {
+        id: 'export-json',
+        label: t.top.exportTitle,
+        group: g.prefs,
+        keywords: kw.export,
+        icon: <IconDownload />,
+        run: exportJson,
+      },
+      {
+        id: 'export-png',
+        label: t.stage.savePngTitle,
+        group: g.prefs,
+        keywords: kw.export,
+        icon: <IconImage />,
+        run: exportPng,
+      },
+      {
+        id: 'theme',
+        label: theme === 'dark' ? t.top.useLight : t.top.useDark,
+        group: g.prefs,
+        keywords: kw.theme,
+        icon: theme === 'dark' ? <IconSun /> : <IconMoon />,
+        run: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+      },
+      {
+        id: 'lang',
+        label: t.palette.toggleLang,
+        group: g.prefs,
+        keywords: kw.lang,
+        run: () => onLang(lang === 'pt' ? 'en' : 'pt'),
+      },
+      {
+        id: 'shortcuts',
+        label: t.palette.shortcuts,
+        group: g.prefs,
+        shortcut: '?',
+        icon: <IconKeyboard />,
+        run: () => setShortcutsOpen(true),
+      },
+    );
+    return actions;
+  };
+
   const panelMode =
     pathMode?.to && pathResult
       ? 'path'
@@ -620,10 +928,19 @@ function Explorer({
           <span className="brand-project" title={displayPath(graph.project.root)}>
             {graph.project.name}
           </span>
-          <span className="beta">v0.1</span>
+          <span className="beta">v{graph.tool.version.split('.').slice(0, 2).join('.')}</span>
         </div>
         <Search index={index} onPick={(id) => navigate(id)} focusSignal={searchFocus} />
         <div className="top-actions">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setPaletteOpen(true)}
+            aria-label={t.palette.openPalette}
+            title={t.palette.openPalette}
+          >
+            <IconCommand />
+          </button>
           <button
             type="button"
             className="button ghost"
@@ -694,6 +1011,7 @@ function Explorer({
           pathHighlight={pathHighlight}
           changeHighlight={changeHighlight}
           highlightNeighbors={highlightNeighbors}
+          minimap={minimap}
           fitKey={fitKey}
           centerRequest={centerRequest}
           onSelect={(id) => {
@@ -818,6 +1136,16 @@ function Explorer({
           </button>
           <button
             type="button"
+            className={`icon-button${minimap ? ' on' : ''}`}
+            onClick={() => setMinimap((v) => !v)}
+            aria-label={minimap ? t.stage.hideMinimap : t.stage.showMinimap}
+            aria-pressed={minimap}
+            title={minimap ? t.stage.hideMinimap : t.stage.showMinimap}
+          >
+            <IconMinimap />
+          </button>
+          <button
+            type="button"
             className="icon-button"
             onClick={exportPng}
             aria-label={t.stage.savePng}
@@ -933,6 +1261,19 @@ function Explorer({
           </>
         )}
       </aside>
+
+      {paletteOpen && (
+        <CommandPalette
+          index={index}
+          actions={paletteActions()}
+          recent={[...new Set([...history].reverse())]
+            .filter((id) => id !== selectedId)
+            .slice(0, 5)}
+          onPickNode={(id) => navigate(id)}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
     </div>
   );
 }

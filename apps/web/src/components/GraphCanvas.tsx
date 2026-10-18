@@ -8,18 +8,27 @@ import type { GraphView, ViewNode } from '@rastro/graph';
 import { computeElkPositions, LayoutCancelled } from '../lib/elkLayout';
 import { buildStyle, displayLabel, estimateNodeWidth } from '../lib/graphStyle';
 import type { Palette } from '../lib/theme';
+import { Minimap } from './Minimap';
 
 cytoscape.use(fcose);
 // necessário para o fcose empacotar componentes desconectados (packComponents)
 cytoscape.use(layoutUtilities);
 
 export type LayoutMode = 'hierarchical' | 'organic';
+export type Direction = 'up' | 'down' | 'left' | 'right';
 
 export interface GraphCanvasHandle {
   fit(): void;
   zoom(factor: number): void;
   relayout(): void;
   centerOn(id: string): void;
+  /** Move a visão só o necessário para o nó ficar visível (sem mudar o zoom). */
+  reveal(id: string): void;
+  /**
+   * O nó mais próximo na direção pedida (navegação pelo teclado). Sem `fromId`, o nó mais
+   * perto do centro da tela.
+   */
+  nearest(fromId: string | null, direction: Direction): string | null;
   png(background: string): Blob | undefined;
 }
 
@@ -34,6 +43,8 @@ interface Props {
   /** Mudanças do git a destacar: o que mudou e o que é afetado. */
   changeHighlight: { changed: string[]; impacted: string[] } | null;
   highlightNeighbors: boolean;
+  /** Mostra o minimapa no canto do mapa. */
+  minimap: boolean;
   /** Muda quando o mapa deve reenquadrar tudo (ex.: trocar de nível ou entrar no foco). */
   fitKey: string;
   /** Pedido para centralizar um nó (o número garante que pedidos repetidos sejam atendidos). */
@@ -82,6 +93,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   i18nRef.current = i18n;
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cyInstance, setCyInstance] = useState<Core | null>(null);
   /** Fator de ampliação dos rótulos dos grupos (lido pelo estilo, sem criar regras novas). */
   const labelScale = useRef(1);
   const groupWidths = useRef(new Map<string, number>());
@@ -238,6 +250,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       autounselectify: true,
     });
     cyRef.current = cy;
+    setCyInstance(cy);
     firstLayout.current = true;
     lastFitKey.current = null;
 
@@ -325,6 +338,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       observer.disconnect();
       cy.destroy();
       cyRef.current = null;
+      setCyInstance(null);
     };
   }, []);
 
@@ -590,6 +604,91 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       if (cy && node?.nonempty())
         cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) }, { duration: 350 });
     },
+    reveal: (id) => {
+      const cy = cyRef.current;
+      const node = cy?.getElementById(id);
+      if (!cy || !node || node.empty()) return;
+      const box = node.renderedBoundingBox();
+      const margin = 60;
+      const dx =
+        box.x1 < margin
+          ? margin - box.x1
+          : box.x2 > cy.width() - margin
+            ? cy.width() - margin - box.x2
+            : 0;
+      const dy =
+        box.y1 < margin
+          ? margin - box.y1
+          : box.y2 > cy.height() - margin
+            ? cy.height() - margin - box.y2
+            : 0;
+      // nó maior que a tela (ex.: uma pasta inteira): centraliza
+      if (box.w > cy.width() - 2 * margin || box.h > cy.height() - 2 * margin) {
+        cy.animate({ center: { eles: node } }, { duration: 220, easing: 'ease-out-cubic' });
+        return;
+      }
+      if (dx || dy) {
+        const pan = cy.pan();
+        cy.animate(
+          { pan: { x: pan.x + dx, y: pan.y + dy } },
+          { duration: 220, easing: 'ease-out-cubic' },
+        );
+      }
+    },
+    nearest: (fromId, direction) => {
+      const cy = cyRef.current;
+      if (!cy) return null;
+      const from = fromId ? cy.getElementById(fromId) : null;
+      if (!from || from.empty()) {
+        // sem seleção: o nó (não grupo) mais perto do centro da tela
+        const ext = cy.extent();
+        const cx = (ext.x1 + ext.x2) / 2;
+        const cyy = (ext.y1 + ext.y2) / 2;
+        let best: string | null = null;
+        let bestD = Infinity;
+        cy.nodes()
+          .filter((n) => !n.isParent())
+          .forEach((n) => {
+            const p = n.position();
+            const d = (p.x - cx) ** 2 + (p.y - cyy) ** 2;
+            if (d < bestD) {
+              bestD = d;
+              best = n.id();
+            }
+          });
+        return best;
+      }
+      // ignora quem contém o nó e quem está dentro dele: andar "para cima" não deve cair na pasta
+      const skip = from.ancestors().union(from.descendants()).union(from);
+      const origin = from.position();
+      const [ax, ay] =
+        direction === 'up'
+          ? [0, -1]
+          : direction === 'down'
+            ? [0, 1]
+            : direction === 'left'
+              ? [-1, 0]
+              : [1, 0];
+      let best: string | null = null;
+      let bestScore = Infinity;
+      cy.nodes()
+        .not(skip)
+        .forEach((n) => {
+          const p = n.position();
+          const dx = p.x - origin.x;
+          const dy = p.y - origin.y;
+          const along = dx * ax + dy * ay;
+          if (along <= 1) return;
+          const across = Math.abs(dx * ay - dy * ax);
+          // fora do cone de 45° só conta se não houver nada dentro dele
+          const score = along + across * (across > along ? 6 : 2);
+          if (score < bestScore) {
+            bestScore = score;
+            best = n.id();
+          }
+        });
+      return best;
+    },
     png: (background) =>
       cyRef.current?.png({
         output: 'blob',
@@ -616,6 +715,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
           <span>{tooltip.detail}</span>
         </div>
       )}
+      {props.minimap && cyInstance && <Minimap cy={cyInstance} palette={props.palette} />}
       {busy && (
         <div className="layout-busy" aria-live="polite">
           {i18n.t.stage.organizing}

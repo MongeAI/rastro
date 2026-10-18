@@ -53,9 +53,9 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 8. Navegação de outro nível
 
-- ⬜ **Paleta de comandos** (<kbd>Ctrl</kbd>+<kbd>K</kbd>): buscar entidades e ações (trocar nível, focar, exportar, tema…).
-- ⬜ Minimapa e navegação por teclado entre vizinhos.
-- ⬜ Breadcrumb pasta › arquivo › classe › método.
+- ✅ **Paleta de comandos** (<kbd>Ctrl</kbd>+<kbd>K</kbd>): entidades e ~30 ações contextuais (nível, foco, caminho, exportar, tema, idioma…), busca sem acento e por iniciais, `>` para só ações, recentes com a busca vazia.
+- ✅ Minimapa clicável/arrastável (tecla <kbd>M</kbd>, preferência salva) e navegação por teclado: setas vão ao nó mais próximo naquela direção, <kbd>Enter</kbd> abre/recolhe, <kbd>Alt</kbd>+<kbd>↑</kbd> sobe, <kbd>Backspace</kbd> volta, <kbd>?</kbd> lista os atalhos.
+- ✅ Breadcrumb pasta › arquivo › classe › método no painel de detalhes, cada parte clicável.
 
 ### 9. Precisão do analisador
 
