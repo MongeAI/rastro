@@ -130,6 +130,38 @@ describe('parseUnifiedDiff', () => {
     ]);
   });
 
+  it('arquivos sem ---/+++ (binários, vazios, só modo): o caminho da linha diff --git', () => {
+    const diff = [
+      'diff --git a/logo.png b/logo.png',
+      'deleted file mode 100644',
+      'index 1234567..0000000',
+      'Binary files a/logo.png and /dev/null differ',
+      'diff --git a/types.ts b/types.ts',
+      'deleted file mode 100644',
+      'index e69de29..0000000',
+      'diff --git a/vazio novo.ts b/vazio novo.ts',
+      'new file mode 100644',
+      'index 0000000..e69de29',
+      'diff --git a/run.sh b/run.sh',
+      'old mode 100644',
+      'new mode 100755',
+      'diff --git "a/x\\"y b/z.png" "b/x\\"y b/z.png"',
+      'index 1..2 100644',
+      'Binary files "a/x\\"y b/z.png" and "b/x\\"y b/z.png" differ',
+      'diff --git a/a b/c.ts b/a b/c.ts',
+      'old mode 100644',
+      'new mode 100755',
+    ].join('\n');
+    expect(parseUnifiedDiff(diff)).toEqual([
+      { file: 'logo.png', status: 'deleted', ranges: [] },
+      { file: 'types.ts', status: 'deleted', ranges: [] },
+      { file: 'vazio novo.ts', status: 'added', ranges: [] },
+      { file: 'run.sh', status: 'modified', ranges: [] },
+      { file: 'x"y b/z.png', status: 'modified', ranges: [] },
+      { file: 'a b/c.ts', status: 'modified', ranges: [] },
+    ]);
+  });
+
   it('nomes das linhas removidas (fora de chamadas): pistas do que a mudança tirou', () => {
     const diff = [
       'diff --git a/src/a.ts b/src/a.ts',

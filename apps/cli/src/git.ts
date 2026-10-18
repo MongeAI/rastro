@@ -237,6 +237,28 @@ function headerPath(rest: string): string {
   return unquote(rest.endsWith('\t') ? rest.slice(0, -1) : rest);
 }
 
+/**
+ * Caminho da linha `diff --git a/X b/Y` (sem o prefixo), para arquivos sem `---`/`+++`
+ * (binários, vazios, só mudança de modo). Sem renomeação os dois lados são iguais: com aspas
+ * (caracteres especiais), cada lado é uma string do git; sem aspas, as duas metades iguais
+ * (o caminho pode ter espaços). `undefined` se não der para separar com segurança.
+ */
+export function diffGitPath(rest: string): string | undefined {
+  if (rest.startsWith('"')) {
+    // fim da primeira string entre aspas: a primeira aspa não escapada
+    let end = 1;
+    while (end < rest.length && rest[end] !== '"') end += rest[end] === '\\' ? 2 : 1;
+    const second = rest.slice(end + 2);
+    const a = unquote(rest.slice(0, end + 1));
+    const b = second.startsWith('"') ? unquote(second) : second;
+    return a.startsWith('a/') && b === `b/${a.slice(2)}` ? a.slice(2) : undefined;
+  }
+  const half = (rest.length - 5) / 2;
+  if (!Number.isInteger(half) || half < 1 || !rest.startsWith('a/')) return undefined;
+  const a = rest.slice(2, 2 + half);
+  return rest.slice(2 + half, 5 + half) === ' b/' && rest.slice(5 + half) === a ? a : undefined;
+}
+
 /** Máximo de nomes guardados por arquivo (uma remoção enorme não incha o grafo). */
 const MAX_REMOVED_NAMES = 500;
 const IDENTIFIER = /(?<![\p{L}\p{N}_$.])[\p{L}_$][\p{L}\p{N}_$]*/gu;
@@ -274,6 +296,8 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
   const files: ChangedFile[] = [];
   let current: ChangedFile | null = null;
   const removed = new Map<ChangedFile, Set<string>>();
+  /** Caminho da linha `diff --git`, usado só quando não vêm `---`/`+++` nem `rename to`. */
+  const fromHeader = new Map<ChangedFile, string>();
   // depois do primeiro @@ de um arquivo, tudo é conteúdo (linhas com +, -, espaço ou \) até o
   // próximo "diff --git": uma linha adicionada "++ n;" aparece como "+++ n;" e não é cabeçalho
   let inHunk = false;
@@ -281,6 +305,8 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
     if (line.startsWith('diff --git ')) {
       current = { file: '', status: 'modified', ranges: [] };
       files.push(current);
+      const header = diffGitPath(line.slice('diff --git '.length));
+      if (header) fromHeader.set(current, header);
       inHunk = false;
       continue;
     }
@@ -316,6 +342,7 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
     }
   }
   for (const [file, names] of removed) if (names.size) file.removedNames = [...names];
+  for (const [file, header] of fromHeader) if (!file.file) file.file = header;
   return files.filter((f) => f.file);
 }
 

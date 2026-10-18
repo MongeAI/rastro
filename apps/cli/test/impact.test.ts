@@ -502,6 +502,25 @@ describe('possivelmente quebrado pela mudança', () => {
     ]);
   });
 
+  it('arquivo binário ou vazio removido (o diff não tem ---/+++)', async () => {
+    setLang('en');
+    const root = gitProject(
+      {
+        'logo.png': '\u0000\u0001PNG\u0000binário',
+        'types.ts': '',
+        'main.ts': "import logo from './logo.png';\nimport './types';\nexport const l = logo;\n",
+      },
+      ({ git }) => {
+        git('rm', '-q', 'logo.png');
+        git('rm', '-q', 'types.ts');
+      },
+    );
+    expect(await brokenOf(root)).toEqual([
+      ['import', 'main.ts', './logo.png', 'logo.png', 'file-deleted', 'main.ts:1'],
+      ['import', 'main.ts', './types', 'types.ts', 'file-deleted', 'main.ts:2'],
+    ]);
+  });
+
   it('nada quebrado: nenhuma seção nova', async () => {
     setLang('en');
     const report = buildImpactReport(await graphWithChanges(changedProject()));
