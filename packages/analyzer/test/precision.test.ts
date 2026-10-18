@@ -923,6 +923,21 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
     }
   });
 
+  it('export { type X } from não cria ciclo de importação (é só de tipo)', async () => {
+    const g = await analyzeProject(
+      makeProject({
+        'src/a.ts': 'export { type B } from "./b";\nexport interface A { x: number }\n',
+        'src/b.ts': 'export { type A } from "./a";\nexport interface B { y: number }\n',
+        'src/c.ts': 'export { type A, x } from "./d";\n',
+        'src/d.ts': 'export type A = 1;\nexport const x = 1;\n',
+      }),
+    );
+    expect(g.stats.importCycles).toEqual([]);
+    expect(edge(g, 'imports', 'file:src/a.ts', 'file:src/b.ts')?.meta?.typeOnly).toBe(true);
+    // com um nome de valor junto, não é só de tipo
+    expect(edge(g, 'imports', 'file:src/c.ts', 'file:src/d.ts')?.meta?.typeOnly).toBeUndefined();
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');

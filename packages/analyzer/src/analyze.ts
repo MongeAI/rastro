@@ -1182,7 +1182,12 @@ function collectImports(sf: SourceFile): { found: ImportFound[]; dynamic: Node[]
   for (const decl of sf.getExportDeclarations()) {
     const specifier = decl.getModuleSpecifierValue();
     if (!specifier) continue;
-    const names = decl.isNamespaceExport() ? ['*'] : decl.getNamedExports().map((n) => n.getName());
+    const named = decl.getNamedExports();
+    const names = decl.isNamespaceExport() ? ['*'] : named.map((n) => n.getName());
+    // `export { type A, type B } from`: só tipos, como `export type { ... } from`
+    const typeOnly =
+      decl.isTypeOnly() ||
+      (!decl.isNamespaceExport() && named.length > 0 && named.every((n) => n.isTypeOnly()));
     // `export * as ns from`: o namespace inteiro sai com um nome só (não é um barril)
     const namespaceAs = decl.getNamespaceExport()?.getName();
     found.push({
@@ -1192,7 +1197,7 @@ function collectImports(sf: SourceFile): { found: ImportFound[]; dynamic: Node[]
         importKind: 're-export',
         names,
         ...(namespaceAs ? { exportedAs: namespaceAs } : {}),
-        ...(decl.isTypeOnly() ? { typeOnly: true } : {}),
+        ...(typeOnly ? { typeOnly: true } : {}),
       },
     });
   }
