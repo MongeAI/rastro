@@ -3,6 +3,7 @@ import type { ViewEdge, ViewNode } from '../view.js';
 import {
   buildExportView,
   edgeLabel,
+  exportTexts,
   exportTitle,
   ExportTooLargeError,
   nodeLabel,
@@ -23,9 +24,6 @@ export const MERMAID_MAX_NODES = 400;
 export const MERMAID_MAX_EDGES = 500;
 /** Limite padrão de texto do Mermaid (`maxTextSize`), usado pelo GitHub. */
 export const MERMAID_MAX_TEXT = 50_000;
-
-const HINT =
-  'Reduza o diagrama com o nível de pastas ou um filtro de pasta (na CLI: --level modules ou --folder <pasta>), ou exporte em DOT/GraphML, que não têm esse limite.';
 
 /** Formas por tipo de nó: [abre, fecha]. */
 const SHAPES: Record<NodeKind, [string, string]> = {
@@ -94,15 +92,16 @@ function baseId(node: ViewNode): string {
 export function toMermaid(graph: RastroGraph, options: MermaidOptions = {}): string {
   const view = buildExportView(graph, options);
   const maxNodes = options.maxNodes ?? MERMAID_MAX_NODES;
+  const text = exportTexts(view.lang);
   if (view.nodes.length > maxNodes)
     throw new ExportTooLargeError(
-      `O diagrama Mermaid teria ${view.nodes.length} nós (limite: ${maxNodes}).`,
-      HINT,
+      text.mermaidTooManyNodes(view.nodes.length, maxNodes),
+      text.mermaidHint,
     );
   if (view.edges.length > MERMAID_MAX_EDGES)
     throw new ExportTooLargeError(
-      `O diagrama Mermaid teria ${view.edges.length} relações (o Mermaid desenha até ${MERMAID_MAX_EDGES}).`,
-      HINT,
+      text.mermaidTooManyEdges(view.edges.length, MERMAID_MAX_EDGES),
+      text.mermaidHint,
     );
 
   // ids curtos e legíveis, únicos na ordem determinística dos nós
@@ -126,7 +125,7 @@ export function toMermaid(graph: RastroGraph, options: MermaidOptions = {}): str
   const emit = (node: ViewNode, depth: number) => {
     const pad = '  '.repeat(depth);
     const id = ids.get(node.id)!;
-    const label = mermaidLabel(nodeLabel(node));
+    const label = mermaidLabel(nodeLabel(node, view.lang));
     const kids = children.get(node.id);
     if (kids?.length) {
       lines.push(`${pad}subgraph ${id}["${label}"]`);
@@ -145,8 +144,8 @@ export function toMermaid(graph: RastroGraph, options: MermaidOptions = {}): str
   const showKind = new Set(view.edges.map((e) => e.kind)).size > 1;
   view.edges.forEach((edge) => {
     const dotted = edge.typeOnly || edge.kind === 'exports';
-    const text = edgeLabel(edge, showKind);
-    const arrow = `${dotted ? '-.->' : '-->'}${text ? `|"${mermaidLabel(text)}"|` : ''}`;
+    const label = edgeLabel(edge, showKind, view.lang);
+    const arrow = `${dotted ? '-.->' : '-->'}${label ? `|"${mermaidLabel(label)}"|` : ''}`;
     lines.push(`  ${ids.get(edge.source)} ${arrow} ${ids.get(edge.target)}`);
   });
 
@@ -162,11 +161,11 @@ export function toMermaid(graph: RastroGraph, options: MermaidOptions = {}): str
     if (indexes.length) lines.push(`  linkStyle ${indexes.join(',')} ${style}`);
   }
 
-  const text = `${lines.join('\n')}\n`;
-  if (text.length > MERMAID_MAX_TEXT)
+  const output = `${lines.join('\n')}\n`;
+  if (output.length > MERMAID_MAX_TEXT)
     throw new ExportTooLargeError(
-      `O diagrama Mermaid teria ${text.length} caracteres (o Mermaid aceita até ${MERMAID_MAX_TEXT}).`,
-      HINT,
+      text.mermaidTooLong(output.length, MERMAID_MAX_TEXT),
+      text.mermaidHint,
     );
-  return text;
+  return output;
 }

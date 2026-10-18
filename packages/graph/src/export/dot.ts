@@ -3,8 +3,8 @@ import type { ViewEdge, ViewNode } from '../view.js';
 import {
   buildExportView,
   edgeLabel,
+  exportTexts,
   exportTitle,
-  LEVEL_LABELS,
   nodeLabel,
   viewTree,
   type ExportOptions,
@@ -71,7 +71,7 @@ export function toDot(graph: RastroGraph, options: DotOptions = {}): string {
       compound: 'true',
       fontname: 'Helvetica',
       fontsize: '11',
-      label: `${view.graph.project.name} · ${LEVEL_LABELS[view.level]}${view.folder ? ` · ${view.folder}` : ''}`,
+      label: `${view.graph.project.name} · ${exportTexts(view.lang).levels[view.level]}${view.folder ? ` · ${view.folder}` : ''}`,
       labelloc: 't',
     })};`,
     `  node ${attrs({ shape: 'box', fontname: 'Helvetica', fontsize: '10' })};`,
@@ -80,7 +80,7 @@ export function toDot(graph: RastroGraph, options: DotOptions = {}): string {
 
   const emit = (node: ViewNode, depth: number) => {
     const pad = '  '.repeat(depth);
-    const label = nodeLabel(node);
+    const label = nodeLabel(node, view.lang);
     const kids = children.get(node.id);
     if (kids?.length) {
       lines.push(`${pad}subgraph ${dotString(`cluster_${node.id}`)} {`);
@@ -107,14 +107,14 @@ export function toDot(graph: RastroGraph, options: DotOptions = {}): string {
   for (const root of roots) emit(root, 1);
 
   const showKind = new Set(view.edges.map((e) => e.kind)).size > 1;
-  for (const edge of view.edges) lines.push(`  ${edgeLine(edge, showKind, isCluster)}`);
+  for (const edge of view.edges)
+    lines.push(`  ${edgeLine(edge, edgeLabel(edge, showKind, view.lang), isCluster)}`);
   lines.push('}');
   return `${lines.join('\n')}\n`;
 }
 
-function edgeLine(edge: ViewEdge, showKind: boolean, isCluster: (id: string) => boolean): string {
+function edgeLine(edge: ViewEdge, label: string, isCluster: (id: string) => boolean): string {
   const values: Record<string, string> = {};
-  const label = edgeLabel(edge, showKind);
   if (label) values.label = label;
   values.color =
     edge.resolution === 'unresolved'

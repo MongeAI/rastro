@@ -18,12 +18,16 @@ import { GraphBuilder } from '@rastro/graph';
 import { discoverFiles, toPosix, type DiscoverOptions, type DiscoveredFile } from './discover.js';
 import { loadCompilerOptions, ModuleResolver, packageNameOf } from './resolve.js';
 import { RouteDetector } from './routes/index.js';
+import { progressMessage, type ProgressEvent } from './progress.js';
 
 export interface AnalyzeOptions extends DiscoverOptions {
   /** Nome exibido do projeto (padrão: nome do package.json ou da pasta). */
   name?: string;
-  /** Recebe mensagens de progresso. */
-  onProgress?: (message: string) => void;
+  /**
+   * Recebe o progresso: o texto padrão (em português) e a etapa com código estável e
+   * parâmetros, para mostrar o texto em outro idioma.
+   */
+  onProgress?: (message: string, event: ProgressEvent) => void;
 }
 
 const MAX_SNIPPET = 160;
@@ -60,12 +64,12 @@ export async function analyzeProject(
   options: AnalyzeOptions = {},
 ): Promise<RastroGraph> {
   const started = performance.now();
-  const progress = options.onProgress ?? (() => {});
+  const progress = (event: ProgressEvent) => options.onProgress?.(progressMessage(event), event);
 
-  progress('Procurando arquivos JavaScript/TypeScript...');
+  progress({ code: 'discovering' });
   const discovered = discoverFiles(rootInput, options);
   const { root } = discovered;
-  progress(`${discovered.files.length} arquivos encontrados.`);
+  progress({ code: 'discovered', files: discovered.files.length });
 
   const config = loadCompilerOptions(root);
   const project = new Project({
@@ -91,7 +95,7 @@ export async function analyzeProject(
   }
   discovered.files = readable;
 
-  progress('Construindo o modelo do compilador...');
+  progress({ code: 'loading-compiler' });
   let program: ts.Program;
   try {
     program = project.getProgram().compilerObject;
@@ -119,7 +123,7 @@ export async function analyzeProject(
     .filter((pair): pair is readonly [DiscoveredFile, SourceFile] => !!pair[1]);
 
   // Passo 1: arquivos, módulos, entidades e rotas (Express, Fastify, Hono, NestJS, Next.js)
-  progress('Extraindo arquivos, funções, classes e métodos...');
+  progress({ code: 'extracting' });
   let syntaxErrors = 0;
   const routes = new RouteDetector(ctx);
   for (const [file, sf] of sourceFiles) {
@@ -158,7 +162,7 @@ export async function analyzeProject(
   }
 
   // Passo 2: relações (imports, exports, chamadas, herança)
-  progress('Resolvendo imports, exports e chamadas...');
+  progress({ code: 'resolving' });
   for (const [file, sf] of sourceFiles) {
     safely(ctx, file, 'imports', () => extractImports(ctx, file, sf));
     safely(ctx, file, 'exports', () => extractExports(ctx, file, sf));
@@ -171,7 +175,7 @@ export async function analyzeProject(
 
   countMentions(ctx);
 
-  progress('Montando o grafo...');
+  progress({ code: 'building-graph' });
   const finalized = ctx.builder.finalize();
   const languages = [...new Set(discovered.files.map((f) => f.language))].sort();
 
@@ -216,7 +220,7 @@ export async function analyzeProject(
       message: 'Nenhum arquivo .js/.jsx/.ts/.tsx foi encontrado (após aplicar as exclusões).',
     });
   }
-  progress(`Concluído em ${graph.stats.durationMs} ms.`);
+  progress({ code: 'done', durationMs: graph.stats.durationMs });
   return graph;
 }
 

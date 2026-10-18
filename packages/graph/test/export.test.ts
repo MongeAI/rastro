@@ -358,3 +358,42 @@ describe('exportadores com o fixture ts-basic', () => {
     expect(mermaid.match(/ -(?:->|\.->)/g)).toHaveLength(view.edges.length);
   });
 });
+
+describe('idioma dos exportadores', () => {
+  it('português por padrão; inglês com lang: en (comentário, níveis, contagens e relações)', () => {
+    const pt = toMermaid(sample(), { level: 'modules' });
+    expect(pt).toContain('%% Rastro · demo "x" <y> · nível: pastas');
+    expect(pt).toContain('(1 arquivo)');
+    expect(pt).toContain('(2 arquivos)');
+
+    const en = toMermaid(sample(), { level: 'modules', lang: 'en' });
+    expect(en).toContain('%% Rastro · demo "x" <y> · level: folders');
+    expect(en).toContain('(1 file)');
+    expect(en).toContain('(2 files)');
+    expect(toMermaid(sample(), { level: 'symbols', lang: 'en' })).toMatch(
+      /fn_run -->\|"calls"\| fn_end/,
+    );
+
+    const dot = toDot(sample(), { level: 'symbols', folder: 'src', lang: 'en' });
+    expect(dot).toMatch(/^\/\/ Rastro · demo "x" <y> · level: symbols · folder: src\n/);
+    expect(dot).toContain('label="demo \\"x\\" <y> · symbols · src"');
+    expect(dot).toContain('label="imports ×2"');
+    expect(toGraphML(sample(), { level: 'modules', lang: 'en' })).toContain(
+      '<data key="n_label">src (2 files)</data>',
+    );
+  });
+
+  it('erros do Mermaid no idioma pedido', () => {
+    const b = new GraphBuilder();
+    for (let i = 0; i < 30; i++) addFile(b, `src/f${i}.ts`);
+    const g = wrap(b, 30);
+    expect(() => toMermaid(g, { maxNodes: 20, lang: 'en' })).toThrow(
+      'The Mermaid diagram would have 31 nodes (limit: 20).',
+    );
+    try {
+      toMermaid(g, { maxNodes: 20, lang: 'en' });
+    } catch (err) {
+      expect((err as ExportTooLargeError).hint).toContain('--level modules or --folder <path>');
+    }
+  });
+});

@@ -1,12 +1,13 @@
 import {
   compareStrings,
-  EDGE_KIND_LABELS,
+  kindLabels,
   NODE_KINDS,
   type EdgeKind,
   type Evidence,
   type GraphEdge,
   type GraphNode,
   type GraphStats,
+  type Lang,
   type RastroGraph,
 } from '@rastro/core';
 import { GraphIndex } from '../query.js';
@@ -39,6 +40,8 @@ export interface ExportOptions {
   includeExternal?: boolean;
   /** Inclui referências não resolvidas. Padrão: `true`. */
   includeUnresolved?: boolean;
+  /** Idioma dos comentários e rótulos legíveis (nível, contagens, tipos de relação). Padrão: `pt`. */
+  lang?: Lang;
 }
 
 /** O que será exportado: a mesma visão calculada pela interface (`computeView`). */
@@ -49,6 +52,7 @@ export interface ExportView {
   level: ExportLevel;
   folder?: string;
   edgeKinds: EdgeKind[];
+  lang: Lang;
   nodes: ViewNode[];
   edges: ViewEdge[];
 }
@@ -186,22 +190,23 @@ export function buildExportView(graph: RastroGraph, options: ExportOptions = {})
     level,
     ...(folder ? { folder } : {}),
     edgeKinds,
+    lang: options.lang ?? 'pt',
     nodes: view.nodes,
     edges: view.edges,
   };
 }
 
 /** Rótulo exibido de um nó: pastas recolhidas mostram quantos arquivos têm. */
-export function nodeLabel(node: ViewNode): string {
+export function nodeLabel(node: ViewNode, lang: Lang = 'pt'): string {
   if (node.collapsed && node.fileCount !== undefined)
-    return `${node.label} (${node.fileCount} ${node.fileCount === 1 ? 'arquivo' : 'arquivos'})`;
+    return `${node.label} (${exportTexts(lang).files(node.fileCount)})`;
   return node.label;
 }
 
 /** Rótulo de uma relação: o tipo (quando há mais de um no diagrama) e a contagem (×N). */
-export function edgeLabel(edge: ViewEdge, showKind: boolean): string {
+export function edgeLabel(edge: ViewEdge, showKind: boolean, lang: Lang = 'pt'): string {
   const parts: string[] = [];
-  if (showKind) parts.push(EDGE_KIND_LABELS[edge.kind].toLowerCase());
+  if (showKind) parts.push(kindLabels(lang).edge[edge.kind].toLowerCase());
   if (edge.count > 1) parts.push(`×${edge.count}`);
   return parts.join(' ');
 }
@@ -251,9 +256,54 @@ export const LEVEL_LABELS: Record<ExportLevel, string> = {
   symbols: 'símbolos',
 };
 
+const LEVEL_LABELS_EN: Record<ExportLevel, string> = {
+  modules: 'folders',
+  files: 'files',
+  symbols: 'symbols',
+};
+
+const PT = {
+  levels: LEVEL_LABELS,
+  level: 'nível',
+  folder: 'pasta',
+  files: (n: number) => `${n} ${n === 1 ? 'arquivo' : 'arquivos'}`,
+  mermaidTooManyNodes: (n: number, max: number) =>
+    `O diagrama Mermaid teria ${n} nós (limite: ${max}).`,
+  mermaidTooManyEdges: (n: number, max: number) =>
+    `O diagrama Mermaid teria ${n} relações (o Mermaid desenha até ${max}).`,
+  mermaidTooLong: (n: number, max: number) =>
+    `O diagrama Mermaid teria ${n} caracteres (o Mermaid aceita até ${max}).`,
+  mermaidHint:
+    'Reduza o diagrama com o nível de pastas ou um filtro de pasta (na CLI: --level modules ou --folder <pasta>), ou exporte em DOT/GraphML, que não têm esse limite.',
+};
+
+/** Textos legíveis dos diagramas exportados (comentários, rótulos e erros), por idioma. */
+const EXPORT_TEXTS: Record<Lang, typeof PT> = {
+  pt: PT,
+  en: {
+    levels: LEVEL_LABELS_EN,
+    level: 'level',
+    folder: 'folder',
+    files: (n) => `${n} ${n === 1 ? 'file' : 'files'}`,
+    mermaidTooManyNodes: (n, max) => `The Mermaid diagram would have ${n} nodes (limit: ${max}).`,
+    mermaidTooManyEdges: (n, max) =>
+      `The Mermaid diagram would have ${n} relationships (Mermaid draws up to ${max}).`,
+    mermaidTooLong: (n, max) =>
+      `The Mermaid diagram would have ${n} characters (Mermaid accepts up to ${max}).`,
+    mermaidHint:
+      'Shrink the diagram with the folders level or a folder filter (in the CLI: --level modules or --folder <path>), or export to DOT/GraphML, which have no such limit.',
+  },
+};
+
+/** Textos dos exportadores no idioma pedido (padrão: português). */
+export function exportTexts(lang: Lang = 'pt'): typeof PT {
+  return EXPORT_TEXTS[lang];
+}
+
 /** Linha de título usada nos comentários dos formatos de texto. */
 export function exportTitle(view: ExportView): string {
-  const parts = [`Rastro`, view.graph.project.name, `nível: ${LEVEL_LABELS[view.level]}`];
-  if (view.folder) parts.push(`pasta: ${view.folder}`);
+  const text = exportTexts(view.lang);
+  const parts = [`Rastro`, view.graph.project.name, `${text.level}: ${text.levels[view.level]}`];
+  if (view.folder) parts.push(`${text.folder}: ${view.folder}`);
   return parts.join(' · ').replace(/[\r\n]+/g, ' ');
 }
