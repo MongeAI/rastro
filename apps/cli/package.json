@@ -1,7 +1,7 @@
 {
   "name": "@mongeai/rastro",
-  "version": "0.1.0",
-  "description": "Siga o rastro do seu código: mapa navegável e local-first de projetos JavaScript/TypeScript, com cada relação ligada à linha que a comprova.",
+  "version": "0.1.1",
+  "description": "Follow the trail of your code: a local-first, explorable map of JavaScript/TypeScript projects where every relationship links to the line that proves it.",
   "license": "MIT",
   "author": "MongeAI",
   "type": "module",
@@ -51,6 +51,9 @@
     "javascript",
     "visualization",
     "cli",
-    "local-first"
+    "local-first",
+    "code-graph",
+    "codebase-visualization",
+    "dependency-analysis"
   ]
 }

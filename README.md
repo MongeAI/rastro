@@ -1,59 +1,63 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg" />
-    <img src="docs/assets/banner-light.svg" alt="Rastro — siga o rastro do seu código" width="880" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-en-dark.svg" />
+    <img src="docs/assets/banner-en-light.svg" alt="Rastro — follow the trail of your code" width="880" />
   </picture>
 </p>
 
 <p align="center">
+  <b>English</b> · <a href="README.pt-BR.md">Português</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/MongeAI/rastro/actions/workflows/ci.yml"><img src="https://github.com/MongeAI/rastro/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://www.npmjs.com/package/@mongeai/rastro"><img src="https://img.shields.io/npm/v/%40mongeai%2Frastro?color=black&label=npm" alt="Versão no npm" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-black" alt="Licença MIT" /></a>
-  <img src="https://img.shields.io/badge/node-%E2%89%A5%2022.12-black" alt="Node 22.12 ou mais novo" />
-  <img src="https://img.shields.io/badge/status-v0.1%20(inicial)-black" alt="Status: v0.1, fase inicial" />
-  <img src="https://img.shields.io/badge/local--first-sem%20nuvem-black" alt="Local-first" />
+  <a href="https://www.npmjs.com/package/@mongeai/rastro"><img src="https://img.shields.io/npm/v/%40mongeai%2Frastro?color=black&label=npm" alt="npm version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-black" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/node-%E2%89%A5%2022.12-black" alt="Node 22.12 or newer" />
+  <img src="https://img.shields.io/badge/status-v0.1%20(early)-black" alt="Status: v0.1, early stage" />
+  <img src="https://img.shields.io/badge/local--first-no%20cloud-black" alt="Local-first" />
 </p>
 
 <p align="center">
-  <b>Entenda um código que você nunca viu em minutos, não em dias.</b><br />
-  O Rastro lê um repositório JavaScript/TypeScript e abre no seu navegador um <b>mapa interativo</b> de pastas, arquivos, funções e classes,<br />
-  em que <b>cada ligação aponta para o arquivo e a linha que a comprovam</b>. Tudo na sua máquina, sem nuvem e sem IA obrigatória.
+  <b>Understand code you have never seen in minutes, not days.</b><br />
+  Rastro reads a JavaScript/TypeScript repository and opens an <b>interactive map</b> of its folders, files, functions and classes in your browser,<br />
+  where <b>every connection points to the file and line that proves it</b>. Everything runs on your machine: no cloud, no mandatory AI.
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Demonstração: do mapa de pastas até uma função e suas chamadas" width="900" />
+  <img src="docs/assets/demo.gif" alt="Demo: from the folder map down to a function and its calls" width="900" />
 </p>
 
-<sub>🇬🇧 <b>English:</b> Rastro is a local-first, open source tool by MongeAI that statically analyzes JS/TS repositories and opens an interactive, evidence-backed code map in your browser. Every relation links to the file and line that proves it; unresolved references are shown as such, never guessed. Docs are in Portuguese for now. Quick start: <code>npx @mongeai/rastro ./your-project</code>.</sub>
+> _Rastro_ is Portuguese for “trail” or “trace”: the tool lets you follow the trail of any relationship in your code back to the exact line that creates it.
 
 ---
 
-## Por que o Rastro?
+## Why Rastro?
 
-Você caiu em um projeto novo. Antes de mexer em qualquer coisa, precisa responder:
+You just landed in an unfamiliar project. Before touching anything, you need answers:
 
-- 🗺️ **Quais são os módulos e como eles se conectam?**
-- 🔗 **Quem chama esta função? Ela chama o quê?**
-- 💥 **Se eu alterar isto, o que pode quebrar?**
-- 🔁 **Existem ciclos de importação?**
-- 🛣️ **Quais rotas HTTP existem e qual função atende cada uma?**
-- ❓ **O que o código referencia, mas não dá para comprovar estaticamente?**
+- 🗺️ **What are the modules and how do they connect?**
+- 🔗 **Who calls this function? What does it call?**
+- 💥 **If I change this, what might break?**
+- 🔁 **Are there import cycles?**
+- 🛣️ **Which HTTP routes exist, and which function handles each one?**
+- ❓ **What does the code reference that cannot be proven statically?**
 
-O Rastro responde tudo isso num mapa navegável, e com uma regra de ouro:
+Rastro answers all of that in an explorable map, with one golden rule:
 
-> **Nada de conexões inventadas.** Toda relação no grafo tem um _rastro_ até o código: arquivo, linha e o trecho exato. O que não pode ser provado (callbacks, `obj[nome]()`, imports dinâmicos) aparece como **não resolvido**, com o motivo.
+> **No invented connections.** Every relationship in the graph has a _trail_ back to the code: file, line and the exact snippet. Whatever cannot be proven (callbacks, `obj[name]()`, dynamic imports) shows up as **unresolved**, together with the reason.
 
-## Comece em um minuto
+## Get started in one minute
 
-Pré-requisito: **Node.js 22.12+**. Na pasta de qualquer projeto JS/TS:
+Requirement: **Node.js 22.12+**. In any JS/TS project folder:
 
 ```bash
 npx @mongeai/rastro .
 ```
 
-Ou instale o comando de vez com `npm install -g @mongeai/rastro` e use `rastro ./caminho/do/projeto`.
+Or install the command once with `npm install -g @mongeai/rastro` and run `rastro ./path/to/project`.
 
-O terminal mostra um resumo e o navegador abre sozinho:
+The terminal prints a summary and your browser opens by itself:
 
 ```text
 rastro-monorepo ~/rastro
@@ -65,67 +69,69 @@ rastro-monorepo ~/rastro
 Rastro pronto em http://127.0.0.1:4321/?token=…  (Ctrl+C para encerrar)
 ```
 
+> 🌐 **Language note:** the interface and the CLI messages are currently in **Portuguese** (Rastro is made in Brazil). They are short and icon-driven, and an English UI is on the [roadmap](ROADMAP.md). The data format, the code and this documentation are language-neutral or in English.
+
 <details>
-<summary><b>Rodar a partir do código-fonte</b></summary>
+<summary><b>Run from source</b></summary>
 
 ```bash
 git clone https://github.com/MongeAI/rastro.git
 cd rastro
 npm install
 npm run build
-npx rastro fixtures/ts-basic        # ou fixtures/express-api, ou o caminho de qualquer projeto
+npx rastro fixtures/ts-basic        # or fixtures/express-api, or the path to any project
 ```
 
-Para ter esse build como comando global: `npm link -w apps/cli` (desfazer: `npm unlink -g rastro`).
+To use this build as a global command: `npm link -w apps/cli` (undo with `npm unlink -g @mongeai/rastro`).
 
 </details>
 
-## Um passeio pela interface
+## A tour of the interface
 
-### 1. Da arquitetura ao detalhe, em três níveis
+### 1. From architecture to detail, in three levels
 
-Comece pelas **Pastas** (cada pasta é um bloco e as linhas somam os imports entre elas), desça para **Arquivos** e chegue aos **Símbolos**. Dois cliques abrem uma pasta ou mostram as funções de um arquivo. O layout hierárquico desenha o fluxo de dependências da esquerda para a direita.
+Start at **Folders** (_Pastas_: each folder is a block and the lines add up the imports between them), go down to **Files** (_Arquivos_) and reach **Symbols** (_Símbolos_). Double-click opens a folder or reveals a file's functions. The hierarchical layout draws the dependency flow from left to right.
 
-<p align="center"><img src="docs/assets/pastas.png" alt="Nível Pastas: a arquitetura do projeto em blocos" width="900" /></p>
+<p align="center"><img src="docs/assets/pastas.png" alt="Folders level: the project's architecture as blocks" width="900" /></p>
 
-### 2. Selecione e veja tudo o que está conectado
+### 2. Select something and see everything connected to it
 
-Busque com <kbd>/</kbd> e o mapa leva você até a função, abre o arquivo dela e destaca as conexões. O painel lista **o que ela chama** e **quem a chama**, cada item com `arquivo:linha` e a linha de código. Em vermelho tracejado, o que não pôde ser comprovado.
+Search with <kbd>/</kbd> and the map takes you to the function, opens its file and highlights its connections. The side panel lists **what it calls** and **who calls it**, each item with `file:line` and the line of code. Anything that could not be proven is drawn with a dashed red line.
 
-<p align="center"><img src="docs/assets/hero.png" alt="Função analyzeProject selecionada com todas as funções que ela chama" width="900" /></p>
+<p align="center"><img src="docs/assets/hero.png" alt="The analyzeProject function selected, with every function it calls" width="900" /></p>
 
-### 3. Clique numa linha e veja as provas
+### 3. Click a line to see the evidence
 
-Toda aresta é clicável: o painel mostra **cada ocorrência** daquela relação, com o trecho de código e um atalho para abrir no editor (VS Code, Cursor, VSCodium, Zed ou JetBrains).
+Every edge is clickable: the panel shows **each occurrence** of that relationship, with the code snippet and a shortcut to open it in your editor (VS Code, Cursor, VSCodium, Zed or JetBrains).
 
-<p align="center"><img src="docs/assets/relacao.png" alt="Detalhes de uma relação com as 8 ocorrências no código" width="900" /></p>
+<p align="center"><img src="docs/assets/relacao.png" alt="Details of a relationship with its 8 occurrences in the code" width="900" /></p>
 
-### 4. O código ao lado do mapa
+### 4. The code next to the map
 
-O trecho da definição aparece no painel, com a região destacada, sem sair da ferramenta.
+The source of the definition appears in the panel with the relevant lines highlighted, without leaving the tool.
 
-<p align="center"><img src="docs/assets/simbolo.png" alt="Painel de detalhes com o código-fonte da função" width="900" /></p>
+<p align="center"><img src="docs/assets/simbolo.png" alt="Details panel showing the function's source code" width="900" /></p>
 
-### 5. Rotas HTTP, tema claro e muito mais
+### 5. HTTP routes, light theme and more
 
-Rotas do **Express** viram nós ligados aos seus handlers. Também há **tema claro**, **foco na vizinhança** (distância 1 a 3), **análise de impacto**, filtros, legenda e exportação em **JSON** e **PNG**.
+**Express** routes become nodes linked to their handlers. There is also a **light theme**, **neighborhood focus** (distance 1 to 3), **impact analysis**, filters, a legend and export to **JSON** and **PNG**.
 
-<p align="center"><img src="docs/assets/express.png" alt="API Express no tema claro: rota GET /users ligada ao handler listUsers" width="900" /></p>
+<p align="center"><img src="docs/assets/express.png" alt="Express API in the light theme: route GET /users linked to the listUsers handler" width="900" /></p>
 
-## O que ele entende
+## What it understands
 
-| Área           | Suporte na v0.1                                                                                                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Linguagens** | `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.mts` `.cts`                                                                                                    |
-| **Módulos**    | ESM, CommonJS (`require`, `module.exports`, `exports.x`), `import()` dinâmico, reexportações (`export * from`)                                           |
-| **Resolução**  | Compilador do TypeScript via [ts-morph](https://ts-morph.com): `tsconfig`/`jsconfig` (`paths`, `baseUrl`, `references`), `.js`→`.ts`, `index`, monorepos |
-| **Entidades**  | Funções, classes, métodos (construtor, getters/setters, propriedades-função), componentes React (`memo`, `forwardRef`), rotas Express                    |
-| **Relações**   | `importa` · `exporta` · `contém` · `chama` (incluindo `new` e `<Componente />`) · `estende` · `depende de` (entre pastas)                                |
-| **Análises**   | Ciclos de importação, análise de impacto, vizinhança, busca                                                                                              |
+| Area              | Support in v0.1                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Languages**     | `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.mts` `.cts`                                                                                                   |
+| **Modules**       | ESM, CommonJS (`require`, `module.exports`, `exports.x`), dynamic `import()`, re-exports (`export * from`)                                              |
+| **Resolution**    | The TypeScript compiler via [ts-morph](https://ts-morph.com): `tsconfig`/`jsconfig` (`paths`, `baseUrl`, `references`), `.js`→`.ts`, `index`, monorepos |
+| **Entities**      | Functions, classes, methods (constructor, getters/setters, function properties), React components (`memo`, `forwardRef`), Express routes                |
+| **Relationships** | `imports` · `exports` · `contains` · `calls` (including `new` and `<Component />`) · `extends` · `depends_on` (between folders)                         |
+| **Analyses**      | Import cycles, impact analysis, neighborhood, search                                                                                                    |
 
-## Honesto por design
+## Honest by design
 
-Cada relação diz **como** foi descoberta e **se** foi resolvida. Um trecho real do JSON exportado:
+Every relationship says **how** it was discovered and **whether** it was resolved. A real excerpt from the exported JSON:
 
 ```jsonc
 {
@@ -145,98 +151,99 @@ Cada relação diz **como** foi descoberta e **se** foi resolvida. Um trecho rea
 }
 ```
 
-Quando não dá para provar, o Rastro diz o motivo em vez de chutar: `module-not-found`, `undeclared-package`, `symbol-not-found`, `indirect-call`, `dynamic-import`, `not-analyzed`… O resumo da análise também mostra o que ficou **fora do grafo por cautela** (chamadas a bibliotecas, objetos sem tipo conhecido, chamadas por nome calculado).
+When something cannot be proven, Rastro states the reason instead of guessing: `module-not-found`, `undeclared-package`, `symbol-not-found`, `indirect-call`, `dynamic-import`, `not-analyzed`… The analysis summary also shows what was **left out of the graph on purpose** (calls into libraries, objects of unknown type, calls by computed name).
 
-O formato é versionado (`schemaVersion: "0.1.0"`), tem **JSON Schema** e pode ser validado com `rastro validate grafo.json`. Detalhes em [docs/formato-dos-dados.md](docs/formato-dos-dados.md).
+The format is versioned (`schemaVersion: "0.1.0"`), ships with a **JSON Schema** and can be validated with `rastro validate graph.json`. Details in [docs/formato-dos-dados.md](docs/formato-dos-dados.md) (Portuguese).
 
-## Como funciona
+## How it works
 
 ```mermaid
 flowchart LR
-  A[📁 Seu projeto] --> B[Descoberta de arquivos<br/><sub>.gitignore · sem symlinks · sem node_modules</sub>]
-  B --> C[Compilador TypeScript<br/><sub>ts-morph · só leitura</sub>]
-  C --> D[Extração<br/><sub>entidades · imports · chamadas · rotas</sub>]
-  D --> E[GraphBuilder<br/><sub>evidências · ciclos · dependências</sub>]
-  E --> F[(JSON versionado<br/>~/.cache/rastro)]
-  F --> G[Servidor local<br/><sub>127.0.0.1 · token</sub>]
+  A[📁 Your project] --> B[File discovery<br/><sub>.gitignore · no symlinks · no node_modules</sub>]
+  B --> C[TypeScript compiler<br/><sub>ts-morph · read-only</sub>]
+  C --> D[Extraction<br/><sub>entities · imports · calls · routes</sub>]
+  D --> E[GraphBuilder<br/><sub>evidence · cycles · dependencies</sub>]
+  E --> F[(Versioned JSON<br/>~/.cache/rastro)]
+  F --> G[Local server<br/><sub>127.0.0.1 · token</sub>]
   G --> H[🧭 Interface<br/><sub>React · Cytoscape · ELK</sub>]
 ```
 
-Arquitetura completa em [docs/arquitetura.md](docs/arquitetura.md).
+Full architecture in [docs/arquitetura.md](docs/arquitetura.md) (Portuguese).
 
-## Linha de comando
+## Command line
 
 ```bash
-rastro <caminho>                  # analisa e abre o mapa (igual a "rastro open <caminho>")
-rastro analyze <caminho>          # só analisa e salva o JSON
-rastro analyze <caminho> --stdout # escreve o JSON na saída padrão
-rastro serve <grafo.json>         # abre o mapa de um JSON salvo antes
-rastro validate <grafo.json>      # confere se um JSON é um grafo válido
+rastro <path>                   # analyze and open the map (same as "rastro open <path>")
+rastro analyze <path>           # only analyze and save the JSON
+rastro analyze <path> --stdout  # write the JSON to standard output
+rastro serve <graph.json>       # open the map of a previously saved JSON
+rastro validate <graph.json>    # check that a JSON file is a valid graph
 ```
 
-| Opção                    | Para quê                                                             |
-| ------------------------ | -------------------------------------------------------------------- |
-| `-o, --out <arquivo>`    | Onde salvar o JSON (padrão: cache do usuário, ex. `~/.cache/rastro`) |
-| `-p, --port <n>`         | Porta da interface (padrão 4321; se ocupada, usa a próxima livre)    |
-| `--no-open`              | Não abre o navegador automaticamente                                 |
-| `-e, --exclude <padrão>` | Ignora caminhos, com a sintaxe do `.gitignore` (pode repetir)        |
-| `--no-gitignore`         | Não usa o `.gitignore` do projeto                                    |
-| `--max-files <n>`        | Limite de arquivos analisados (padrão 10000)                         |
+| Option                 | Purpose                                                                  |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `-o, --out <file>`     | Where to save the JSON (default: the user cache, e.g. `~/.cache/rastro`) |
+| `-p, --port <n>`       | Interface port (default 4321; if busy, the next free one is used)        |
+| `--no-open`            | Do not open the browser automatically                                    |
+| `-e, --exclude <glob>` | Ignore paths using `.gitignore` syntax (repeatable)                      |
+| `--no-gitignore`       | Do not use the project's `.gitignore`                                    |
+| `--max-files <n>`      | Maximum number of analyzed files (default 10000)                         |
 
-Atalhos na interface: <kbd>/</kbd> busca · <kbd>F</kbd> enquadra · <kbd>Esc</kbd> limpa a seleção · dois cliques abrem pastas e arquivos · a URL guarda a seleção (`#n=…`).
+Interface shortcuts: <kbd>/</kbd> search · <kbd>F</kbd> fit the map · <kbd>Esc</kbd> clear the selection · double-click opens folders and files · the URL keeps the selection (`#n=…`).
 
-## Privacidade e segurança
+## Privacy and security
 
-- 🔒 **Local-first.** Nenhum código sai da sua máquina. Sem conta, sem API paga, sem telemetria, sem CDN.
-- 📖 **Só leitura.** O Rastro **não executa** o projeto analisado, não roda scripts do `package.json` e não instala dependências. Os testes conferem isso.
-- 🛡️ **Servidor restrito.** Escuta só em `127.0.0.1`, exige um **token aleatório por execução**, aceita só `GET`/`HEAD`, bloqueia DNS rebinding e só entrega código de arquivos que fazem parte do grafo.
-- 🧭 **Nada gravado no seu repositório.** O resultado vai para a pasta de cache do usuário (ou para `--out`).
+- 🔒 **Local-first.** No code leaves your machine. No account, no paid API, no telemetry, no CDN.
+- 📖 **Read-only.** Rastro **never executes** the analyzed project, never runs its `package.json` scripts and never installs its dependencies. The test suite checks this.
+- 🛡️ **Locked-down server.** It only listens on `127.0.0.1`, requires a **random per-run token**, only accepts `GET`/`HEAD`, blocks DNS rebinding and only serves source code of files that are part of the graph.
+- 🧭 **Nothing written to your repository.** Results go to the user cache folder (or to `--out`).
 
-O JSON exportado contém o caminho absoluto do projeto e trechos de código. Revise antes de compartilhar. Mais em [docs/seguranca.md](docs/seguranca.md).
+The exported JSON contains the absolute path of the project and code snippets. Review it before sharing. More in [docs/seguranca.md](docs/seguranca.md) (Portuguese) and [SECURITY.md](SECURITY.md).
 
-## Limitações conhecidas
+## Known limitations
 
-O Rastro está na **v0.1**. Hoje:
+Rastro is at **v0.1**. Today:
 
-- Entende apenas **JavaScript e TypeScript**.
-- Chamadas dinâmicas (callbacks, `obj[nome]()`, injeção de dependência, eventos) aparecem como não resolvidas ou só nas contagens.
-- Em JavaScript sem tipos, `obj.metodo()` só é ligado quando o TypeScript consegue inferir o tipo de `obj`.
-- Funções declaradas dentro de outras funções não viram nós próprios.
-- Rotas: só **Express**, com caminho literal e `app`/`router` criado no próprio código.
-- Monorepos usam o `tsconfig` da raiz (e seus `references`); `paths` só de subpacotes podem não ser resolvidos.
-- Testado em projetos de dezenas a algumas centenas de arquivos; num teste sintético, cerca de 1 000 arquivos foram analisados em ~3 s.
+- It only understands **JavaScript and TypeScript**.
+- Dynamic calls (callbacks, `obj[name]()`, dependency injection, events) show up as unresolved or only in the counters.
+- In untyped JavaScript, `obj.method()` is only linked when TypeScript can infer the type of `obj`.
+- Functions declared inside other functions do not become nodes of their own.
+- Routes: only **Express**, with a literal path and the `app`/`router` created in the analyzed code.
+- Monorepos use the root `tsconfig` (and its `references`); `paths` defined only in sub-packages may not be resolved.
+- Tested on projects from dozens to a few hundred files; in a synthetic test, about 1,000 files were analyzed in ~3 s. Showing every symbol of a very large project (thousands of nodes) can take a few seconds.
+- The interface and CLI messages are in Portuguese for now.
 
-Próximos passos no [roadmap](ROADMAP.md): mais frameworks de rotas, análise incremental, diff entre versões e impacto de um _pull request_.
+Next steps on the [roadmap](ROADMAP.md): more route frameworks, incremental analysis, diffing two versions and the impact of a _pull request_.
 
-## Estrutura do repositório
+## Repository layout
 
 ```
-apps/cli           CLI `rastro`: análise, armazenamento local e servidor
+apps/cli           `rastro` CLI: analysis, local storage and server
 apps/web           Interface (React + Cytoscape.js + ELK)
-packages/core      Modelo de dados, JSON Schema e validação
-packages/graph     GraphBuilder, ciclos, consultas e cálculo da visão
-packages/analyzer  Analisador JS/TS baseado em ts-morph
-fixtures           Projetos de exemplo usados nos testes
-docs               Arquitetura, formato dos dados, segurança e imagens
+packages/core      Data model, JSON Schema and validation
+packages/graph     GraphBuilder, cycles, queries and view computation
+packages/analyzer  JS/TS analyzer built on ts-morph
+fixtures           Sample projects used by the tests
+docs               Architecture, data format, security and images
 ```
 
-## Contribuindo
+## Contributing
 
-Contribuições são muito bem-vindas, principalmente exemplos de código que o Rastro entende errado.
+Contributions are very welcome, especially code samples that Rastro gets wrong.
 
 ```bash
-npm test             # testes (Vitest)
+npm test             # tests (Vitest)
 npm run lint         # ESLint
 npm run format       # Prettier
-npm run typecheck    # TypeScript em todos os pacotes
+npm run typecheck    # TypeScript across all packages
 ```
 
-Para desenvolver a interface com recarga automática, rode `npx rastro fixtures/ts-basic --port 4321 --no-open` num terminal e `npm run dev:web` em outro. Abra uma vez a URL com token do primeiro terminal; depois use `http://127.0.0.1:5173`.
+To work on the interface with hot reload, run `npx rastro fixtures/ts-basic --port 4321 --no-open` in one terminal and `npm run dev:web` in another. Open the tokenized URL from the first terminal once, then use `http://127.0.0.1:5173`.
 
-Veja o [CONTRIBUTING.md](CONTRIBUTING.md). Encontrou uma falha de segurança? Siga o [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) (Portuguese; issues and pull requests in English are welcome too). Found a security issue? Follow [SECURITY.md](SECURITY.md).
 
-## Licença
+## License
 
-[MIT](LICENSE) © [MongeAI](https://github.com/MongeAI). As fontes Inter e JetBrains Mono embutidas na interface usam a SIL Open Font License 1.1.
+[MIT](LICENSE) © [MongeAI](https://github.com/MongeAI). The Inter and JetBrains Mono fonts bundled with the interface use the SIL Open Font License 1.1.
 
-<p align="center"><sub>Feito no Brasil 🇧🇷 pela MongeAI.</sub></p>
+<p align="center"><sub>Made in Brazil 🇧🇷 by MongeAI.</sub></p>

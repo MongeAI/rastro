@@ -1,5 +1,7 @@
 # Contribuindo com o Rastro
 
+> 🇬🇧 **English:** contributions in English are welcome! Setup: `npm install && npm run build && npm test` (Node.js 22.12+). Golden rules: never invent connections (anything unproven must be `unresolved` with a reason, and every resolved relationship needs file + line evidence), never execute the analyzed code, keep the output deterministic, and add a fixture under `fixtures/` plus a test for every new case. Before opening a PR, run `npm run lint`, `npm run format:check`, `npm run typecheck` and `npm test`.
+
 Obrigado pelo interesse! O Rastro está em fase inicial e contribuições são bem-vindas: correções, novos casos de teste, melhorias na interface e, principalmente, exemplos de código que o analisador entende errado.
 
 ## Preparando o ambiente

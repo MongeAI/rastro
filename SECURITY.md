@@ -1,5 +1,7 @@
 # Política de segurança
 
+> 🇬🇧 **English:** please **do not open a public issue** for security problems. Report them privately through [GitHub's private vulnerability reporting](https://github.com/MongeAI/rastro/security/advisories/new) with the Rastro and Node.js versions, steps to reproduce and the expected impact. We are especially interested in: execution of the analyzed project's code, reading files outside the graph through the local server, access without the token or from another site (DNS rebinding, CSRF), and content injection into the interface. Reports in English or Portuguese are welcome.
+
 O Rastro é local-first e somente leitura (detalhes em [docs/seguranca.md](docs/seguranca.md)). Ainda assim, levamos falhas de segurança a sério.
 
 ## Como reportar

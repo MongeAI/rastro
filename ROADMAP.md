@@ -4,6 +4,7 @@ O Rastro 0.1 é o núcleo: um grafo confiável e rastreável de projetos JS/TS e
 
 ## 0.2: mais precisão no JS/TS
 
+- [ ] Interface e mensagens da CLI em inglês (i18n), além do português.
 - [ ] `tsconfig` por pacote em monorepos (resolver `paths` de cada workspace).
 - [ ] Chamadas via `super.metodo()` e métodos herdados.
 - [ ] Implementações de interfaces (`implements`) e chamadas por interface com múltiplos candidatos marcados como “possíveis”.
