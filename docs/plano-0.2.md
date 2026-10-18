@@ -19,9 +19,9 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 2. Mudanças e impacto (git): "o que este PR afeta?"
 
-- ⬜ `rastro --changes [base]` (padrão: `HEAD`, ou a branch principal): lê `git diff` (só leitura, sem executar o projeto) e marca **arquivos e funções alterados** pelas linhas modificadas.
-- ⬜ Modo **Mudanças** na interface: o que mudou em destaque e o **raio de impacto** (quem depende do que mudou, por distância).
-- ⬜ Resumo "este conjunto de mudanças afeta N funções, M rotas HTTP, K arquivos de teste".
+- ✅ `rastro --changes` (desde o último commit) e `rastro --since <ref>` (desde que a branch saiu de `<ref>`): lê `git diff` (só leitura, sem executar o projeto) e marca **arquivos e funções alterados** pelas linhas modificadas.
+- ✅ Modo **Mudanças** na interface: o que mudou em destaque e o **raio de impacto** (quem depende do que mudou, por distância).
+- ✅ Resumo "este conjunto de mudanças afeta N funções, M rotas HTTP, K arquivos de teste".
 
 ### 3. Insights: onde olhar primeiro
 

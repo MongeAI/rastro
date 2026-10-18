@@ -31,6 +31,8 @@ interface Props {
   selectedEdgeId: string | null;
   /** Caminho a destacar (ids de nós e de relações reais do grafo). */
   pathHighlight: { nodes: string[]; edges: string[] } | null;
+  /** Mudanças do git a destacar: o que mudou e o que é afetado. */
+  changeHighlight: { changed: string[]; impacted: string[] } | null;
   highlightNeighbors: boolean;
   /** Muda quando o mapa deve reenquadrar tudo (ex.: trocar de nível ou entrar no foco). */
   fitKey: string;
@@ -490,7 +492,27 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     const cy = cyRef.current;
     if (!cy) return;
     cy.batch(() => {
-      cy.elements().removeClass('faded highlight chosen path');
+      cy.elements().removeClass('faded highlight chosen path changed impacted impact-edge');
+      if (
+        props.changeHighlight &&
+        !props.selectedId &&
+        !props.selectedEdgeId &&
+        !props.pathHighlight
+      ) {
+        const changed = new Set(props.changeHighlight.changed);
+        const impacted = new Set(props.changeHighlight.impacted);
+        const changedNodes = cy.nodes().filter((n) => changed.has(n.id()));
+        const impactedNodes = cy.nodes().filter((n) => impacted.has(n.id()));
+        changedNodes.addClass('changed');
+        impactedNodes.addClass('impacted');
+        const involved = changedNodes.union(impactedNodes);
+        // linhas entre o que mudou e o que é afetado mostram por onde o impacto chega
+        const edges = involved.edgesWith(involved);
+        edges.addClass('impact-edge');
+        const keep = involved.union(edges).union(involved.ancestors());
+        if (involved.nonempty()) cy.elements().not(keep).addClass('faded');
+        return;
+      }
       if (props.pathHighlight) {
         // caminho: os nós e as linhas que representam cada passo ficam em destaque
         const nodeIds = new Set(props.pathHighlight.nodes);
@@ -535,6 +557,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     props.highlightNeighbors,
     props.view,
     props.pathHighlight,
+    props.changeHighlight,
   ]);
 
   // centraliza quando pedido: se um layout estiver em andamento, espera ele terminar

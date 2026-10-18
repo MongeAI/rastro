@@ -211,6 +211,31 @@ export function buildStyle(
     },
     { selector: 'node.hover', style: { 'border-width': 2, 'border-color': p.selection } },
     {
+      selector: 'node.changed',
+      style: {
+        'border-width': 3,
+        'border-color': p.changed,
+        'border-style': 'solid',
+        'underlay-color': p.changed,
+        'underlay-opacity': 0.18,
+        'underlay-padding': 5,
+        'z-index': 22,
+      },
+    },
+    {
+      selector: 'node.impacted',
+      style: {
+        'border-width': 2,
+        'border-color': p.changed,
+        'border-style': 'dashed',
+        'z-index': 21,
+      },
+    },
+    {
+      selector: 'edge.impact-edge',
+      style: { opacity: 0.9, 'line-color': p.changed, 'target-arrow-color': p.changed },
+    },
+    {
       selector: 'node.path',
       style: { 'border-width': 2.5, 'border-color': p.selection, 'z-index': 25 },
     },

@@ -218,6 +218,30 @@ export interface AnalyzerInfo {
   };
 }
 
+/** Um arquivo alterado segundo o git, com as linhas novas/alteradas (1-based, inclusivas). */
+export interface ChangedFile {
+  /** Caminho relativo à raiz analisada, com `/`. */
+  file: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  /** Caminho anterior, quando renomeado. */
+  previous?: string;
+  /** Intervalos de linhas alteradas no arquivo atual; vazio para arquivos removidos. */
+  ranges: Array<[number, number]>;
+  /** Linhas (no arquivo atual) logo após trechos apenas removidos. */
+  deletionsAt?: number[];
+}
+
+/** Mudanças em relação a uma referência do git (opcional: só com `rastro --changes`/`--since`). */
+export interface ChangeSet {
+  /** Referência comparada: `HEAD` (mudanças locais) ou o commit base de `--since`. */
+  base: string;
+  /** Rótulo legível da base (ex.: `main`, `HEAD`). */
+  baseLabel: string;
+  /** Inclui arquivos ainda não versionados. */
+  includesUntracked: boolean;
+  files: ChangedFile[];
+}
+
 export interface RastroGraph {
   schemaVersion: typeof SCHEMA_VERSION;
   generatedAt: string;
@@ -228,4 +252,6 @@ export interface RastroGraph {
   edges: GraphEdge[];
   stats: GraphStats;
   diagnostics: Diagnostic[];
+  /** Mudanças do git, quando a análise foi feita com `--changes` ou `--since`. */
+  changes?: ChangeSet;
 }

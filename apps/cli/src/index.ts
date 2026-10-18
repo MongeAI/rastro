@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { analyzeProject } from '@rastro/analyzer';
 import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
+import { computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
 import { startServer } from './server.js';
+import { collectChanges, GitError } from './git.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
 
 const HELP = `
@@ -28,6 +30,9 @@ Opções:
   -e, --exclude <padrão>    ignora caminhos (sintaxe do .gitignore; pode repetir)
       --no-gitignore        não usa o .gitignore do projeto
       --max-files <n>       limite de arquivos analisados (padrão: 10000)
+      --changes             marca o que mudou desde o último commit (git) e o impacto
+      --since <ref>         marca o que mudou desde que a branch saiu de <ref> (ex.: main)
+      --trust-git-config    permite rodar o git mesmo com comandos no .git/config
   -h, --help                mostra esta ajuda
   -v, --version             mostra a versão
 
@@ -58,6 +63,30 @@ function tildify(p: string): string {
   return home && (p === home || p.startsWith(`${home}${path.sep}`))
     ? `~${p.slice(home.length)}`
     : p;
+}
+
+function printChanges(graph: RastroGraph): void {
+  const changes = graph.changes!;
+  const impact = computeChangeImpact(new GraphIndex(graph), changes);
+  const out = (s = '') => process.stderr.write(`${s}\n`);
+  const since =
+    changes.baseLabel === 'HEAD' ? 'desde o último commit' : `desde ${changes.baseLabel}`;
+  if (!changes.files.length) {
+    out(`  ${dim(`nenhuma mudança ${since}`)}`);
+    out();
+    return;
+  }
+  out(`${bold('Mudanças')} ${dim(since)}`);
+  out(
+    `  ${changes.files.length} arquivo(s) alterado(s) · ${impact.changedEntities.length} entidade(s) alterada(s)`,
+  );
+  out(
+    `  impacto: ${impact.impacted.length} entidade(s) dependem do que mudou` +
+      (impact.routes.length ? ` · ${impact.routes.length} rota(s)` : '') +
+      (impact.tests.length ? ` · ${impact.tests.length} arquivo(s) de teste` : ''),
+  );
+  for (const route of impact.routes.slice(0, 5)) out(`    ${cyan('↳')} ${route.name}`);
+  out();
 }
 
 function printSummary(graph: RastroGraph, savedTo?: string): void {
@@ -140,6 +169,9 @@ async function main(argv: string[]): Promise<void> {
         exclude: { type: 'string', short: 'e', multiple: true },
         'no-gitignore': { type: 'boolean' },
         'max-files': { type: 'string' },
+        changes: { type: 'boolean' },
+        since: { type: 'string' },
+        'trust-git-config': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -224,12 +256,25 @@ async function main(argv: string[]): Promise<void> {
     onProgress: quiet ? undefined : (msg) => process.stderr.write(dim(`  ${msg}\n`)),
   });
 
+  if (values.changes || values.since) {
+    try {
+      graph.changes = collectChanges(root, {
+        ...(values.since ? { since: values.since } : {}),
+        trustConfig: !!values['trust-git-config'],
+      });
+    } catch (err) {
+      const reason = err instanceof GitError ? err.message : (err as Error).message;
+      process.stderr.write(`${yellow('aviso:')} mudanças do git não incluídas: ${reason}\n`);
+    }
+  }
+
   if (quiet) {
     process.stdout.write(`${JSON.stringify(graph, null, 2)}\n`);
     return;
   }
   const savedTo = saveGraph(graph, values.out ?? defaultGraphPath(graph));
   printSummary(graph, savedTo);
+  if (graph.changes) printChanges(graph);
   if (command === 'analyze') return;
   return serve(graph, port, !values['no-open']);
 }

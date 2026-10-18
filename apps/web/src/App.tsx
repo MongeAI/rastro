@@ -6,7 +6,14 @@ import {
   type NodeKind,
   type RastroGraph,
 } from '@rastro/core';
-import { computeView, findPaths, GraphIndex, groupableModules } from '@rastro/graph';
+import {
+  computeChangeImpact,
+  computeView,
+  findPaths,
+  GraphIndex,
+  groupableModules,
+} from '@rastro/graph';
+import { ChangesPanel } from './components/ChangesPanel';
 import { DetailsPanel } from './components/DetailsPanel';
 import { EdgeDetails } from './components/EdgeDetails';
 import { GraphCanvas, type GraphCanvasHandle, type LayoutMode } from './components/GraphCanvas';
@@ -218,7 +225,11 @@ function Explorer({
     () => readPref<'shown' | 'hidden'>('sidebar', 'shown', ['shown', 'hidden']) === 'hidden',
   );
   const [history, setHistory] = useState<string[]>([]);
-  const [panelTab, setPanelTab] = useState<'summary' | 'insights'>('summary');
+  // com mudanças do git, a aba "Mudanças" abre primeiro
+  const [panelTab, setPanelTab] = useState<'summary' | 'insights' | 'changes'>(() =>
+    graph.changes?.files.length ? 'changes' : 'summary',
+  );
+  const [highlightChanges, setHighlightChanges] = useState(true);
   /** Caminho A → B: origem escolhida e, depois, o destino. */
   const [pathMode, setPathMode] = useState<{ from: string; to?: string } | null>(null);
   const [activePath, setActivePath] = useState(0);
@@ -501,6 +512,37 @@ function Explorer({
     if (origin) setCenterRequest((r) => ({ id: origin, seq: (r?.seq ?? 0) + 1, fitIds: [...ids] }));
   }, [pathResult, index]);
 
+  const changeImpact = useMemo(
+    () => (graph.changes ? computeChangeImpact(index, graph.changes) : null),
+    [index, graph.changes],
+  );
+  const showChanges = !!changeImpact && panelTab === 'changes' && highlightChanges && !pathMode?.to;
+  const changeHighlight = useMemo(() => {
+    if (!showChanges || !changeImpact) return null;
+    const changedIds = [
+      ...changeImpact.changedEntities.map((n) => n.id),
+      ...changeImpact.changedFiles.map((n) => n.id),
+    ];
+    return { changed: changedIds, impacted: changeImpact.impacted.map((i) => i.node.id) };
+  }, [showChanges, changeImpact]);
+  // o que mudou (e o que é afetado diretamente) aparece no mapa quando a aba está aberta
+  useEffect(() => {
+    if (!showChanges || !changeImpact) return;
+    const ids = [
+      ...changeImpact.changedEntities.map((n) => n.id),
+      ...changeImpact.impacted.filter((i) => i.depth === 1).map((i) => i.node.id),
+    ];
+    if (!ids.length) return;
+    for (const id of ids) {
+      for (const ancestor of index.ancestors(id))
+        if (collapsedRef.current.has(ancestor.id)) setModuleOpenRef.current(ancestor.id, true);
+      const file = index.fileOf(id);
+      if (file && file.id !== id)
+        setExpandedFiles((s) => (s.has(file.id) ? s : new Set(s).add(file.id)));
+    }
+    setCenterRequest((r) => ({ id: ids[0]!, seq: (r?.seq ?? 0) + 1, fitIds: ids }));
+  }, [showChanges, changeImpact, index]);
+
   const panelMode =
     pathMode?.to && pathResult
       ? 'path'
@@ -607,6 +649,7 @@ function Explorer({
           selectedId={selectedId}
           selectedEdgeId={selectedEdge ? selectedEdge.id : null}
           pathHighlight={pathHighlight}
+          changeHighlight={changeHighlight}
           highlightNeighbors={highlightNeighbors}
           fitKey={fitKey}
           centerRequest={centerRequest}
@@ -803,7 +846,10 @@ function Explorer({
         ) : (
           <>
             <div className="panel-tabs" role="tablist">
-              {(['summary', 'insights'] as const).map((tab) => (
+              {(changeImpact
+                ? (['changes', 'summary', 'insights'] as const)
+                : (['summary', 'insights'] as const)
+              ).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -812,11 +858,26 @@ function Explorer({
                   className={panelTab === tab ? 'on' : ''}
                   onClick={() => setPanelTab(tab)}
                 >
-                  {tab === 'summary' ? t.insights.tabSummary : t.insights.tabInsights}
+                  {tab === 'summary'
+                    ? t.insights.tabSummary
+                    : tab === 'insights'
+                      ? t.insights.tabInsights
+                      : t.changes.tab}
+                  {tab === 'changes' && graph.changes && (
+                    <span className="tab-count">{graph.changes.files.length}</span>
+                  )}
                 </button>
               ))}
             </div>
-            {panelTab === 'summary' ? (
+            {panelTab === 'changes' && changeImpact && graph.changes ? (
+              <ChangesPanel
+                changes={graph.changes}
+                impact={changeImpact}
+                highlight={highlightChanges}
+                onHighlight={setHighlightChanges}
+                onNavigate={(id) => navigate(id)}
+              />
+            ) : panelTab === 'summary' || panelTab === 'changes' ? (
               <Overview graph={graph} index={index} onNavigate={(id) => navigate(id)} />
             ) : (
               <Insights index={index} onNavigate={(id) => navigate(id)} />

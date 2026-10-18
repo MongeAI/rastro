@@ -55,6 +55,22 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     for (const [i, d] of input.diagnostics.entries())
       if (!isObject(d) || typeof d.code !== 'string' || typeof d.message !== 'string')
         fail(`diagnostics[${i}] inválido.`);
+  if (input.changes !== undefined) {
+    const changes = input.changes;
+    if (!isObject(changes) || typeof changes.base !== 'string' || !Array.isArray(changes.files))
+      fail('changes inválido (precisa de base e files).');
+    else
+      for (const [i, f] of changes.files.entries())
+        if (
+          !isObject(f) ||
+          typeof f.file !== 'string' ||
+          !Array.isArray(f.ranges) ||
+          !f.ranges.every(
+            (r) => Array.isArray(r) && r.length === 2 && isPositiveInt(r[0]) && isPositiveInt(r[1]),
+          )
+        )
+          fail(`changes.files[${i}] inválido.`);
+  }
   if (!isObject(input.project) || !Array.isArray(input.project.languages))
     fail('project.languages deve ser uma lista.');
   if (errors.length) return { valid: false, errors };

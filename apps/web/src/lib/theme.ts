@@ -11,6 +11,8 @@ export interface Palette {
   border: string;
   selection: string;
   cycle: string;
+  /** Mudanças do git: o que mudou e o que é afetado. */
+  changed: string;
   unresolved: string;
   node: Record<NodeKind, string>;
   edge: Record<EdgeKind, string>;
@@ -30,6 +32,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     border: '#3f3f46',
     selection: '#ffffff',
     cycle: '#fb923c',
+    changed: '#4ade80',
     unresolved: '#f87171',
     node: {
       module: '#71717a',
@@ -59,6 +62,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     border: '#d4d4d8',
     selection: '#000000',
     cycle: '#ea580c',
+    changed: '#16a34a',
     unresolved: '#dc2626',
     node: {
       module: '#a1a1aa',

@@ -216,6 +216,31 @@ const pt = {
     analyzedAt: (date: string, ms: number, ts: string) =>
       `Analisado em ${date} · ${ms} ms · TypeScript ${ts}`,
   },
+  changes: {
+    tab: 'Mudanças',
+    eyebrow: 'Mudanças do git',
+    sinceHead: 'Desde o último commit',
+    since: (ref: string) => `Desde ${ref}`,
+    none: 'Nenhuma mudança encontrada.',
+    stats: (files: number, entities: number) =>
+      `${n(files, 'arquivo alterado', 'arquivos alterados')} · ${n(entities, 'entidade alterada', 'entidades alteradas')}`,
+    impactSummary: (count: number) =>
+      count === 0
+        ? 'Nada conhecido depende do que mudou.'
+        : `${n(count, 'entidade depende', 'entidades dependem')} do que mudou (chamadas, imports e herança resolvidos).`,
+    highlight: 'Destacar no mapa',
+    changed: 'O que mudou',
+    impacted: 'Pode ser afetado',
+    routes: 'Rotas HTTP envolvidas',
+    tests: 'Testes para rodar',
+    testsHint: 'Arquivos de teste alterados ou que dependem do que mudou.',
+    outside: 'Fora do mapa',
+    outsideHint: 'Arquivos removidos, não analisados ou ignorados.',
+    status: { added: 'novo', modified: 'alterado', deleted: 'removido', renamed: 'renomeado' },
+    fileLevel: 'código no topo do arquivo',
+    legendChanged: 'mudou',
+    legendImpacted: 'afetado',
+  },
   paths: {
     start: 'Traçar caminho a partir daqui',
     startTitle: 'Descobre como esta entidade chega em outra (chamadas, imports e herança)',
@@ -495,6 +520,31 @@ const en: Messages = {
       'Dashed red lines are references that could not be resolved.',
     ],
     analyzedAt: (date, ms, ts) => `Analyzed on ${date} · ${ms} ms · TypeScript ${ts}`,
+  },
+  changes: {
+    tab: 'Changes',
+    eyebrow: 'Git changes',
+    sinceHead: 'Since the last commit',
+    since: (ref) => `Since ${ref}`,
+    none: 'No changes found.',
+    stats: (files, entities) =>
+      `${n(files, 'changed file', 'changed files')} · ${n(entities, 'changed entity', 'changed entities')}`,
+    impactSummary: (count) =>
+      count === 0
+        ? 'Nothing known depends on what changed.'
+        : `${n(count, 'entity depends', 'entities depend')} on what changed (resolved calls, imports and inheritance).`,
+    highlight: 'Highlight on the map',
+    changed: 'What changed',
+    impacted: 'Could be affected',
+    routes: 'HTTP routes involved',
+    tests: 'Tests to run',
+    testsHint: 'Test files that changed or depend on what changed.',
+    outside: 'Outside the map',
+    outsideHint: 'Deleted, not analyzed or ignored files.',
+    status: { added: 'new', modified: 'modified', deleted: 'deleted', renamed: 'renamed' },
+    fileLevel: 'top-level code',
+    legendChanged: 'changed',
+    legendImpacted: 'affected',
   },
   paths: {
     start: 'Trace a path from here',
