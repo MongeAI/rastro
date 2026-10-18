@@ -63,7 +63,17 @@ Typical flow: rastro_overview to get oriented; rastro_search to find an entity; 
 
 Semantics: PROVEN = resolved by the type checker or an explicit framework rule, always with file:line evidence. POSSIBLE = an unresolved reference (call through an interface or abstract method, callback, dynamic call) with candidate targets; the real target is only known at runtime, so never present it as fact. Rastro never guesses: no proven relationship does not mean no use (reflection, string-based dispatch, dependency injection, code outside the analyzed folder).
 
-Targets: an id such as fn:src/math.ts#sum (ids are stable within this session), a name or qualified name (UserService.create), a file path (src/math.ts), a folder (src/services) or path:line — every file:line shown in results can be passed back as a target. Paths are relative to the project root. Files are re-analyzed automatically after edits, so answers reflect the code on disk.`;
+Targets: an id such as fn:src/math.ts#sum (ids are stable within this session), a name or qualified name (UserService.create), a file path (src/math.ts), a folder (src/services) or path:line — every file:line shown in results can be passed back as a target. Paths are relative to the project root. Long lists are paginated: "N shown of M" tells you to raise \`limit\` or pass \`offset\`.`;
+
+const FRESH_WATCHING =
+  'Files are re-analyzed automatically after edits, so answers reflect the code on disk.';
+const FRESH_NOT_WATCHING =
+  'File watching is OFF (--no-watch): answers reflect the code as it was when the server started; restart the server to see edits.';
+
+/** Instruções para o cliente: o que diz sobre a atualização depende de observar arquivos. */
+export function instructionsFor(watching: boolean): string {
+  return `${INSTRUCTIONS} ${watching ? FRESH_WATCHING : FRESH_NOT_WATCHING}`;
+}
 
 type Id = string | number;
 
@@ -213,10 +223,15 @@ export class McpServer {
 
     // era moderna: versão e capacidades do cliente em cada requisição
     if (typeof modern !== 'string' || !(MODERN_VERSIONS as readonly string[]).includes(modern))
-      throw new RpcError(ERROR.unsupportedVersion, 'Unsupported protocol version', {
-        supported: [...MODERN_VERSIONS, ...PROTOCOL_VERSIONS],
-        requested: modern,
-      });
+      // só as versões que valem neste estilo de requisição (com a versão em `_meta`); as
+      // legadas existem, mas pedem o handshake `initialize`
+      throw new RpcError(
+        ERROR.unsupportedVersion,
+        (PROTOCOL_VERSIONS as readonly string[]).includes(String(modern))
+          ? `Unsupported protocol version: ${String(modern)} is supported only through the initialize handshake`
+          : 'Unsupported protocol version',
+        { supported: [...MODERN_VERSIONS], requested: modern },
+      );
     if (!isObject(meta[META_CAPABILITIES]))
       throw new RpcError(
         ERROR.invalidParams,
@@ -245,7 +260,7 @@ export class McpServer {
         return {
           supportedVersions: [...MODERN_VERSIONS, ...PROTOCOL_VERSIONS],
           capabilities: { tools: {} },
-          instructions: INSTRUCTIONS,
+          instructions: instructionsFor(this.options.project.watching),
           ttlMs: LIST_TTL_MS,
           cacheScope: 'public',
         };
@@ -292,7 +307,7 @@ export class McpServer {
       protocolVersion: version,
       capabilities: { tools: { listChanged: false } },
       serverInfo: SERVER_INFO,
-      instructions: INSTRUCTIONS,
+      instructions: instructionsFor(this.options.project.watching),
     };
   }
 
@@ -347,6 +362,8 @@ export interface StdioOptions {
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   maxLineBytes?: number;
+  /** Quanto esperar as requisições em andamento depois que a entrada fecha (padrão 2 s). */
+  closeGraceMs?: number;
 }
 
 /**
@@ -364,8 +381,15 @@ export function serveStdio(server: McpServer, options: StdioOptions = {}): Promi
   let discarding = false;
 
   const send = (reply: Response | Response[] | undefined) => {
-    // JSON.stringify nunca gera quebras de linha cruas: uma mensagem por linha
-    if (reply !== undefined) output.write(`${JSON.stringify(reply)}\n`);
+    // JSON.stringify nunca gera quebras de linha cruas: uma mensagem por linha. U+2028/U+2029
+    // são válidos crus num texto JSON, mas leitores que separam linhas por eles (ou tratam a
+    // saída como JavaScript) quebrariam a mensagem: vão escapados
+    if (reply !== undefined)
+      output.write(
+        `${JSON.stringify(reply)
+          .replace(/\u2028/g, '\\u2028')
+          .replace(/\u2029/g, '\\u2029')}\n`,
+      );
   };
   const handle = (line: string) => {
     const trimmed = line.endsWith('\r') ? line.slice(0, -1) : line;
@@ -409,7 +433,13 @@ export function serveStdio(server: McpServer, options: StdioOptions = {}): Promi
       finished = true;
       if (!discarding && buffer.trim()) handle(buffer);
       buffer = '';
-      void Promise.allSettled([...inflight]).then(() => resolve());
+      // o cliente fechou a entrada: responde o que terminar logo, sem esperar uma análise longa
+      const grace = setTimeout(resolve, options.closeGraceMs ?? 2000);
+      grace.unref?.();
+      void Promise.allSettled([...inflight]).then(() => {
+        clearTimeout(grace);
+        resolve();
+      });
     };
     input.once('end', finish);
     input.once('close', finish);
@@ -430,7 +460,15 @@ export interface RunMcpOptions {
  */
 export async function runMcp(options: RunMcpOptions): Promise<void> {
   const m = t().mcp;
-  const say = (text: string) => process.stderr.write(`${dim('rastro mcp:')} ${safeText(text)}\n`);
+  // o cliente pode fechar o stderr (pipe): escrever nele não pode derrubar o servidor
+  process.stderr.on('error', () => {});
+  const say = (text: string) => {
+    try {
+      process.stderr.write(`${dim('rastro mcp:')} ${safeText(text)}\n`);
+    } catch {
+      // stderr fechado: os avisos são só informativos
+    }
+  };
   // nada de console.log no stdout (de dependências, inclusive): tudo vai para o stderr
   for (const method of ['log', 'info', 'debug', 'warn'] as const)
     console[method] = (...args: unknown[]) => console.error(...args);

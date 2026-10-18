@@ -153,13 +153,13 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
     expect((await client.request('ping')).result).toEqual({});
 
     const calls: Array<[string, Record<string, unknown>, string]> = [
-      ['rastro_overview', {}, '# express-api — Rastro code graph'],
-      ['rastro_search', { query: 'user' }, '`getUser` function · src/handlers/users.js:7'],
+      ['rastro_overview', {}, '# `express-api` — Rastro code graph'],
+      ['rastro_search', { query: 'user' }, '`getUser` function · `src/handlers/users.js:7`'],
       ['rastro_entity', { target: 'getUser', source: true }, '7  function getUser(req, res) {'],
       [
         'rastro_references',
         { target: 'find' },
-        '`getUser` function · src/handlers/users.js:7 calls `find`',
+        '`getUser` function · `src/handlers/users.js:7` calls `find`',
       ],
       ['rastro_impact', { targets: ['src/db.js'] }, '## HTTP routes involved (3)'],
       ['rastro_path', { from: 'GET /users/:id', to: 'find' }, '1 proven path'],
@@ -185,6 +185,17 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
     // o stderr tem avisos curtos, no idioma pedido
     expect(client.stderr).toContain('rastro mcp: MCP server for');
     expect(client.stderr).toMatch(/analysis ready in \d+ ms · 3 files/);
+  });
+
+  it('cliente que fecha o stderr: o servidor continua respondendo e termina com código 0', async () => {
+    const client = start([fixture('express-api')]);
+    // o lado de leitura do stderr some: cada aviso do servidor vira EPIPE
+    client.child.stderr!.destroy();
+    await client.initialize();
+    const routes = await client.call('rastro_routes');
+    expect(routes.isError).toBe(false);
+    expect(routes.text).toContain('# HTTP routes: 4 of 4');
+    expect(await client.close()).toBe(0);
   });
 
   it('a entrada fechada encerra o processo, mesmo no meio da primeira análise', async () => {
@@ -216,7 +227,7 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
     const after = await live.call('rastro_references', { target: 'fn:src/db.js#all' });
     expect(after.text).toContain('## Incoming — proven (2)');
     expect(after.text).toContain(
-      '`report` function · src/report.js:3 calls `all` — src/report.js:4 `return db.all();`',
+      '`report` function · `src/report.js:3` calls `all` — `src/report.js:4` `return db.all();`',
     );
     expect((await live.call('rastro_overview')).text).toContain('_Analysis #2:');
 
@@ -242,11 +253,11 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
       '# Impact of uncommitted changes (vs HEAD, including untracked files)',
     );
     expect(local.text).toContain(
-      'Summary: 1 changed file · 1 changed entity · 2 could be affected · 0 HTTP routes · 1 test file',
+      'Summary: 1 changed file (1 modified) · 1 changed item (1 entity) · 2 could be affected · 0 HTTP routes · 1 test file',
     );
-    expect(local.text).toContain('- `sum` function · src/math.ts:1');
+    expect(local.text).toContain('- `sum` function · `src/math.ts:1`');
     expect(local.text).toContain(
-      '- [d1] `total` function · src/app.ts:3 — calls `sum` at src/app.ts:4 `return sum(1, 2);`',
+      '- [d1] `total` function · `src/app.ts:3` — calls `sum` at `src/app.ts:4` `return sum(1, 2);`',
     );
     expect(local.text).toContain('## Test files to run (1)\n- `test/math.test.ts`');
 
@@ -254,7 +265,7 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
     git('commit', '-q', '-am', 'troca a ordem');
     const since = await client.call('rastro_impact', { since: 'main' });
     expect(since.text).toContain('# Impact of changes since `main`');
-    expect(since.text).toContain('- `sum` function · src/math.ts:1');
+    expect(since.text).toContain('- `sum` function · `src/math.ts:1`');
     const clean = await client.call('rastro_impact', { changes: true });
     expect(clean.text).toContain('No changed files.');
     const badRef = await client.call('rastro_impact', { since: 'nao-existe' });
@@ -300,10 +311,10 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
       env: { CLAUDE_PROJECT_DIR: fixture('express-api') },
     });
     await viaEnv.initialize();
-    expect((await viaEnv.call('rastro_overview')).text).toContain('# express-api —');
+    expect((await viaEnv.call('rastro_overview')).text).toContain('# `express-api` —');
     const viaCwd = start([], { cwd: fixture('oop'), env: { CLAUDE_PROJECT_DIR: '' } });
     await viaCwd.initialize();
-    expect((await viaCwd.call('rastro_overview')).text).toContain('# oop —');
+    expect((await viaCwd.call('rastro_overview')).text).toContain('# `oop` —');
   });
 
   it('opções que não se aplicam falham antes de começar, sem nada no stdout', () => {

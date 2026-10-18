@@ -153,6 +153,8 @@ export interface LiveProjectOptions {
   discover?: DiscoverOptions;
   /** Varredura em vez de eventos do sistema (testes). */
   polling?: boolean;
+  /** Intervalo da varredura (testes). */
+  pollMs?: number;
   /** Avisos curtos para o stderr (início, fim de análise, falhas). */
   log?: (event: ProjectEvent) => void;
 }
@@ -165,6 +167,12 @@ export type ProjectEvent =
 
 /** Quantas análises seguidas uma chamada espera antes de responder com a última (projeto em edição constante). */
 const MAX_ROUNDS = 3;
+/** Com eventos de arquivos nos últimos `SETTLE_MS`, espera essa calma (salvamentos em etapas)... */
+const SETTLE_MS = 100;
+/** ...mas nunca mais que isto. */
+const MAX_SETTLE_MS = 500;
+
+const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 export class LiveProject {
   private snapshot: Snapshot | undefined;
@@ -174,12 +182,19 @@ export class LiveProject {
   private sequence = 0;
   private watcher: ProjectWatcher | undefined;
   private closed = false;
+  /** Quando chegou o último evento de arquivo (ms desde 1970). */
+  private lastEvent = 0;
 
   constructor(
     readonly root: string,
     private readonly backend: AnalysisBackend,
     private readonly options: LiveProjectOptions = {},
   ) {}
+
+  /** Vai observar os arquivos (não foi aberto com `--no-watch`)? */
+  get watching(): boolean {
+    return this.options.watch !== false;
+  }
 
   /** Modo da observação de arquivos: `off` com `--no-watch` (ou antes de começar). */
   get watchMode(): 'live' | 'polling' | 'off' {
@@ -195,6 +210,7 @@ export class LiveProject {
         // o grafo só é reanalisado na próxima chamada: marcar na hora não custa nada
         delayMs: 0,
         ...(this.options.polling ? { polling: true } : {}),
+        ...(this.options.pollMs ? { pollMs: this.options.pollMs } : {}),
         onFallback: (err) =>
           this.options.log?.({
             type: 'watch-fallback',
@@ -210,6 +226,28 @@ export class LiveProject {
   /** Algo mudou no disco: a próxima chamada reanalisa. */
   markDirty(): void {
     this.dirty = true;
+    this.lastEvent = Date.now();
+  }
+
+  /**
+   * Antes de decidir que o grafo está em dia: uma edição feita logo antes da chamada pode ter o
+   * evento do sistema ainda na fila (lido no mesmo giro do laço de eventos que a requisição, ou
+   * no seguinte) e o aviso do observador sai num `setTimeout(0)`. Dois giros e um timer bastam
+   * para eles chegarem; na varredura, compara os arquivos na hora. Com eventos muito recentes,
+   * espera um pouco de calma (o editor pode salvar em etapas).
+   */
+  private async settle(): Promise<void> {
+    if (!this.watcher) return;
+    this.watcher.flush();
+    await nextTurn();
+    await nextTurn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const deadline = Date.now() + MAX_SETTLE_MS;
+    for (;;) {
+      const quietFor = Date.now() - this.lastEvent;
+      if (quietFor >= SETTLE_MS || Date.now() >= deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, SETTLE_MS - quietFor));
+    }
   }
 
   /**
@@ -218,6 +256,13 @@ export class LiveProject {
    */
   async current(): Promise<Snapshot> {
     if (this.closed) throw new Error('the project is closed');
+    if (this.watcher) {
+      // a análise em andamento pode terminar (e falhar) durante a espera: a falha é desta chamada
+      const inFlight = this.running;
+      await this.settle();
+      const failure = inFlight && (await inFlight);
+      if (failure) throw failure;
+    }
     let rounds = 0;
     for (;;) {
       if (this.running) {
@@ -245,8 +290,11 @@ export class LiveProject {
         if (this.closed) return undefined;
         const wallMs = Math.round(performance.now() - started);
         this.snapshot = makeSnapshot(graph, ++this.sequence, wallMs);
-        // pastas novas ou removidas, .gitignore alterado: observa o conjunto atual
-        this.watcher?.refresh();
+        // pastas novas ou removidas, .gitignore alterado: observa o conjunto atual (depois da
+        // resposta: percorrer as pastas de um projeto grande leva tempo na thread principal)
+        setImmediate(() => {
+          if (!this.closed) this.watcher?.refresh();
+        });
         this.options.log?.({
           type: 'analyzed',
           ms: wallMs,

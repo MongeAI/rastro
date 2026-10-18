@@ -38,6 +38,11 @@ export interface ProjectWatcher {
   readonly watched: number;
   /** Relê as pastas do projeto e passa a observar as novas (chamar depois de cada reanálise). */
   refresh(): void;
+  /**
+   * Na varredura, compara os arquivos agora (sem esperar o intervalo); ao vivo, não faz nada
+   * (os eventos chegam sozinhos). Mudanças encontradas seguem o caminho normal (`onChange`).
+   */
+  flush(): void;
   close(): void;
 }
 
@@ -95,11 +100,14 @@ export function watchProject(
 
   let mode: 'live' | 'polling' = 'live';
   const watchers = new Map<string, fs.FSWatcher>();
+  /** Identidade (dispositivo e inode) da pasta observada: muda se ela for apagada e recriada. */
+  const inodes = new Map<string, string>();
   let poller: ReturnType<typeof setInterval> | undefined;
 
   const closeWatchers = () => {
     for (const w of watchers.values()) w.close();
     watchers.clear();
+    inodes.clear();
   };
 
   /** Arquivos relevantes de cada pasta → `mtime:tamanho`, para a varredura. */
@@ -126,16 +134,20 @@ export function watchProject(
     return stamps;
   };
 
+  let previous: Map<string, string> | undefined;
+  const scan = () => {
+    if (!previous) return;
+    const current = snapshot();
+    for (const [file, stamp] of current) if (previous.get(file) !== stamp) queue(file);
+    for (const file of previous.keys()) if (!current.has(file)) queue(file);
+    previous = current;
+  };
+
   const startPolling = () => {
     mode = 'polling';
     closeWatchers();
-    let previous = snapshot();
-    poller = setInterval(() => {
-      const current = snapshot();
-      for (const [file, stamp] of current) if (previous.get(file) !== stamp) queue(file);
-      for (const file of previous.keys()) if (!current.has(file)) queue(file);
-      previous = current;
-    }, pollMs);
+    previous = snapshot();
+    poller = setInterval(scan, pollMs);
   };
 
   const fallBack = (error: NodeJS.ErrnoException) => {
@@ -160,20 +172,46 @@ export function watchProject(
     }
     const wasWatched = watchers.has(relative);
     if (!isDir && !wasWatched) return;
+    // pasta observada apagada (e talvez recriada no mesmo lugar): o watch antigo ficou preso à
+    // pasta removida e não vê mais nada; ela e as de dentro voltam a ser observadas do zero
+    if (wasWatched) forget(relative);
     refresh();
     // pastas excluídas (--exclude, .gitignore) não disparam reanálise
     if (wasWatched || watchers.has(relative)) queue(relative);
+  };
+
+  /** Para de observar a pasta e as de dentro dela. */
+  const forget = (dir: string) => {
+    for (const [watched, watcher] of watchers)
+      if (watched === dir || dir === '.' || watched.startsWith(`${dir}/`)) {
+        watcher.close();
+        watchers.delete(watched);
+        inodes.delete(watched);
+      }
+  };
+  const identity = (dir: string) => {
+    try {
+      const stat = fs.statSync(absolute(dir));
+      return `${stat.dev}:${stat.ino}`;
+    } catch {
+      return undefined;
+    }
   };
 
   const watchDir = (dir: string) => {
     const watcher = fs.watch(absolute(dir), { persistent: true }, (_event, filename) =>
       onEvent(dir, filename),
     );
+    const id = identity(dir);
+    if (id) inodes.set(dir, id);
     watcher.on('error', (err: NodeJS.ErrnoException) => {
       // a própria pasta foi apagada: só deixa de observá-la
       if (!fs.existsSync(absolute(dir))) {
         watcher.close();
-        watchers.delete(dir);
+        if (watchers.get(dir) === watcher) {
+          watchers.delete(dir);
+          inodes.delete(dir);
+        }
         return;
       }
       fallBack(err);
@@ -183,11 +221,14 @@ export function watchProject(
 
   const refresh = () => {
     if (closed || mode === 'polling') return;
+    // a raiz não tem pasta mãe observada para avisar que foi recriada: confere a identidade
+    if (watchers.has('.') && identity('.') !== inodes.get('.')) forget('.');
     const wanted = new Set(directories());
     for (const [dir, watcher] of watchers)
       if (!wanted.has(dir)) {
         watcher.close();
         watchers.delete(dir);
+        inodes.delete(dir);
       }
     for (const dir of wanted) {
       if (watchers.has(dir)) continue;
@@ -214,6 +255,9 @@ export function watchProject(
       return watchers.size;
     },
     refresh,
+    flush() {
+      if (!closed && mode === 'polling') scan();
+    },
     close() {
       closed = true;
       clearTimeout(timer);

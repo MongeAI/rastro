@@ -7,6 +7,7 @@ import {
   NODE_KIND_LABELS_EN,
   NODE_KINDS,
   RASTRO_VERSION,
+  type ChangedFile,
   type EdgeKind,
   type GraphEdge,
   type GraphNode,
@@ -14,9 +15,11 @@ import {
   type UnresolvedReason,
 } from '@rastro/core';
 import {
+  findPathBetween,
   findPaths,
   findPossiblePath,
   routesAndTests,
+  type BrokenReference,
   type GraphIndex,
   type ImpactEntry,
   type PathResult,
@@ -26,14 +29,16 @@ import { getLang, setLang } from './i18n.js';
 import { changesWithImpact, mdCode } from './impact.js';
 import type { Snapshot } from './mcp-project.js';
 import { readSource } from './server.js';
-import { safeText } from './term.js';
 
 /**
  * As ferramentas do `rastro mcp`: consultas ao grafo com respostas em texto compacto
  * (Markdown) para agentes de IA. Regras de todas elas:
  * - nunca inventam relações: o que é comprovado (resolvido, com arquivo:linha) fica separado
  *   do que é possível (não resolvido, com candidatos) e do que é externo;
- * - listas têm limite e dizem quantos itens ficaram de fora;
+ * - listas têm limite, dizem quantos itens foram mostrados de quantos e como ver o resto;
+ * - texto vindo do projeto (nomes, caminhos, ids, trechos) nunca quebra linha nem vira
+ *   Markdown: caracteres de controle e separadores de linha viram escapes visíveis (`\n`), e
+ *   os ids escritos assim voltam a funcionar como alvo;
  * - caminhos são relativos à raiz do projeto; o texto vem em inglês (é lido por agentes).
  */
 
@@ -83,7 +88,7 @@ export function checkArgs(schema: ObjectSchema, args: Args): string[] {
   for (const key of Object.keys(args))
     if (!Object.hasOwn(schema.properties, key))
       problems.push(
-        `unknown argument \`${clip(key, 60)}\` (accepted: ${Object.keys(schema.properties).join(', ') || 'none'})`,
+        `unknown argument ${tick(key, 60)} (accepted: ${Object.keys(schema.properties).join(', ') || 'none'})`,
       );
   for (const key of schema.required ?? [])
     if (args[key] === undefined) problems.push(`\`${key}\` is required`);
@@ -105,7 +110,7 @@ function checkValue(spec: PropertySchema, value: unknown): string | undefined {
       if (spec.maxLength !== undefined && value.length > spec.maxLength)
         return `is too long (max ${spec.maxLength} characters)`;
       if (spec.enum && !spec.enum.includes(value))
-        return `must be one of: ${spec.enum.join(', ')} (got ${JSON.stringify(clip(value, 40))})`;
+        return `must be one of: ${spec.enum.join(', ')} (got ${tick(JSON.stringify(clip(value, 40)))})`;
       return undefined;
     }
     case 'integer':
@@ -157,11 +162,45 @@ export interface ToolDefinition {
 /** Limite do texto devolvido (clientes guardam em arquivo respostas acima de ~50 mil caracteres). */
 const MAX_OUTPUT = 40_000;
 const MAX_SOURCE_LINES = 120;
+/** Linha de código mais longa mostrada (arquivos minificados têm linhas de centenas de KB). */
+const MAX_SOURCE_LINE = 400;
 const TOP = 10;
 
 const clip = (s: string, max = 120) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
-/** Texto do projeto (nomes, caminhos, código) em código inline: sem quebras, controles ou Markdown solto. */
-const tick = (s: string, max = 120) => mdCode(clip(s, max));
+
+/**
+ * Caracteres de controle (C0, DEL, C1, que inclui U+0085) e os separadores U+2028/U+2029: num
+ * nome de arquivo ou num texto do projeto, quebrariam a linha da resposta e deixariam o projeto
+ * escrever Markdown (títulos, instruções falsas) no que o agente lê.
+ */
+// eslint-disable-next-line no-control-regex -- é exatamente o que queremos escapar
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+// eslint-disable-next-line no-control-regex -- no código-fonte (em bloco cercado), o tab fica
+const UNSAFE_IN_CODE = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]/g;
+const ESCAPES: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+const escapeChar = (c: string) =>
+  ESCAPES[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+
+/** Texto do projeto numa linha só: controles e separadores viram escapes visíveis (`\n`, `\u2028`). */
+export const plain = (s: string) => s.replace(UNSAFE, escapeChar);
+
+/** O inverso de `plain` (para aceitar de volta um id ou caminho escrito com escapes). */
+function unescapeText(s: string): string {
+  return s.replace(/\\(n|r|t|u[0-9a-fA-F]{4})/g, (_, e: string) =>
+    e === 'n'
+      ? '\n'
+      : e === 'r'
+        ? '\r'
+        : e === 't'
+          ? '\t'
+          : String.fromCharCode(parseInt(e.slice(1), 16)),
+  );
+}
+
+/** Texto do projeto (nomes, caminhos, código) em código inline, numa linha, sem Markdown solto. */
+const tick = (s: string, max = 120) => mdCode(clip(plain(s), max));
+/** Um id inteiro (sem cortar), para ser passado de volta como alvo. */
+const idText = (id: string) => mdCode(plain(id));
 const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`;
 
@@ -186,6 +225,10 @@ const VERBS: Record<EdgeKind, string> = {
   contains: 'contains',
 };
 
+/** O que não vira entidade no Rastro (para explicar buscas sem resultado). */
+const NOT_MODELED =
+  'Rastro models top-level functions (including `const f = () => …`), classes, class members with a body (methods, constructors, getters/setters, arrow-function properties), files, folders, HTTP routes and packages. NOT entities: interfaces, type aliases, enums, plain variables/constants, functions declared inside other functions, object-literal methods, abstract methods and overload signatures (no body). For those, use grep or the enclosing entity (`path:line`).';
+
 /** Nome exibido: `Classe.metodo`, `GET /x`, caminho do arquivo ou da pasta. */
 function nameOf(n: GraphNode): string {
   if (n.kind === 'module')
@@ -203,13 +246,13 @@ function kindOf(n: GraphNode): string {
   return NODE_KIND_LABELS_EN[n.kind].toLowerCase();
 }
 
-/** `arquivo:linha` de onde a entidade começa (só o caminho para arquivos; vazio para pastas e pacotes). */
+/** `arquivo:linha` (em código) de onde a entidade começa; vazio para arquivos, pastas e pacotes. */
 function whereOf(n: GraphNode): string {
   if (n.kind === 'file' || n.kind === 'module' || n.kind === 'package') return '';
-  return n.location ? safeText(`${n.location.file}:${n.location.startLine}`) : '';
+  return n.location ? tick(`${n.location.file}:${n.location.startLine}`, 300) : '';
 }
 
-/** `` `Classe.metodo` method · src/a.ts:12 `` */
+/** `` `Classe.metodo` method · `src/a.ts:12` `` */
 function describe(n: GraphNode): string {
   const where = whereOf(n);
   return `${tick(nameOf(n))} ${kindOf(n)}${where ? ` · ${where}` : ''}`;
@@ -226,47 +269,144 @@ function qualifier(e: GraphEdge): string {
   if (importKind === 'dynamic') notes.push('dynamic import');
   else if (importKind === 'require') notes.push('require');
   else if (importKind === 're-export') notes.push('re-export');
-  if (e.meta?.typeOnly) notes.push('type-only');
+  if (e.meta?.typeOnly) notes.push('type-only: compile time only');
   if (e.meta?.viaDeclaration) notes.push('via .d.ts');
   return notes.length ? ` (${notes.join(', ')})` : '';
 }
 
-/** Evidência: `src/a.ts:8 \`linha de código\`` (+ quantos outros lugares). */
+/** Evidência: `` `src/a.ts:8` `linha de código` `` (+ quantos outros lugares). */
 function evidenceOf(e: GraphEdge): string {
   const first = e.evidence[0];
   if (!first) return '';
   const snippet = first.snippet ? ` ${tick(first.snippet, 140)}` : '';
   const total = Math.max(e.meta?.count ?? 0, e.evidence.length);
   const more = total > 1 ? ` (+${total - 1} more ${total - 1 === 1 ? 'site' : 'sites'})` : '';
-  return `${safeText(first.file)}:${first.line}${snippet}${more}`;
+  return `${tick(`${first.file}:${first.line}`, 300)}${snippet}${more}`;
 }
 
+// ---- saída com orçamento
+
+interface ListOptions {
+  limit: number;
+  /** Primeiro item mostrado (paginação). */
+  offset?: number;
+  /** A ferramenta aceita `offset` para esta lista. */
+  pageable?: boolean;
+  /** Maior `limit` aceito (para não sugerir aumentar o que já está no máximo). */
+  maxLimit?: number;
+  /** Como ver o resto quando não há paginação (ex.: "use rastro_references"). */
+  hint?: string;
+}
+
+interface ListBlock extends ListOptions {
+  /** Itens da página, já formatados (cada um pode ter mais de uma linha, mas nunca é partido). */
+  items: string[];
+  total: number;
+}
+
+/**
+ * Resposta montada em blocos: linhas e listas. Se passar do limite, cada lista mostra menos
+ * itens (o mesmo máximo para todas, o maior que cabe), sempre itens inteiros e com a linha
+ * "N shown of M" dizendo como pedir o resto: nenhuma seção some e nada é cortado no meio.
+ */
 class Out {
-  readonly lines: string[] = [];
+  private readonly blocks: Array<string | ListBlock> = [];
+
   push(...lines: string[]): this {
-    this.lines.push(...lines);
+    this.blocks.push(...lines);
     return this;
   }
+
   section(title: string): this {
-    if (this.lines.length) this.lines.push('');
-    this.lines.push(`## ${title}`);
+    if (this.blocks.length) this.blocks.push('');
+    this.blocks.push(`## ${title}`);
     return this;
   }
-  /** Até `limit` itens, e uma linha dizendo quantos ficaram de fora. */
-  list<T>(items: readonly T[], limit: number, render: (item: T) => string, hint: string): this {
-    for (const item of items.slice(0, limit)) this.lines.push(`- ${render(item)}`);
-    if (items.length > limit) this.lines.push(`- … ${items.length - limit} more (${hint})`);
+
+  list<T>(items: readonly T[], render: (item: T) => string, options: ListOptions): this {
+    const offset = options.offset ?? 0;
+    this.blocks.push({
+      ...options,
+      offset,
+      items: items.slice(offset, offset + options.limit).map((item) => `- ${render(item)}`),
+      total: items.length,
+    });
     return this;
   }
+
+  private render(cap: number): string[] {
+    const lines: string[] = [];
+    for (const block of this.blocks) {
+      if (typeof block === 'string') {
+        lines.push(block);
+        continue;
+      }
+      const offset = block.offset ?? 0;
+      if (offset && offset >= block.total && block.total) {
+        lines.push(`- (\`offset: ${offset}\` is past the end: ${plural(block.total, 'item')})`);
+        continue;
+      }
+      const shown = Math.min(block.items.length, cap);
+      lines.push(...block.items.slice(0, shown));
+      const end = offset + shown;
+      if (end >= block.total) continue;
+      const range = offset ? `items ${offset + 1}-${end}` : `${shown}`;
+      const how: string[] = [];
+      if (shown < block.items.length) {
+        // cortado pelo tamanho da resposta
+        how.push(
+          block.pageable
+            ? `response size limit: continue with \`offset: ${end}\``
+            : `response size limit: ${block.hint ?? 'narrow the query'}`,
+        );
+      } else {
+        if (block.pageable) how.push(`\`offset: ${end}\` for the next page`);
+        if (block.maxLimit && block.limit < block.maxLimit)
+          how.push(`raise \`limit\` (max ${block.maxLimit})`);
+        if (!how.length && block.hint) how.push(block.hint);
+      }
+      lines.push(
+        `- … ${block.total - end} more (${range} shown of ${block.total}${how.length ? `; ${how.join(' or ')}` : ''})`,
+      );
+    }
+    return lines;
+  }
+
   toString(): string {
-    const text = this.lines.join('\n');
+    const fits = (cap: number) => this.render(cap).join('\n');
+    const full = fits(Infinity);
+    if (full.length <= MAX_OUTPUT) return full;
+    // o maior número de itens por lista que cabe (busca binária)
+    const most = Math.max(
+      0,
+      ...this.blocks.map((b) => (typeof b === 'string' ? 0 : b.items.length)),
+    );
+    let low = 0;
+    let high = most;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (fits(mid).length <= MAX_OUTPUT) low = mid;
+      else high = mid - 1;
+    }
+    const text = fits(low);
     if (text.length <= MAX_OUTPUT) return text;
-    const cut = text.lastIndexOf('\n', MAX_OUTPUT);
-    return `${text.slice(0, cut > 0 ? cut : MAX_OUTPUT)}\n… output truncated at ${MAX_OUTPUT} characters (lower \`limit\` or narrow the query)`;
+    // só texto fixo grande demais (não acontece com as ferramentas atuais): corta numa linha
+    const cut = text.lastIndexOf('\n', MAX_OUTPUT - 200);
+    return `${text.slice(0, cut > 0 ? cut : MAX_OUTPUT - 200)}\n… output truncated at ${MAX_OUTPUT} characters (narrow the query)`;
   }
 }
 
-const RAISE = 'raise `limit`';
+/** Numa lista em linha cortada: `` (5 shown of 9; dica)``; vazio se coube inteira. */
+const shownOf = (shown: number, total: number, hint?: string) =>
+  total > shown ? ` (${shown} shown of ${total}${hint ? `; ${hint}` : ''})` : '';
+
+/** Opções de lista com paginação (`limit` e `offset` da ferramenta). */
+const paged = (args: Args, fallback: number, maxLimit: number): ListOptions => ({
+  limit: num(args, 'limit', fallback),
+  offset: num(args, 'offset', 0),
+  pageable: true,
+  maxLimit,
+});
 
 // ---------------------------------------------------------------------------
 // resolução de nomes
@@ -275,7 +415,7 @@ const SYMBOLS = new Set<NodeKind>(['function', 'class', 'method', 'route']);
 
 /** Caminho como o grafo usa: relativo à raiz, com `/`, sem `./` nem `/` no fim. */
 function normalizePath(raw: string, root: string): string {
-  let p = raw.replace(/\\/g, '/');
+  let p = raw.replace(/\\(?![nrt]|u[0-9a-fA-F]{4})/g, '/');
   const rootPosix = root.replace(/\\/g, '/').replace(/\/+$/, '');
   if (p === rootPosix) return '.';
   if (p.startsWith(`${rootPosix}/`)) p = p.slice(rootPosix.length + 1);
@@ -283,12 +423,33 @@ function normalizePath(raw: string, root: string): string {
   return p || '.';
 }
 
-/** A entidade mais interna que contém a linha (ou o próprio arquivo). */
-function entityAtLine(index: GraphIndex, file: GraphNode, line: number): GraphNode {
+/** Extensão escrita num import ESM (`./a.js`) → extensões do código-fonte que o TypeScript aceita no lugar. */
+const SOURCE_FOR: Record<string, string[]> = {
+  '.js': ['.ts', '.tsx', '.jsx'],
+  '.jsx': ['.tsx'],
+  '.mjs': ['.mts'],
+  '.cjs': ['.cts'],
+};
+
+/** O arquivo do caminho, aceitando o especificador ESM (`src/a.js` para `src/a.ts`). */
+function fileAt(index: GraphIndex, p: string): GraphNode | undefined {
+  const exact = index.node(`file:${p}`);
+  if (exact) return exact;
+  const ext = /\.[cm]?jsx?$/.exec(p)?.[0];
+  if (!ext) return undefined;
+  for (const source of SOURCE_FOR[ext] ?? []) {
+    const found = index.node(`file:${p.slice(0, -ext.length)}${source}`);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** A entidade mais interna que contém as linhas `[first, last]` (ou o próprio arquivo). */
+function entityAtLines(index: GraphIndex, file: GraphNode, first: number, last = first): GraphNode {
   let best: GraphNode | undefined;
   for (const n of index.descendants(file.id)) {
     const loc = n.location;
-    if (!SYMBOLS.has(n.kind) || !loc || line < loc.startLine || line > loc.endLine) continue;
+    if (!SYMBOLS.has(n.kind) || !loc || first < loc.startLine || last > loc.endLine) continue;
     const span = loc.endLine - loc.startLine;
     const bestSpan = best ? best.location!.endLine - best.location!.startLine : Infinity;
     if (span < bestSpan || (span === bestSpan && compareStrings(n.id, best!.id) < 0)) best = n;
@@ -314,15 +475,93 @@ function editDistance(a: string, b: string, max: number): number {
   return previous[b.length]!;
 }
 
-/** Quando nada foi encontrado: o que tentar (busca aproximada). */
+const looksLikePath = (q: string) => q.includes('/') || /\.[cm]?[jt]sx?$/.test(q);
+
+/**
+ * Arquivos e pastas parecidos com um caminho, do mais parecido ao menos: o nome do arquivo
+ * (sem extensão) igual ou a poucas letras de distância pesa mais; partes do caminho em comum
+ * contam pelo quanto são raras no projeto (`src` e `ts` aparecem em todo lugar e não dizem nada).
+ */
+function similarPaths(index: GraphIndex, query: string): GraphNode[] {
+  const parts = (p: string) => [
+    ...new Set(
+      p
+        .toLowerCase()
+        .split(/[/._-]+/)
+        .filter(Boolean),
+    ),
+  ];
+  const stem = (p: string) =>
+    (p.toLowerCase().replace(/\/+$/, '').split('/').pop() ?? '').replace(/\.[^.]*$/, '');
+  const candidates = [...index.nodes.values()].filter(
+    (n) => (n.kind === 'file' || n.kind === 'module') && (n.qualifiedName ?? '.') !== '.',
+  );
+  const frequency = new Map<string, number>();
+  for (const n of candidates)
+    for (const part of parts(n.qualifiedName ?? n.name))
+      frequency.set(part, (frequency.get(part) ?? 0) + 1);
+  const wantedParts = parts(query);
+  const wantedStem = stem(query);
+  const scored: Array<{ node: GraphNode; score: number }> = [];
+  for (const n of candidates) {
+    const p = n.qualifiedName ?? n.name;
+    const own = new Set(parts(p));
+    let score = 0;
+    for (const part of wantedParts)
+      if (own.has(part)) score += Math.log(candidates.length / (frequency.get(part) ?? 1));
+    const d = wantedStem ? editDistance(wantedStem, stem(p), 2) : 3;
+    if (d === 0) score += 6;
+    else if (d <= 2) score += 4 - d;
+    if (score > 0) scored.push({ node: n, score });
+  }
+  scored.sort((a, b) => b.score - a.score || compareStrings(a.node.id, b.node.id));
+  const best = scored[0]?.score ?? 0;
+  return scored
+    .filter((x) => x.score >= best / 2)
+    .slice(0, 8)
+    .map((x) => x.node);
+}
+
+/** Quando nada foi encontrado: o que tentar (busca aproximada) e o que o Rastro não modela. */
 function notFound(index: GraphIndex, query: string): ToolError {
   const out = new Out().push(`No entity matches ${tick(query)}.`);
-  const words = query.split(/[\s#:/.]+/).filter((w) => w.length > 1);
+  // `Classe.metodo` abstrato: existe, mas sem corpo (não é entidade)
+  const member = /^([\w$]+)\.([\w$]+)$/.exec(query);
+  if (member) {
+    const [, className, method] = member as unknown as [string, string, string];
+    for (const cls of index.nodes.values()) {
+      if (cls.kind !== 'class' || cls.name !== className) continue;
+      if (!cls.meta?.abstractMembers?.includes(method)) continue;
+      const implementations = [...index.nodes.values()].filter(
+        (n) =>
+          n.kind === 'method' &&
+          n.name === method &&
+          !!n.parent &&
+          inheritsFrom(index, n.parent, cls.id),
+      );
+      out.push(
+        `${tick(`${className}.${method}`)} is an abstract method of ${describe(cls)}: it has no body, so it is not an entity. Calls to it are unresolved, with the implementations as POSSIBLE targets.`,
+      );
+      if (implementations.length) {
+        out.push('Implementations in subclasses:');
+        out.list(implementations, (n) => `${describe(n)} · id ${idText(n.id)}`, {
+          limit: 10,
+          hint: 'use rastro_search',
+        });
+      }
+      return new ToolError(out.toString());
+    }
+  }
   const seen = new Set<string>();
-  const close = [query, ...words.reverse()]
-    .flatMap((q) => index.search(q, 8).map((r) => r.node))
-    .filter((n) => n.kind !== 'unresolved' && !seen.has(n.id) && seen.add(n.id))
-    .slice(0, 8);
+  const close = looksLikePath(query)
+    ? similarPaths(index, query)
+    : (() => {
+        const words = query.split(/[\s#:/.]+/).filter((w) => w.length > 1);
+        return [query, ...words.reverse()]
+          .flatMap((q) => index.search(q, 8).map((r) => r.node))
+          .filter((n) => n.kind !== 'unresolved' && !seen.has(n.id) && seen.add(n.id))
+          .slice(0, 8);
+      })();
   if (!close.length) {
     // erro de digitação: nomes a poucas letras de distância
     const wanted = query.toLowerCase();
@@ -339,34 +578,92 @@ function notFound(index: GraphIndex, query: string): ToolError {
   }
   if (close.length) {
     out.push('Close matches:');
-    out.list(close, 8, (n) => `${describe(n)} · id ${tick(n.id, 200)}`, '');
+    out.list(close, (n) => `${describe(n)} · id ${idText(n.id)}`, { limit: 8 });
   }
   out.push(
     '',
-    'A target can be an id (`fn:src/a.ts#name`), a name or qualified name (`Class.method`), a file path relative to the project root (`src/a.ts`), a folder (`src/lib`) or `path:line`. Use rastro_search to explore.',
+    'A target can be an id (`fn:src/a.ts#name`), a name or qualified name (`Class.method`), a file path relative to the project root (`src/a.ts`, or the `.js` specifier of a `.ts` file), a folder (`src/lib`), `path:line`, `path:line:column` or `path:start-end`. Use rastro_search to explore.',
+    '',
+    NOT_MODELED,
   );
   return new ToolError(out.toString());
 }
 
+/** A classe `id` estende `base` (direta ou indiretamente, por herança comprovada)? */
+function inheritsFrom(index: GraphIndex, id: string, base: string): boolean {
+  const seen = new Set<string>();
+  let level = [id];
+  while (level.length) {
+    const next: string[] = [];
+    for (const cls of level)
+      for (const e of index.outgoing(cls, ['extends'])) {
+        if (e.resolution !== 'resolved' || seen.has(e.target)) continue;
+        if (e.target === base) return true;
+        seen.add(e.target);
+        next.push(e.target);
+      }
+    level = next;
+  }
+  return false;
+}
+
+/** Arquivo:linha fora do arquivo: erro claro em vez de devolver o arquivo inteiro. */
+function checkLines(file: GraphNode, first: number, last: number): void {
+  const lines = file.meta?.lines ?? file.location?.endLine;
+  const name = tick(nameOf(file), 300);
+  if (first < 1) throw new ToolError(`Line ${first} does not exist: lines start at 1 (${name}).`);
+  if (last < first)
+    throw new ToolError(
+      `Invalid line range ${first}-${last} in ${name}: the end comes before the start.`,
+    );
+  if (lines !== undefined && last > lines)
+    throw new ToolError(`Line ${last} is out of range: ${name} has ${plural(lines, 'line')}.`);
+}
+
 /**
- * Encontra a entidade pedida: id, `arquivo:linha`, caminho de arquivo ou pasta, sufixo de id
- * (`src/a.ts#nome`), nome qualificado ou nome (com e sem diferenciar maiúsculas). Se mais de
- * uma combina, lista os candidatos e pede um id; se nenhuma, sugere nomes parecidos.
+ * Encontra a entidade pedida: id, `arquivo:linha` (também `:linha:coluna` e `:início-fim`),
+ * caminho de arquivo (também o especificador `.js` de um `.ts`) ou pasta, sufixo de id
+ * (`src/a.ts#nome`, com `./` ou caminho absoluto), nome qualificado ou nome (com e sem
+ * diferenciar maiúsculas; entre crases ou com `()` também). Se mais de uma combina, lista os
+ * candidatos e pede um id; se nenhuma, sugere nomes parecidos.
  */
 export function resolveTarget(snapshot: Snapshot, raw: string): GraphNode {
   const { index } = snapshot;
-  const query = raw.trim();
+  let query = raw.trim();
+  // `sum`, `` `sum` ``: as crases do Markdown não fazem parte do nome
+  if (/^`+[^`]+`+$/.test(query)) query = query.replace(/^`+|`+$/g, '').trim();
   if (!query) throw new ToolError('The target is empty.');
-  const exact = index.node(query);
+  const found = lookup(snapshot, query);
+  if (found) return found;
+  // id ou caminho escrito com escapes (`\n`) como as respostas mostram
+  const unescaped = unescapeText(query);
+  if (unescaped !== query) {
+    const again = lookup(snapshot, unescaped);
+    if (again) return again;
+  }
+  throw notFound(index, query);
+}
+
+function lookup(snapshot: Snapshot, input: string): GraphNode | undefined {
+  const { index } = snapshot;
+  const exact = index.node(input);
   if (exact) return exact;
+  // `sum()`, `Classe.metodo(a, b)`: os parênteses da chamada não fazem parte do nome
+  const call = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(.*\)$/s.exec(input);
+  const query = call ? call[1]! : input;
 
   const p = normalizePath(query, snapshot.graph.project.root);
-  const atLine = /^(.+):(\d+)$/.exec(p);
+  const atLine = /^(.+?):(\d+)(?:-(\d+)|:(\d+))?$/.exec(p);
   if (atLine) {
-    const file = index.node(`file:${atLine[1]}`);
-    if (file) return entityAtLine(index, file, Number(atLine[2]));
+    const file = fileAt(index, atLine[1]!);
+    if (file) {
+      const first = Number(atLine[2]);
+      const last = atLine[3] ? Number(atLine[3]) : first;
+      checkLines(file, first, last);
+      return entityAtLines(index, file, first, last);
+    }
   }
-  const pathMatch = index.node(`file:${p}`) ?? index.node(`module:${p}`);
+  const pathMatch = fileAt(index, p) ?? index.node(`module:${p}`);
   if (pathMatch) return pathMatch;
 
   const all = [...index.nodes.values()];
@@ -379,29 +676,35 @@ export function resolveTarget(snapshot: Snapshot, raw: string): GraphNode {
     const out = new Out().push(
       `${tick(query)} is ambiguous: ${plural(list.length, 'entity', 'entities')} match. Retry with one of these ids (or a \`path:line\`):`,
     );
-    out.list(list, 20, (n) => `${tick(n.id, 200)} — ${describe(n)}`, 'narrow the name');
+    out.list(list, (n) => `${idText(n.id)} — ${describe(n)}`, {
+      limit: 20,
+      hint: 'narrow the name',
+    });
     throw new ToolError(out.toString());
   };
 
-  if (query.includes('#')) {
-    const bySuffix = all.filter((n) => n.id.slice(n.id.indexOf(':') + 1) === query);
-    const found = pick(bySuffix);
+  const hash = p.indexOf('#');
+  if (hash > 0) {
+    // `src/a.ts#nome` (também `./src/a.ts#nome`, o caminho absoluto ou `src/a.js#nome`)
+    const file = fileAt(index, p.slice(0, hash));
+    const suffix = `${file ? (file.qualifiedName ?? file.name) : p.slice(0, hash)}${p.slice(hash)}`;
+    const found = pick(all.filter((n) => n.id.slice(n.id.indexOf(':') + 1) === suffix));
     if (found) return found;
   }
-  const byName = (same: (a: string, b: string) => boolean) =>
+  const byName = (same: (a: string, b: string) => boolean, includeUnresolved: boolean) =>
     all.filter(
       (n) =>
         n.kind !== 'module' &&
+        (includeUnresolved || n.kind !== 'unresolved') &&
         (same(n.qualifiedName ?? '', query) ||
           same(n.name, query) ||
           (n.kind === 'route' && same(routeLabel(n), query))),
     );
+  // sem diferenciar maiúsculas, só entidades reais: `Animal.sound` não pode virar a chamada
+  // `animal.sound` (uma referência não resolvida qualquer)
   return (
-    pick(byName((a, b) => a === b)) ??
-    pick(byName((a, b) => a.toLowerCase() === b.toLowerCase())) ??
-    (() => {
-      throw notFound(index, query);
-    })()
+    pick(byName((a, b) => a === b, true)) ??
+    pick(byName((a, b) => a.toLowerCase() === b.toLowerCase(), false))
   );
 }
 
@@ -412,6 +715,8 @@ interface Reached {
   node: GraphNode;
   depth: number;
   edge: GraphEdge;
+  /** Observação da relação (ex.: o `new` de uma subclasse que roda este construtor). */
+  note?: string;
 }
 
 interface Neighborhood {
@@ -419,6 +724,15 @@ interface Neighborhood {
   external: Reached[];
   /** Relações não resolvidas (só a partir da própria entidade). */
   unresolved: Reached[];
+}
+
+/**
+ * Relações que chegam num nó. Para um construtor, também os `new` comprovados da classe e de
+ * subclasses sem construtor próprio (que rodam este construtor).
+ */
+function incomingOf(index: GraphIndex, id: string, kinds: readonly EdgeKind[]): GraphEdge[] {
+  const edges = index.incoming(id, kinds);
+  return kinds.includes('calls') ? [...edges, ...index.constructionSites(id)] : edges;
 }
 
 /**
@@ -439,7 +753,7 @@ function walk(
   for (let d = 1; d <= depth && frontier.length; d++) {
     const next: string[] = [];
     for (const id of frontier) {
-      const edges = direction === 'in' ? index.incoming(id, kinds) : index.outgoing(id, kinds);
+      const edges = direction === 'in' ? incomingOf(index, id, kinds) : index.outgoing(id, kinds);
       const other = (e: GraphEdge) => (direction === 'in' ? e.source : e.target);
       for (const edge of [...edges].sort((a, b) => compareStrings(other(a), other(b)))) {
         const node = index.node(other(edge));
@@ -447,7 +761,22 @@ function walk(
         if (edge.resolution === 'resolved') {
           if (visited.has(node.id)) continue;
           visited.add(node.id);
-          result.proven.push({ node, depth: d, edge });
+          const owner = index.node(id)?.parent;
+          const inherited =
+            direction === 'in' &&
+            edge.target !== id &&
+            edge.meta?.callKind === 'new' &&
+            edge.target !== owner;
+          result.proven.push({
+            node,
+            depth: d,
+            edge,
+            ...(inherited
+              ? {
+                  note: `${tick(nameOf(index.node(edge.target) ?? node))} has no constructor of its own: \`new\` runs this inherited one`,
+                }
+              : {}),
+          });
           next.push(node.id);
         } else if (d === 1) {
           (edge.resolution === 'external' ? result.external : result.unresolved).push({
@@ -463,18 +792,44 @@ function walk(
   return result;
 }
 
-/** Quem chama a entidade por meio de uma chamada não resolvida que a tem como candidata. */
-function possibleCallers(
-  index: GraphIndex,
-  id: string,
-): Array<{ caller: GraphNode; via: GraphNode; edge: GraphEdge }> {
-  const found: Array<{ caller: GraphNode; via: GraphNode; edge: GraphEdge }> = [];
+/** Quem talvez chame a entidade: por interface/método abstrato ou por sobrescrita (despacho). */
+interface PossibleCaller {
+  caller: GraphNode;
+  edge: GraphEdge;
+  /** Como a chamada pode chegar aqui (já formatado). */
+  how: string;
+  /** A entidade que talvez seja chamada. */
+  target: string;
+}
+
+function possibleCallers(index: GraphIndex, id: string): PossibleCaller[] {
+  const found: PossibleCaller[] = [];
   for (const via of index.possibleCallSites(id))
     for (const edge of index.incoming(via.id, ['calls'])) {
       const caller = index.node(edge.source);
-      if (caller) found.push({ caller, via, edge });
+      if (caller)
+        found.push({
+          caller,
+          edge,
+          how: `via ${tick(via.meta?.reference ?? via.name)} (1 of ${via.meta?.candidates?.length ?? '?'} possible implementations)`,
+          target: id,
+        });
     }
-  return found.sort((a, b) => compareStrings(a.caller.id, b.caller.id));
+  const self = index.node(id);
+  const owner = self?.parent ? index.node(self.parent) : undefined;
+  for (const { edge, base } of index.dispatchCalls(id)) {
+    const caller = index.node(edge.source);
+    if (caller)
+      found.push({
+        caller,
+        edge,
+        how: `via ${tick(nameOf(base))} (overridden here: runs this method when the object is ${owner ? `a ${tick(nameOf(owner))}` : 'of this class'})`,
+        target: id,
+      });
+  }
+  return found.sort(
+    (a, b) => compareStrings(a.caller.id, b.caller.id) || compareStrings(a.edge.id, b.edge.id),
+  );
 }
 
 /** Linha de uma relação a partir da entidade: quem fica do outro lado e a evidência. */
@@ -487,7 +842,7 @@ function relationLine(
   const depth = showDepth ? `[d${r.depth}] ` : '';
   const verb = `${VERBS[r.edge.kind]}${qualifier(r.edge)}`;
   const evidence = evidenceOf(r.edge);
-  const tail = evidence ? ` — ${evidence}` : '';
+  const tail = `${evidence ? ` — ${evidence}` : ''}${r.note ? ` (${r.note})` : ''}`;
   if (direction === 'in') {
     const target = index.node(r.edge.target);
     return `${depth}${describe(r.node)} ${verb} ${tick(target ? nameOf(target) : r.edge.target)}${tail}`;
@@ -496,7 +851,7 @@ function relationLine(
   return `${depth}${tick(source ? nameOf(source) : r.edge.source)} ${verb} ${describe(r.node)}${tail}`;
 }
 
-/** Uma referência não resolvida: o texto, o motivo e os alvos possíveis. */
+/** Uma referência não resolvida: o texto, o motivo e os alvos possíveis (um item, nunca partido). */
 function unresolvedLine(index: GraphIndex, r: Reached): string {
   const target = r.node;
   const reason = target.meta?.reason ? REASONS[target.meta.reason] : 'target not resolved';
@@ -521,6 +876,9 @@ function externalLine(r: Reached, direction: 'in' | 'out', index: GraphIndex): s
   return `${tick(source ? nameOf(source) : r.edge.source)} ${verb} ${describe(r.node)}${evidence ? ` — ${evidence}` : ''}`;
 }
 
+const possibleLine = (p: PossibleCaller) =>
+  `${describe(p.caller)} may call it ${p.how} — ${evidenceOf(p.edge)}`;
+
 // ---------------------------------------------------------------------------
 // rotas
 
@@ -538,7 +896,10 @@ function routePathNote(n: GraphNode): string {
   return 'full path unknown (no proven mount prefix; path as written in code)';
 }
 
-/** Handlers da rota: funções ligadas pelo framework, ou o handler inline (o que ele chama). */
+/**
+ * Handlers da rota: funções ligadas pelo framework, o handler inline (e o que ele chama) ou,
+ * quando nenhum dos dois, que o handler não foi identificado (nunca "inline" sem saber).
+ */
 function routeHandler(index: GraphIndex, n: GraphNode): string {
   const out = index.outgoing(n.id, ['calls']);
   const handlers = out.filter((e) => e.meta?.callKind === 'route-handler');
@@ -555,12 +916,16 @@ function routeHandler(index: GraphIndex, n: GraphNode): string {
   const calls = out
     .map((e) => index.node(e.target))
     .filter((t): t is GraphNode => !!t && t.kind !== 'unresolved');
+  const callList = calls
+    .slice(0, 4)
+    .map((t) => tick(nameOf(t)))
+    .join(', ');
+  const more = calls.length > 4 ? ', …' : '';
+  if (n.meta?.inlineHandler)
+    return calls.length ? `inline function (calls ${callList}${more})` : 'inline function';
   return calls.length
-    ? `inline function (calls ${calls
-        .slice(0, 4)
-        .map((t) => tick(nameOf(t)))
-        .join(', ')}${calls.length > 4 ? ', …' : ''})`
-    : 'inline function';
+    ? `handler not identified (code attributed to the route calls ${callList}${more})`
+    : 'handler not identified (not a function Rastro can follow statically, e.g. a value returned by a library call)';
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +973,39 @@ function inEnglish<T>(fn: () => T): T {
 }
 
 // ---------------------------------------------------------------------------
+// análise parcial
+
+/** Diagnósticos que deixam parte do projeto fora da análise. */
+const PARTIAL_CODES = new Set([
+  'max-files-reached',
+  'file-too-large',
+  'parse-failed',
+  'unreadable-directory',
+  'analysis-failed',
+  'next-routes-skipped',
+]);
+
+/** Uma linha de aviso, em toda resposta, enquanto a análise está incompleta. */
+export function partialNote(snapshot: Snapshot): string | undefined {
+  const { graph } = snapshot;
+  const count = (code: string) => graph.diagnostics.filter((d) => d.code === code).length;
+  if (!graph.diagnostics.some((d) => PARTIAL_CODES.has(d.code))) return undefined;
+  const parts: string[] = [];
+  if (count('max-files-reached'))
+    parts.push(
+      `file limit reached (${graph.analyzer.options.maxFiles}): files beyond it were not analyzed`,
+    );
+  const skipped = count('file-too-large') + count('parse-failed');
+  if (skipped) parts.push(`${plural(skipped, 'file')} skipped (too large or unreadable)`);
+  if (count('unreadable-directory'))
+    parts.push(`${plural(count('unreadable-directory'), 'folder')} could not be read`);
+  if (count('analysis-failed'))
+    parts.push(`${plural(count('analysis-failed'), 'analysis step')} failed`);
+  if (count('next-routes-skipped')) parts.push('some Next.js routes were not detected');
+  return `> ⚠ Partial analysis: ${parts.join('; ')}. Relationships with the code left out are missing (details in rastro_overview).`;
+}
+
+// ---------------------------------------------------------------------------
 // ferramentas
 
 const target = (description: string): StringSchema => ({
@@ -617,23 +1015,47 @@ const target = (description: string): StringSchema => ({
   description,
 });
 const TARGET_HELP =
-  'Entity: an id (`fn:src/a.ts#name`), a name or qualified name (`Class.method`), a file path relative to the project root, a folder, or `path:line`.';
+  'Entity: an id (`fn:src/a.ts#name`), a name or qualified name (`Class.method`), a file path relative to the project root (the `.js` specifier of a `.ts` file also works), a folder, `path:line`, `path:line:column` or `path:start-end`.';
 const limit = (max: number, fallback: number): IntegerSchema => ({
   type: 'integer',
   minimum: 1,
   maximum: max,
   default: fallback,
-  description: `Maximum items per list (default ${fallback}).`,
+  description: `Maximum items per list (default ${fallback}, max ${max}).`,
+});
+const offset = (what: string): IntegerSchema => ({
+  type: 'integer',
+  minimum: 0,
+  maximum: 1_000_000,
+  default: 0,
+  description: `Skip this many items of ${what} (pagination; the answer says which offset comes next).`,
 });
 const num = (args: Args, key: string, fallback: number) =>
   typeof args[key] === 'number' ? (args[key] as number) : fallback;
 
 // ---- overview
 
+/** Relações por tipo e resolução (pares distintos; `meta.count` guarda as ocorrências). */
+function relationshipCounts(index: GraphIndex) {
+  const counts = new Map<
+    EdgeKind,
+    { resolved: number; external: number; unresolved: number; possible: number }
+  >();
+  for (const kind of EDGE_KINDS)
+    counts.set(kind, { resolved: 0, external: 0, unresolved: 0, possible: 0 });
+  for (const e of index.edges.values()) {
+    const c = counts.get(e.kind)!;
+    c[e.resolution]++;
+    if (e.resolution === 'unresolved' && index.node(e.target)?.meta?.candidates?.length)
+      c.possible++;
+  }
+  return counts;
+}
+
 function overview(_args: Args, ctx: ToolContext): string {
   const { graph, index } = ctx.snapshot;
   const s = graph.stats;
-  const out = new Out().push(`# ${clip(graph.project.name, 80)} — Rastro code graph`);
+  const out = new Out().push(`# ${tick(graph.project.name, 80)} — Rastro code graph`);
   const skipped = graph.diagnostics.filter((d) =>
     ['file-too-large', 'parse-failed', 'symlink-skipped'].includes(d.code),
   );
@@ -653,10 +1075,16 @@ function overview(_args: Args, ctx: ToolContext): string {
             : plural(s.nodesByKind[k]!, k),
     );
   out.push(`Entities: ${kinds.join(' · ') || 'none'}`);
-  const r = s.edgesByResolution;
+  const c = relationshipCounts(index);
+  const calls = c.get('calls')!;
+  const imports = c.get('imports')!;
+  const ext = c.get('extends')!;
   out.push(
-    `Relationships: ${r.resolved ?? 0} proven · ${r.external ?? 0} to external packages · ${r.unresolved ?? 0} unresolved (target unknown or only possible)`,
-    `By kind: ${(['calls', 'imports', 'exports', 'extends'] as const).map((k) => `${k} ${s.edgesByKind[k] ?? 0}`).join(' · ')}`,
+    'Relationships (distinct pairs; repeated occurrences are evidence of the same pair):',
+    `- Calls: ${calls.resolved} proven · ${calls.unresolved} unresolved (${calls.possible} of them with POSSIBLE targets, e.g. interface calls)`,
+    `- Imports: ${imports.resolved} proven (project files) · ${imports.external} to external packages · ${imports.unresolved} unresolved`,
+    `- Inheritance (extends): ${ext.resolved} proven · ${ext.external} from external classes · ${ext.unresolved} unresolved`,
+    `- Structural, not usage: ${c.get('exports')!.resolved} exports · ${c.get('depends_on')!.resolved} folder dependencies (depends_on, derived from imports)`,
   );
   const unknown = s.unknownReceiverCalls + s.computedCalls;
   if (unknown)
@@ -690,7 +1118,7 @@ function overview(_args: Args, ctx: ToolContext): string {
   if (routes.length) {
     const frameworks = [...new Set(routes.map((n) => n.meta?.framework ?? '?'))].sort();
     out.push(
-      `HTTP routes: ${routes.length} (${frameworks.join(', ')}) — list them with rastro_routes`,
+      `HTTP routes: ${routes.length} (${frameworks.map((f) => plain(f)).join(', ')}) — list them with rastro_routes`,
     );
   }
 
@@ -722,8 +1150,11 @@ function overview(_args: Args, ctx: ToolContext): string {
     out.push(
       `Possibly unused (no proven caller and the name appears only at its declaration; dynamic use is still possible): ${internal.length} internal, ${exported.length} exported (may be public API)`,
     );
-    for (const n of [...internal.slice(0, 5), ...exported.slice(0, 3)])
-      out.push(`- ${describe(n)}`);
+    const hint = 'not listed here; find them with rastro_search or rastro_references';
+    if (internal.length) out.push('Internal:');
+    out.list(internal, describe, { limit: 5, hint });
+    if (exported.length) out.push('Exported:');
+    out.list(exported, describe, { limit: 3, hint });
   }
   if (!insights.mostCalled.length && !insights.mostImported.length)
     out.push('No proven calls or imports between project files yet.');
@@ -733,15 +1164,16 @@ function overview(_args: Args, ctx: ToolContext): string {
   out.push(
     `Diagnostics: ${plural(warnings.length, 'warning')}, ${graph.diagnostics.length - warnings.length} info`,
   );
-  for (const d of warnings.slice(0, 5))
-    out.push(
-      `- ${d.file ? `${tick(`${d.file}${d.line ? `:${d.line}` : ''}`)} — ` : ''}${clip(diagnosticText(d, 'en'), 300)}`,
-    );
-  if (warnings.length > 5) out.push(`- … ${warnings.length - 5} more`);
+  const diagLine = (d: (typeof graph.diagnostics)[number], max: number) =>
+    `${d.file ? `${tick(`${d.file}${d.line ? `:${d.line}` : ''}`, 300)} — ` : ''}${plain(clip(diagnosticText(d, 'en'), max))}`;
+  out.list(warnings, (d) => diagLine(d, 300), {
+    limit: 5,
+    hint: 'see the Rastro web UI or `rastro analyze`',
+  });
   if (skipped.length && warnings.length <= 5) {
     // os ignorados de nível info (links simbólicos) também contam como fora da análise
     for (const d of skipped.filter((d) => d.level === 'info').slice(0, 3))
-      out.push(`- ${tick(d.file ?? '?')} — ${clip(diagnosticText(d, 'en'), 200)}`);
+      out.push(`- ${diagLine(d, 200)}`);
   }
   const branch = gitBranch(graph.project.root);
   if (branch) out.push(`Git branch: ${tick(branch)}`);
@@ -757,8 +1189,8 @@ function freshness(ctx: ToolContext): string {
       ? 'not watching files (--no-watch): restart the server to see edits'
       : ctx.watchMode === 'live'
         ? 'watching files: edits are re-analyzed before the next answer'
-        : 'watching files by polling (every 1.5 s): edits are re-analyzed before the next answer';
-  return `_Analysis #${snap.sequence}: ${ago}s ago, took ${snap.wallMs} ms (TypeScript ${snap.graph.analyzer.typescriptVersion}) · ${watch} · Rastro ${RASTRO_VERSION}_`;
+        : 'watching files by polling: edits are re-analyzed before the next answer';
+  return `_Analysis #${snap.sequence}: ${ago}s ago, took ${snap.wallMs} ms (TypeScript ${plain(snap.graph.analyzer.typescriptVersion)}) · ${watch} · Rastro ${RASTRO_VERSION}_`;
 }
 
 // ---- search
@@ -766,15 +1198,26 @@ function freshness(ctx: ToolContext): string {
 function search(args: Args, ctx: ToolContext): string {
   const { index } = ctx.snapshot;
   const query = String(args.query);
-  const max = num(args, 'limit', 20);
   const kind = args.kind as NodeKind | undefined;
   const results = index.search(query, Number.MAX_SAFE_INTEGER, kind ? new Set([kind]) : undefined);
-  if (!results.length)
-    return `No ${kind ? `${kind} ` : ''}entity matches ${tick(query)}. Search covers names, qualified names (\`Class.method\`) and file paths, case-insensitively; it does not search code text (use grep for literals and comments).`;
+  if (!results.length) {
+    const out = new Out().push(
+      `No ${kind ? `${kind} ` : ''}entity matches ${tick(query)}. Search covers names, qualified names (\`Class.method\`) and file paths, case-insensitively; it does not search code text (use grep for literals and comments).`,
+    );
+    if (looksLikePath(query)) {
+      const close = similarPaths(index, query);
+      if (close.length) {
+        out.push('Similar paths:');
+        out.list(close, (n) => `${describe(n)} · id ${idText(n.id)}`, { limit: 8 });
+      }
+    }
+    out.push('', NOT_MODELED);
+    return out.toString();
+  }
   const out = new Out().push(
-    `${plural(results.length, 'match', 'matches')} for ${tick(query)}${kind ? ` (kind: ${kind})` : ''}${results.length > max ? `, showing ${max}` : ''}:`,
+    `${plural(results.length, 'match', 'matches')} for ${tick(query)}${kind ? ` (kind: ${kind})` : ''}:`,
   );
-  out.list(results, max, (r) => `${describe(r.node)} · id ${tick(r.node.id, 200)}`, RAISE);
+  out.list(results, (r) => `${describe(r.node)} · id ${idText(r.node.id)}`, paged(args, 20, 100));
   return out.toString();
 }
 
@@ -783,14 +1226,11 @@ function search(args: Args, ctx: ToolContext): string {
 function entity(args: Args, ctx: ToolContext): string {
   const { index } = ctx.snapshot;
   const node = resolveTarget(ctx.snapshot, String(args.target));
-  const out = new Out().push(
-    `# ${tick(nameOf(node))} — ${kindOf(node)}`,
-    `id: ${tick(node.id, 200)}`,
-  );
+  const out = new Out().push(`# ${tick(nameOf(node))} — ${kindOf(node)}`, `id: ${idText(node.id)}`);
   const loc = node.location;
   if (loc && node.kind !== 'module')
     out.push(
-      `Location: ${safeText(loc.file)}:${loc.startLine}${loc.endLine !== loc.startLine ? `-${loc.endLine}` : ''}`,
+      `Location: ${tick(`${loc.file}:${loc.startLine}${loc.endLine !== loc.startLine ? `-${loc.endLine}` : ''}`, 300)}`,
     );
   const chain = index
     .ancestors(node.id)
@@ -816,7 +1256,8 @@ function entity(args: Args, ctx: ToolContext): string {
       (e) =>
         `${tick(e.meta?.exportedAs ?? node.name)} by ${tick(index.node(e.source) ? nameOf(index.node(e.source)!) : e.source)}`,
     );
-  if (exportedAs.length) out.push(`Exported as: ${exportedAs.slice(0, 5).join('; ')}`);
+  if (exportedAs.length)
+    out.push(`Exported as: ${exportedAs.slice(0, 5).join('; ')}${shownOf(5, exportedAs.length)}`);
 
   switch (node.kind) {
     case 'file':
@@ -853,7 +1294,10 @@ function topRelations(
 ): void {
   if (!reached.length) return;
   out.section(`${title} (${reached.length})`);
-  out.list(reached, TOP, (r) => relationLine(index, r, direction, false), 'use rastro_references');
+  out.list(reached, (r) => relationLine(index, r, direction, false), {
+    limit: TOP,
+    hint: 'use rastro_references',
+  });
 }
 
 function symbolDetails(index: GraphIndex, node: GraphNode, out: Out): void {
@@ -863,7 +1307,7 @@ function symbolDetails(index: GraphIndex, node: GraphNode, out: Out): void {
     const m = node.meta ?? {};
     out.section('HTTP route');
     out.push(
-      `${tick(routeLabel(node))} · framework ${m.framework ?? 'unknown'}${m.routeKind ? ` · ${m.routeKind}` : ''}`,
+      `${tick(routeLabel(node))} · framework ${plain(m.framework ?? 'unknown')}${m.routeKind ? ` · ${m.routeKind}` : ''}`,
     );
     const note = routePathNote(node);
     if (note) out.push(note);
@@ -871,14 +1315,18 @@ function symbolDetails(index: GraphIndex, node: GraphNode, out: Out): void {
   }
   if (node.kind === 'class') {
     const members = index.children(node.id).filter((c) => c.kind === 'method');
-    if (members.length) {
+    const abstract = node.meta?.abstractMembers ?? [];
+    if (members.length || abstract.length) {
       out.section(`Members (${members.length})`);
       out.list(
         members,
-        25,
         (c) => `${tick(c.name)} ${kindOf(c)}${c.meta?.static ? ' (static)' : ''} · ${whereOf(c)}`,
-        'use rastro_search',
+        { limit: 25, hint: 'use rastro_search' },
       );
+      if (abstract.length)
+        out.push(
+          `Abstract (no body, so not entities; calls to them are POSSIBLE calls to the implementations): ${abstract.map((a) => tick(a)).join(', ')}`,
+        );
     }
     const ext = walk(index, node, 'out', ['extends'], 1);
     for (const r of ext.proven) out.push(`Extends: ${describe(r.node)} — ${evidenceOf(r.edge)}`);
@@ -896,7 +1344,9 @@ function symbolDetails(index: GraphIndex, node: GraphNode, out: Out): void {
         `Extended by: ${subclasses
           .slice(0, TOP)
           .map((r) => describe(r.node))
-          .join('; ')}`,
+          .join(
+            '; ',
+          )}${shownOf(TOP, subclasses.length, 'use rastro_references with kinds ["extends"]')}`,
       );
     // quem usa a classe de fora: `new`, chamadas aos membros
     const inside = new Set([node.id, ...index.descendants(node.id).map((d) => d.id)]);
@@ -911,30 +1361,40 @@ function symbolDetails(index: GraphIndex, node: GraphNode, out: Out): void {
   }
   const callers = walk(index, node, 'in', callKinds, 1);
   const callees = walk(index, node, 'out', callKinds, 1);
+  const overridden = index.overriddenMethods(node.id);
+  if (overridden.length) out.push(`Overrides: ${overridden.map((b) => describe(b)).join('; ')}`);
   topRelations(
     index,
     out,
     node.kind === 'class'
       ? 'Instantiated or called directly by (new, super) (proven)'
-      : 'Called by (proven)',
+      : node.meta?.memberKind === 'constructor'
+        ? 'Runs on (new of the class or of subclasses without a constructor, super) (proven)'
+        : 'Called by (proven)',
     callers.proven,
     'in',
   );
   topRelations(index, out, 'Calls (proven)', callees.proven, 'out');
-  if (!callers.proven.length && !usedOutside && node.kind !== 'route')
-    out.push('', 'No proven callers. Dynamic or callback-based use cannot be ruled out.');
   const possible = possibleCallers(index, node.id);
+  if (!callers.proven.length && !usedOutside && node.kind !== 'route')
+    out.push(
+      '',
+      possible.length
+        ? 'No proven callers; possible callers (through interfaces or overriding) are listed below. Dynamic or callback-based use cannot be ruled out.'
+        : 'No proven callers. Dynamic or callback-based use cannot be ruled out.',
+    );
   const unresolved = callees.unresolved;
   if (possible.length || unresolved.length) {
     out.section('Possible (unproven) relationships');
     out.list(
       possible,
-      TOP,
-      (p) =>
-        `may be called by ${describe(p.caller)} via ${tick(p.via.meta?.reference ?? p.via.name)} (1 of ${p.via.meta?.candidates?.length ?? '?'} possible implementations) — ${evidenceOf(p.edge)}`,
-      'use rastro_references',
+      (p) => `may be called by ${describe(p.caller)} ${p.how} — ${evidenceOf(p.edge)}`,
+      { limit: TOP, hint: 'use rastro_references' },
     );
-    out.list(unresolved, TOP, (r) => unresolvedLine(index, r), 'use rastro_references');
+    out.list(unresolved, (r) => unresolvedLine(index, r), {
+      limit: TOP,
+      hint: 'use rastro_references',
+    });
   }
 }
 
@@ -951,7 +1411,7 @@ function fileDetails(index: GraphIndex, node: GraphNode, out: Out): void {
           ? ` · exports: ${m.exportNames
               .slice(0, 15)
               .map((e) => tick(e, 60))
-              .join(', ')}${m.exportNames.length > 15 ? ', …' : ''}`
+              .join(', ')}${shownOf(15, m.exportNames.length)}`
           : ''
       }`,
     );
@@ -961,7 +1421,17 @@ function fileDetails(index: GraphIndex, node: GraphNode, out: Out): void {
       for (const d of contained) counts.set(d.kind, (counts.get(d.kind) ?? 0) + 1);
       out.section(`Contains (${[...counts].map(([k, n]) => `${n} ${k}`).join(', ')})`);
       const top = contained.filter((d) => index.node(d.parent ?? '')?.kind === 'file');
-      out.list(top, 20, (d) => `${describe(d)}`, 'use rastro_search');
+      out.list(top, describe, { limit: 20, hint: 'use rastro_search' });
+    }
+    // código no topo do módulo (fora de funções e classes): o que ele chama
+    const topLevel = walk(index, node, 'out', ['calls'], 1);
+    topRelations(index, out, 'Top-level code calls (proven)', topLevel.proven, 'out');
+    if (topLevel.unresolved.length) {
+      out.section(`Top-level code: unresolved calls (${topLevel.unresolved.length})`);
+      out.list(topLevel.unresolved, (r) => unresolvedLine(index, r), {
+        limit: TOP,
+        hint: 'use rastro_references with direction outgoing',
+      });
     }
   }
   const imports = walk(index, node, 'out', ['imports'], 1);
@@ -973,7 +1443,10 @@ function fileDetails(index: GraphIndex, node: GraphNode, out: Out): void {
   }
   if (imports.unresolved.length) {
     out.section(`Unresolved imports (${imports.unresolved.length})`);
-    out.list(imports.unresolved, TOP, (r) => unresolvedLine(index, r), 'use rastro_references');
+    out.list(imports.unresolved, (r) => unresolvedLine(index, r), {
+      limit: TOP,
+      hint: 'use rastro_references',
+    });
   }
   topRelations(index, out, 'Imported by', importers.proven, 'in');
   if (!importers.proven.length)
@@ -996,7 +1469,7 @@ function moduleDetails(index: GraphIndex, node: GraphNode, out: Out): void {
       `Subfolders: ${subfolders
         .slice(0, 15)
         .map((c) => tick(nameOf(c)))
-        .join(', ')}`,
+        .join(', ')}${shownOf(15, subfolders.length)}`,
     );
   const deps = (dir: 'in' | 'out') =>
     (dir === 'out'
@@ -1012,20 +1485,18 @@ function moduleDetails(index: GraphIndex, node: GraphNode, out: Out): void {
     out.section(`Depends on folders (${out1.length}, derived from imports)`);
     out.list(
       out1,
-      TOP,
       (x) =>
         `${tick(nameOf(x.other))} (${plural(x.e.meta?.count ?? x.e.evidence.length, 'import')}) — e.g. ${evidenceOf(x.e)}`,
-      'use rastro_references',
+      { limit: TOP, hint: 'use rastro_references' },
     );
   }
   if (in1.length) {
     out.section(`Folders that depend on it (${in1.length})`);
     out.list(
       in1,
-      TOP,
       (x) =>
         `${tick(nameOf(x.other))} (${plural(x.e.meta?.count ?? x.e.evidence.length, 'import')})`,
-      'use rastro_references',
+      { limit: TOP, hint: 'use rastro_references' },
     );
   }
 }
@@ -1041,12 +1512,10 @@ function packageDetails(index: GraphIndex, node: GraphNode, out: Out): void {
     .filter((x): x is { e: GraphEdge; from: GraphNode } => !!x.from)
     .sort((a, b) => compareStrings(a.from.id, b.from.id));
   out.section(`Imported by (${importers.length} files)`);
-  out.list(
-    importers,
-    20,
-    (x) => `${tick(nameOf(x.from))}${qualifier(x.e)} — ${evidenceOf(x.e)}`,
-    'use rastro_references',
-  );
+  out.list(importers, (x) => `${tick(nameOf(x.from))}${qualifier(x.e)} — ${evidenceOf(x.e)}`, {
+    limit: 20,
+    hint: 'use rastro_references',
+  });
 }
 
 function unresolvedDetails(index: GraphIndex, node: GraphNode, out: Out): void {
@@ -1055,21 +1524,24 @@ function unresolvedDetails(index: GraphIndex, node: GraphNode, out: Out): void {
     `Reference as written: ${tick(m.reference ?? node.name)}`,
     `Why it is unresolved: ${m.reason ? REASONS[m.reason] : 'unknown'}`,
   );
+  if (m.receiverFile)
+    out.push(
+      `The receiver's type is declared in ${tick(m.receiverFile, 300)} and has no such member (a compile error).`,
+    );
   const candidates = (m.candidates ?? [])
     .map((id) => index.node(id))
     .filter((n): n is GraphNode => !!n);
   if (candidates.length) {
     out.section(`Possible targets (${candidates.length}; only one runs, decided at runtime)`);
-    out.list(candidates, 20, describe, 'narrow with rastro_search');
+    out.list(candidates, describe, { limit: 20, hint: 'narrow with rastro_search' });
   }
   const from = index.incoming(node.id).filter((e) => e.kind !== 'contains');
   out.section(`Referenced from (${from.length})`);
   out.list(
     from,
-    TOP,
     (e) =>
       `${index.node(e.source) ? describe(index.node(e.source)!) : tick(e.source)} — ${evidenceOf(e)}`,
-    'use rastro_references',
+    { limit: TOP, hint: 'use rastro_references' },
   );
 }
 
@@ -1098,14 +1570,21 @@ function sourceSection(snapshot: Snapshot, node: GraphNode, out: Out): void {
   const width = String(shownLast).length;
   const lines = all
     .slice(first - 1, shownLast)
-    // caracteres de controle do arquivo não vão para a resposta
-    .map((line, i) => `${String(first + i).padStart(width)}  ${safeText(line)}`);
-  const longest = Math.max(2, ...lines.map((l) => (/`{3,}/.exec(l)?.[0].length ?? 0) + 1));
-  const fence = '`'.repeat(Math.max(3, longest));
+    // caracteres de controle e separadores de linha do arquivo viram escapes; linhas enormes
+    // (código minificado) são cortadas
+    .map(
+      (line, i) =>
+        `${String(first + i).padStart(width)}  ${clip(line.replace(UNSAFE_IN_CODE, escapeChar), MAX_SOURCE_LINE)}`,
+    );
+  // a cerca é mais longa que qualquer sequência de crases do trecho: nada nele a fecha
+  let longest = 0;
+  for (const l of lines)
+    for (const run of l.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+  const fence = '`'.repeat(Math.max(3, longest + 1));
   out.push(
-    `${safeText(loc.file)} lines ${first}-${shownLast}${shownLast < last ? ` of ${first}-${last} (truncated to ${MAX_SOURCE_LINES} lines; ask for a narrower entity, e.g. a method)` : ''}:`,
+    `${tick(loc.file, 300)} lines ${first}-${shownLast}${shownLast < last ? ` of ${first}-${last} (truncated to ${MAX_SOURCE_LINES} lines; ask for a narrower entity, e.g. a method)` : ''}:`,
   );
-  out.push(`${fence}${node.location?.file.match(/\.([cm]?[jt]sx?)$/)?.[1] ?? ''}`, ...lines, fence);
+  out.push(`${fence}${loc.file.match(/\.([cm]?[jt]sx?)$/)?.[1] ?? ''}`, lines.join('\n'), fence);
 }
 
 // ---- references
@@ -1119,10 +1598,10 @@ function references(args: Args, ctx: ToolContext): string {
   const direction = (args.direction as 'incoming' | 'outgoing' | 'both' | undefined) ?? 'incoming';
   const kinds = (args.kinds as EdgeKind[] | undefined) ?? DEFAULT_KINDS;
   const depth = num(args, 'depth', 1);
-  const max = num(args, 'limit', 30);
+  const page = paged(args, 30, 200);
   const out = new Out().push(
     `# References of ${describe(node)}`,
-    `id: ${tick(node.id, 200)} · direction: ${direction} · kinds: ${kinds.join(', ')} · depth: ${depth}`,
+    `id: ${idText(node.id)} · direction: ${direction} · kinds: ${kinds.join(', ')} · depth: ${depth}${page.offset ? ` · offset: ${page.offset}` : ''}`,
   );
   let total = 0;
   const side = (dir: 'in' | 'out') => {
@@ -1133,23 +1612,17 @@ function references(args: Args, ctx: ToolContext): string {
       found.proven.length + found.external.length + found.unresolved.length + possible.length;
     out.section(`${label} — proven (${found.proven.length})`);
     if (!found.proven.length) out.push('none');
-    out.list(found.proven, max, (r) => relationLine(index, r, dir, depth > 1), RAISE);
+    out.list(found.proven, (r) => relationLine(index, r, dir, depth > 1), page);
     if (found.external.length) {
       out.section(`${label} — external (${found.external.length})`);
-      out.list(found.external, max, (r) => externalLine(r, dir, index), RAISE);
+      out.list(found.external, (r) => externalLine(r, dir, index), page);
     }
     if (found.unresolved.length || possible.length) {
       out.section(
         `${label} — possible / unresolved (${found.unresolved.length + possible.length}; NOT proven)`,
       );
-      out.list(found.unresolved, max, (r) => unresolvedLine(index, r), RAISE);
-      out.list(
-        possible,
-        max,
-        (p) =>
-          `${describe(p.caller)} may call it via ${tick(p.via.meta?.reference ?? p.via.name)} (1 of ${p.via.meta?.candidates?.length ?? '?'} possible implementations) — ${evidenceOf(p.edge)}`,
-        RAISE,
-      );
+      out.list(found.unresolved, (r) => unresolvedLine(index, r), page);
+      out.list(possible, possibleLine, page);
     }
   };
   if (direction !== 'outgoing') side('in');
@@ -1169,9 +1642,28 @@ function references(args: Args, ctx: ToolContext): string {
 
 // ---- impact
 
+const IMPACT_FORMATS = ['full', 'summary', 'tests'] as const;
+
+const brokenWhy: Record<BrokenReference['why'], string> = {
+  'file-deleted': 'the file was deleted',
+  'file-renamed': 'the file was renamed or moved',
+  'not-exported': 'the changed file does not export that name',
+  'member-missing': 'the type, declared in the changed file, has no such member',
+};
+
+function brokenLine(b: BrokenReference): string {
+  const where = b.evidence
+    ? `${tick(`${b.evidence.file}:${b.evidence.line}`, 300)}${b.evidence.snippet ? ` ${tick(b.evidence.snippet, 140)}` : ''}`
+    : '';
+  const verb = b.kind === 'import' ? 'imports' : 'calls';
+  return `${describe(b.from)} ${verb} ${tick(b.reference)} → ${tick(b.target, 300)}: ${brokenWhy[b.why]}${b.count > 1 ? ` (${b.count} sites)` : ''}${where ? ` — ${where}` : ''}`;
+}
+
 function impact(args: Args, ctx: ToolContext): string {
   const { index, graph } = ctx.snapshot;
-  const max = num(args, 'limit', 30);
+  const page = paged(args, 30, 200);
+  const max = page.limit;
+  const format = (args.format as (typeof IMPACT_FORMATS)[number] | undefined) ?? 'full';
   const targets = args.targets as string[] | undefined;
   if (targets && (args.since !== undefined || args.changes !== undefined))
     throw new ToolError('Use either `targets` or the git mode (`changes` / `since`), not both.');
@@ -1185,6 +1677,11 @@ function impact(args: Args, ctx: ToolContext): string {
   let impacted: ImpactEntry[];
   let routes: GraphNode[];
   let tests: GraphNode[];
+  let broken: BrokenReference[] = [];
+  let title: string;
+  let summary: string;
+  /** Seção "o que mudou" (só aparece no formato completo, depois das rotas e dos testes). */
+  let changedSection: () => void;
 
   if (targets) {
     starts = targets.map((t) => resolveTarget(ctx.snapshot, t));
@@ -1200,12 +1697,13 @@ function impact(args: Args, ctx: ToolContext): string {
       ...inside,
       ...impacted.map((i) => i.node),
     ]));
-    out.push(`# Impact of changing ${starts.map((n) => tick(nameOf(n))).join(', ')}`);
-    out.push(
-      `Summary: ${plural(impacted.length, 'entity', 'entities')} could be affected · ${plural(routes.length, 'HTTP route')} · ${plural(tests.length, 'test file')}`,
-    );
-    out.section(`Targets (${starts.length})`);
-    out.list(starts, max, describe, RAISE);
+    title = `# Impact of changing ${starts.map((n) => tick(nameOf(n))).join(', ')}`;
+    summary = `Summary: ${plural(impacted.length, 'entity', 'entities')} could be affected · ${plural(routes.length, 'HTTP route')} · ${plural(tests.length, 'test file')}`;
+    const shown = starts;
+    changedSection = () => {
+      out.section(`Targets (${shown.length})`);
+      out.list(shown, describe, { limit: max, maxLimit: 200 });
+    };
   } else {
     const since = typeof args.since === 'string' ? args.since : undefined;
     let changes;
@@ -1217,91 +1715,135 @@ function impact(args: Args, ctx: ToolContext): string {
         }),
       );
     } catch (err) {
-      throw new ToolError(`Could not read the git changes: ${(err as Error).message}`);
+      throw new ToolError(`Could not read the git changes: ${plain((err as Error).message)}`);
     }
     const label =
       changes.baseLabel === 'HEAD'
         ? 'uncommitted changes (vs HEAD, including untracked files)'
         : `changes since ${tick(changes.baseLabel)} (merge base ${changes.base.slice(0, 10)}, including uncommitted and untracked files)`;
-    out.push(`# Impact of ${label}`);
-    if (!changes.files.length) {
-      out.push('No changed files.');
-      return out.toString();
-    }
+    title = `# Impact of ${label}`;
+    if (!changes.files.length) return out.push(title, 'No changed files.').toString();
     const result = changesWithImpact(index, changes);
     starts = result.changed;
     impacted = result.impact.impacted;
     routes = result.impact.routes;
     tests = result.impact.tests;
+    broken = result.impact.broken;
     const s = result.impact;
-    out.push(
-      `Summary: ${plural(changes.files.length, 'changed file')} · ${plural(s.changedEntities.length, 'changed entity', 'changed entities')} · ${impacted.length} could be affected · ${plural(routes.length, 'HTTP route')} · ${plural(tests.length, 'test file')}`,
-    );
-    out.section(`Changed (${starts.length})`);
-    out.list(
-      starts,
-      max,
-      (n) =>
-        n.kind === 'file'
-          ? `${tick(nameOf(n))} file (top-level code, new or renamed file)`
-          : describe(n),
-      RAISE,
-    );
-    if (s.outsideGraph.length) {
+    const byStatus = new Map<string, ChangedFile>(changes.files.map((f) => [f.file, f]));
+    const statusCounts = (['added', 'modified', 'renamed', 'deleted'] as const)
+      .map((st) => [st, changes.files.filter((f) => f.status === st).length] as const)
+      .filter(([, n]) => n)
+      .map(([st, n]) => `${n} ${st === 'added' ? 'new' : st}`);
+    const fileLevel = starts.filter((n) => n.kind === 'file');
+    summary = `Summary: ${plural(changes.files.length, 'changed file')} (${statusCounts.join(', ')}) · ${plural(starts.length, 'changed item')} (${plural(s.changedEntities.length, 'entity', 'entities')}${fileLevel.length ? ` + ${plural(fileLevel.length, 'file')} changed at file level` : ''}) · ${impacted.length} could be affected · ${plural(routes.length, 'HTTP route')} · ${plural(tests.length, 'test file')}${broken.length ? ` · ${plural(broken.length, 'reference')} possibly broken` : ''}`;
+    const fileLabel = (n: GraphNode): string => {
+      const change = byStatus.get(n.qualifiedName ?? n.name);
+      if (change?.status === 'added') return 'new file';
+      if (change?.status === 'renamed')
+        return change.previous ? `file renamed from ${tick(change.previous, 300)}` : 'renamed file';
+      return 'file (top-level code changed, outside any function or class)';
+    };
+    changedSection = () => {
       out.section(
-        `Changed outside the graph (${s.outsideGraph.length}: deleted, not JS/TS, or not analyzed)`,
+        `Changed (${s.changedEntities.length} ${s.changedEntities.length === 1 ? 'entity' : 'entities'}${fileLevel.length ? ` + ${plural(fileLevel.length, 'file')}` : ''})`,
       );
-      out.list(s.outsideGraph, max, (f) => `${tick(f.file)} (${f.status})`, RAISE);
-    }
+      out.list(
+        starts,
+        (n) => (n.kind === 'file' ? `${tick(nameOf(n))} ${fileLabel(n)}` : describe(n)),
+        { limit: max, maxLimit: 200 },
+      );
+      if (s.outsideGraph.length) {
+        out.section(
+          `Changed outside the graph (${s.outsideGraph.length}: deleted, not JS/TS, or not analyzed)`,
+        );
+        out.list(
+          s.outsideGraph,
+          (f) =>
+            `${tick(f.file, 300)} (${f.status === 'added' ? 'new' : f.status}${f.previous ? ` from ${tick(f.previous, 300)}` : ''})`,
+          { limit: max, maxLimit: 200 },
+        );
+      }
+    };
   }
 
-  out.section(
-    `Could be affected (${impacted.length}) — by distance, proven calls/imports/inheritance only`,
-  );
-  if (!impacted.length) out.push('Nothing known depends on it through proven relationships.');
-  out.list(
-    impacted,
-    max,
-    (i) => {
-      const via = index.node(i.via.target);
-      return `[d${i.depth}] ${describe(i.node)} — ${VERBS[i.via.kind]}${qualifier(i.via)} ${tick(via ? nameOf(via) : i.via.target)} at ${evidenceOf(i.via)}`;
-    },
-    RAISE,
-  );
-  if (routes.length) {
-    out.section(`HTTP routes involved (${routes.length})`);
-    out.list(
-      routes,
-      max,
-      (n) =>
-        `${tick(routeLabel(n))} · ${whereOf(n)}${n.meta?.fullPath ? '' : ' (full path unknown)'}`,
-      RAISE,
-    );
-  }
-  if (tests.length) {
-    out.section(`Test files to run (${tests.length})`);
-    out.list(tests, max, (n) => tick(nameOf(n)), RAISE);
-  }
-  // chamadas por interface ou método abstrato que podem cair no que mudou
+  // chamadas por interface, método abstrato ou sobrescrita que podem cair no que mudou
   const seeds = new Set<string>();
   for (const n of starts) {
     seeds.add(n.id);
     if (n.kind === 'file' || n.kind === 'class' || n.kind === 'module')
       for (const d of index.descendants(n.id)) seeds.add(d.id);
   }
-  const possible = [...seeds].flatMap((id) =>
-    possibleCallers(index, id).map((p) => ({ ...p, target: id })),
+  const possible = [...seeds].flatMap((id) => possibleCallers(index, id));
+
+  if (format === 'tests') {
+    out.push(
+      `${title} — tests to run`,
+      `${plural(tests.length, 'test file')} changed or depend (through proven relationships) on what changed${tests.length ? ':' : '.'}`,
+    );
+    out.list(tests, (n) => tick(nameOf(n), 300), page);
+    out.push(
+      '',
+      `_Tests reaching the change only through unresolved calls (callbacks, dynamic calls) are not listed${possible.length || broken.length ? `; ${plural(possible.length, 'possible caller')} and ${plural(broken.length, 'possibly broken reference')} are in \`format: "full"\`` : ''}._`,
+    );
+    return out.toString();
+  }
+
+  out.push(title, summary);
+  // o que o agente mais quer primeiro: rotas e testes
+  if (routes.length) {
+    out.section(`HTTP routes involved (${routes.length})`);
+    out.list(
+      routes,
+      (n) =>
+        `${tick(routeLabel(n))} · ${whereOf(n)}${n.meta?.fullPath ? '' : ' (full path unknown)'}`,
+      { limit: max, maxLimit: 200 },
+    );
+  }
+  out.section(`Test files to run (${tests.length})`);
+  if (!tests.length) out.push('No test file is linked to the change by proven relationships.');
+  out.list(tests, (n) => tick(nameOf(n), 300), {
+    limit: max,
+    maxLimit: 200,
+    hint: '`format: "tests"` lists them all (with `offset`)',
+  });
+  if (broken.length) {
+    out.section(
+      `Possibly broken by this change (${broken.length}; references to what changed that do not resolve in the current code — they may have been broken before)`,
+    );
+    out.list(broken, brokenLine, { limit: max, maxLimit: 200 });
+  }
+
+  if (format === 'summary') {
+    out.push(
+      '',
+      `_Summary format: ${plural(impacted.length, 'affected entity', 'affected entities')}${possible.length ? `, ${plural(possible.length, 'possible caller')}` : ''} and the changed items are listed with \`format: "full"\`._`,
+    );
+    return out.toString();
+  }
+
+  changedSection();
+  out.section(
+    `Could be affected (${impacted.length}) — by distance, proven calls/imports/inheritance only`,
+  );
+  if (!impacted.length) out.push('Nothing known depends on it through proven relationships.');
+  out.list(
+    impacted,
+    (i) => {
+      const via = index.node(i.via.target);
+      return `[d${i.depth}] ${describe(i.node)} — ${VERBS[i.via.kind]}${qualifier(i.via)} ${tick(via ? nameOf(via) : i.via.target)} at ${evidenceOf(i.via)}`;
+    },
+    page,
   );
   if (possible.length) {
     out.section(
-      `Possibly affected (${possible.length}; NOT proven — calls through interfaces/abstract methods that may dispatch to it)`,
+      `Possibly affected (${possible.length}; NOT proven — calls through interfaces, abstract or overridden methods that may dispatch to what changed)`,
     );
     out.list(
       possible,
-      max,
       (p) =>
-        `${describe(p.caller)} via ${tick(p.via.meta?.reference ?? p.via.name)} → maybe ${tick(nameOf(index.node(p.target)!))} — ${evidenceOf(p.edge)}`,
-      RAISE,
+        `${describe(p.caller)} ${p.how} → maybe ${tick(nameOf(index.node(p.target)!))} — ${evidenceOf(p.edge)}`,
+      { limit: max, maxLimit: 200 },
     );
   }
   out.push(
@@ -1313,6 +1855,24 @@ function impact(args: Args, ctx: ToolContext): string {
 
 // ---- path
 
+/** Pastas viram o que há dentro (arquivos e entidades); pacotes só servem de destino. */
+function pathEnds(index: GraphIndex, node: GraphNode, role: 'from' | 'to'): string[] {
+  if (node.kind === 'unresolved')
+    throw new ToolError(
+      `${describe(node)} is an unresolved reference, not an entity: rastro_path follows proven relationships between functions, classes, methods, routes, files, folders and (as destination) packages. Use rastro_entity on it to see where it is referenced and its possible targets.`,
+    );
+  if (node.kind === 'package' && role === 'from')
+    throw new ToolError(
+      `${describe(node)} is external: its code is not analyzed, so nothing goes out of it. Swap \`from\` and \`to\` to see how the project reaches it.`,
+    );
+  if (node.kind === 'module')
+    return index
+      .descendants(node.id)
+      .filter((d) => d.kind === 'file' || SYMBOLS.has(d.kind))
+      .map((d) => d.id);
+  return [node.id];
+}
+
 function pathTool(args: Args, ctx: ToolContext): string {
   const { index } = ctx.snapshot;
   const from = resolveTarget(ctx.snapshot, String(args.from));
@@ -1320,22 +1880,96 @@ function pathTool(args: Args, ctx: ToolContext): string {
   const max = num(args, 'limit', 3);
   const out = new Out().push(`# Paths from ${describe(from)} to ${describe(to)}`);
   if (from.id === to.id) return out.push('Both arguments are the same entity.').toString();
-  const search = findPaths(index, from.id, to.id, { limit: max });
+  let compileOnly = false;
   const render = (p: PathResult, n: number) => {
     out.push('', `Path ${n} (${plural(p.edges.length, 'step')}):`);
     p.edges.forEach((e, i) => {
       const a = index.node(e.source);
       const b = index.node(e.target);
+      if (e.meta?.typeOnly) compileOnly = true;
       out.push(
         `${i + 1}. ${a ? tick(nameOf(a)) : tick(e.source)} ${VERBS[e.kind]}${qualifier(e)} ${b ? describe(b) : tick(e.target)} — ${evidenceOf(e)}`,
       );
     });
   };
+  const compileNote = () => {
+    if (compileOnly)
+      out.push(
+        '',
+        '_Steps marked type-only exist only at compile time (`import type` or types from a `.d.ts`): they are not a runtime link._',
+      );
+  };
+
+  // pastas e pacotes: o menor caminho de qualquer coisa de dentro até qualquer coisa de dentro
+  if (from.kind === 'module' || to.kind === 'module' || to.kind === 'package') {
+    const sources = pathEnds(index, from, 'from');
+    const destinations = new Set(pathEnds(index, to, 'to'));
+    if (sources.some((id) => destinations.has(id)) || destinations.has(from.id))
+      return out
+        .push('One is inside the other: pick entities or folders that do not overlap.')
+        .toString();
+    if (to.kind === 'package' && from.kind !== 'module' && from.kind !== 'file') {
+      // só arquivos importam pacotes: o caminho sai do arquivo da entidade
+      const file = index.fileOf(from.id);
+      if (file) sources.push(file.id);
+    }
+    const found = findPathBetween(index, sources, destinations, {
+      external: to.kind === 'package',
+    });
+    const what = [
+      from.kind === 'module' ? `anything in ${tick(nameOf(from))}` : tick(nameOf(from)),
+      to.kind === 'module' ? `anything in ${tick(nameOf(to))}` : tick(nameOf(to)),
+    ];
+    if (!found) {
+      out.push(
+        `No proven path from ${what[0]} to ${what[1]} through calls, imports and inheritance (up to 12 steps).`,
+      );
+      const reverse =
+        to.kind !== 'package'
+          ? findPathBetween(index, pathEnds(index, to, 'from'), new Set(sources))
+          : null;
+      if (reverse) {
+        out.push('', `But ${what[1]} reaches ${what[0]} (opposite direction):`);
+        render(reverse, 1);
+      }
+      out.push(
+        '',
+        'Callbacks, event emitters, dependency injection and dynamic calls are not followed, so a runtime link may still exist.',
+      );
+      compileNote();
+      return out.toString();
+    }
+    out.push(
+      `Shortest proven path from ${what[0]} to ${what[1]} (calls, imports and inheritance${to.kind === 'package' ? '; the last step is the import of the package' : ''}):`,
+    );
+    render(found, 1);
+    const start = index.node(found.nodes[0]!);
+    if (to.kind === 'package' && start && start.id !== from.id && from.kind !== 'module')
+      out.push(
+        '',
+        `_The path starts at ${tick(nameOf(start))}, the file of ${tick(nameOf(from))}: a file-level import chain does not prove that ${tick(nameOf(from))} itself uses the package._`,
+      );
+    if (from.kind === 'module' && to.kind === 'module') {
+      const dep = index.outgoing(from.id, ['depends_on']).find((e) => e.target === to.id);
+      if (dep)
+        out.push(
+          '',
+          `Folder dependency (derived from imports): ${tick(nameOf(from))} depends on ${tick(nameOf(to))} (${plural(dep.meta?.count ?? dep.evidence.length, 'import')}) — e.g. ${evidenceOf(dep)}`,
+        );
+    }
+    compileNote();
+    return out.toString();
+  }
+  pathEnds(index, from, 'from');
+  pathEnds(index, to, 'to');
+
+  const search = findPaths(index, from.id, to.id, { limit: max });
   if (search.paths.length && !search.reversed) {
     out.push(
       `${plural(search.paths.length, 'proven path')} (calls, imports and inheritance; shortest first):`,
     );
     search.paths.forEach((p, i) => render(p, i + 1));
+    compileNote();
     return out.toString();
   }
   out.push(
@@ -1355,6 +1989,7 @@ function pathTool(args: Args, ctx: ToolContext): string {
       const a = index.node(step.edge.source);
       const b = index.node(step.to);
       const via = index.node(step.edge.target);
+      if (step.edge.meta?.typeOnly) compileOnly = true;
       out.push(
         step.possible
           ? `${i + 1}. ${tick(a ? nameOf(a) : step.edge.source)} calls ${tick(via?.meta?.reference ?? via?.name ?? step.edge.target)} → maybe ${b ? describe(b) : tick(step.to)} (POSSIBLE, 1 of ${via?.meta?.candidates?.length ?? '?'}) — ${evidenceOf(step.edge)}`
@@ -1386,6 +2021,7 @@ function pathTool(args: Args, ctx: ToolContext): string {
       '',
       'Callbacks, event emitters, dependency injection and dynamic calls are not followed, so a runtime link may still exist.',
     );
+  compileNote();
   return out.toString();
 }
 
@@ -1398,7 +2034,6 @@ function routes(args: Args, ctx: ToolContext): string {
   const filter = typeof args.filter === 'string' ? args.filter.toLowerCase() : '';
   const method = typeof args.method === 'string' ? args.method.toUpperCase() : undefined;
   const framework = args.framework as string | undefined;
-  const max = num(args, 'limit', 100);
   const all = [...index.nodes.values()].filter((n) => n.kind === 'route');
   const matches = all
     .filter(
@@ -1433,7 +2068,7 @@ function routes(args: Args, ctx: ToolContext): string {
     return 'No HTTP routes were found. Rastro recognizes Express, Fastify, Hono, NestJS and Next.js (App and Pages Router) routes declared in code it can follow statically.';
   const filters = [
     filter && `filter ${tick(filter)}`,
-    method && `method ${method}`,
+    method && `method ${tick(method)}`,
     framework && `framework ${framework}`,
   ].filter(Boolean);
   const out = new Out().push(
@@ -1442,24 +2077,39 @@ function routes(args: Args, ctx: ToolContext): string {
   if (!matches.length) return out.push('No route matches.').toString();
   out.list(
     matches,
-    max,
     (n) => {
       const note = routePathNote(n);
-      return `${tick(routeLabel(n))} — ${n.meta?.framework ?? '?'}${n.meta?.routeKind ? ` ${n.meta.routeKind}` : ''} · defined at ${whereOf(n)} · handler: ${routeHandler(index, n)}${note ? ` · ${note}` : ''}`;
+      return `${tick(routeLabel(n))} — ${plain(n.meta?.framework ?? '?')}${n.meta?.routeKind ? ` ${n.meta.routeKind}` : ''} · defined at ${whereOf(n)} · handler: ${routeHandler(index, n)}${note ? ` · ${note}` : ''}`;
     },
-    RAISE,
+    paged(args, 100, 500),
   );
   return out.toString();
 }
 
 // ---------------------------------------------------------------------------
 
-export const TOOLS: ToolDefinition[] = [
+/** Toda resposta (e todo erro previsto) começa com o aviso de análise parcial, quando houver. */
+function withPartialNote(
+  run: (args: Args, ctx: ToolContext) => string,
+): (args: Args, ctx: ToolContext) => string {
+  return (args, ctx) => {
+    const note = partialNote(ctx.snapshot);
+    if (!note) return run(args, ctx);
+    try {
+      return `${note}\n\n${run(args, ctx)}`;
+    } catch (err) {
+      if (err instanceof ToolError) throw new ToolError(`${note}\n\n${err.message}`);
+      throw err;
+    }
+  };
+}
+
+const TOOL_LIST: ToolDefinition[] = [
   {
     name: 'rastro_overview',
     title: 'Project overview',
     description:
-      'Summary of the analyzed JavaScript/TypeScript project: size, entity counts, main folders, HTTP routes, the most called functions, central files, possibly unused code, analysis diagnostics and freshness. Call this first to get oriented in an unfamiliar codebase.',
+      'Summary of the analyzed JavaScript/TypeScript project: size, entity counts, proven/unresolved relationships per kind, main folders, HTTP routes, the most called functions, central files, possibly unused code, analysis diagnostics and freshness. Call this first to get oriented in an unfamiliar codebase.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: overview,
   },
@@ -1467,7 +2117,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'rastro_search',
     title: 'Search entities',
     description:
-      'Find functions, classes, methods, files, folders, HTTP routes and external packages by name, qualified name (`Class.method`) or file path (case-insensitive; exact names rank first). Returns ids and file:line to pass to the other rastro tools. It searches names, not code text: use grep for string literals and comments.',
+      'Find functions, classes, methods, files, folders, HTTP routes and external packages by name, qualified name (`Class.method`) or file path (case-insensitive; exact names rank first). Returns ids and file:line to pass to the other rastro tools. It searches names, not code text: use grep for string literals and comments. Interfaces, type aliases, enums and plain variables are not entities.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1484,6 +2134,7 @@ export const TOOLS: ToolDefinition[] = [
             'Only this kind of entity (`module` = folder, `package` = external package).',
         },
         limit: limit(100, 20),
+        offset: offset('the matches'),
       },
       required: ['query'],
       additionalProperties: false,
@@ -1494,7 +2145,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'rastro_entity',
     title: 'Entity details',
     description:
-      'Everything Rastro knows about one entity: kind, location, parent chain, export status, members, proven callers and callees (counts and top entries with file:line evidence), imports and importers for files, inheritance, HTTP route details, and possible (unproven) relationships listed separately. Set `source: true` to include its code (up to 120 lines, read from the analyzed file on disk).',
+      'Everything Rastro knows about one entity: kind, location, parent chain, export status, members (abstract ones listed apart), proven callers and callees (counts and top entries with file:line evidence; a constructor also runs on `new` of its class and of subclasses without a constructor), methods it overrides, imports, importers and top-level calls for files, inheritance, HTTP route details, and possible (unproven) relationships listed separately — calls through interfaces and calls to an overridden base method that may dispatch here. Set `source: true` to include its code (up to 120 lines, read from the analyzed file on disk).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1514,7 +2165,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'rastro_references',
     title: 'References with evidence',
     description:
-      'Who uses an entity and what it uses — callers/callees, importers/imports, exports, subclasses — each with evidence (file:line and the line of code). Grouped into PROVEN (resolved by the TypeScript checker or a framework rule), EXTERNAL (packages outside the project) and POSSIBLE (unresolved calls through interfaces, abstract methods or callbacks, with candidate targets: not facts). `direction`: incoming (default: who calls/imports it), outgoing (what it calls/imports) or both. `depth` 2-3 follows proven relationships transitively.',
+      'Who uses an entity and what it uses — callers/callees, importers/imports, exports, subclasses — each with evidence (file:line and the line of code). Grouped into PROVEN (resolved by the TypeScript checker or a framework rule), EXTERNAL (packages outside the project) and POSSIBLE (unresolved calls through interfaces, abstract methods or callbacks with candidate targets, and calls to an overridden base method that may dispatch here: not facts). `direction`: incoming (default: who calls/imports it), outgoing (what it calls/imports) or both. `depth` 2-3 follows proven relationships transitively. Long lists are paginated with `limit` and `offset`.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1540,6 +2191,7 @@ export const TOOLS: ToolDefinition[] = [
           description: 'Transitive levels of proven relationships (default 1).',
         },
         limit: limit(200, 30),
+        offset: offset('each list'),
       },
       required: ['target'],
       additionalProperties: false,
@@ -1550,7 +2202,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'rastro_impact',
     title: 'Impact of a change',
     description:
-      'What could break: the blast radius of a change. Pass `targets` (entities you plan to change), or omit them to use git: uncommitted changes (default) or, with `since` (e.g. `main`), everything changed since the current branch forked from that ref. Returns the changed entities, what depends on them by distance (each with the proven relationship and the file:line that links it), HTTP routes involved, test files to run, and callers that may be affected through interfaces (marked as unproven).',
+      'What could break: the blast radius of a change. Pass `targets` (entities you plan to change), or omit them to use git: uncommitted changes (default) or, with `since` (e.g. `main`), everything changed since the current branch forked from that ref. Answers, in this order: a summary, HTTP routes involved, test files to run, references POSSIBLY BROKEN by the change (git mode: imports of deleted/renamed files, names no longer exported, missing members — they do not resolve in the current code), what changed, what depends on it by distance (each with the proven relationship and the file:line that links it), and callers that may be affected through interfaces or overriding (marked as unproven). `format: "tests"` returns only the test files to run; `format: "summary"` stops after routes, tests and possibly broken references.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1573,7 +2225,14 @@ export const TOOLS: ToolDefinition[] = [
           description:
             'Git ref (branch, tag or commit): changes since the current branch forked from it, plus uncommitted ones.',
         },
+        format: {
+          type: 'string',
+          enum: IMPACT_FORMATS,
+          description:
+            '`full` (default), `summary` (summary, routes, tests, possibly broken) or `tests` (only the test files to run).',
+        },
         limit: limit(200, 30),
+        offset: offset('the "could be affected" list (and the test list with `format: "tests"`)'),
       },
       additionalProperties: false,
     },
@@ -1583,18 +2242,18 @@ export const TOOLS: ToolDefinition[] = [
     name: 'rastro_path',
     title: 'How A reaches B',
     description:
-      'How does A reach B? Shortest chains of proven calls, imports and inheritance from `from` to `to` (up to `limit` alternatives), each step with file:line evidence. When there is no proven path it says so, and reports a path in the opposite direction, a file-level import path, or a possible path through unresolved interface calls (clearly marked as unproven).',
+      'How does A reach B? Shortest chains of proven calls, imports and inheritance from `from` to `to` (up to `limit` alternatives), each step with file:line evidence; type-only steps are marked as compile-time only. A folder stands for everything inside it; `to` can be an external package (the last step is the import). When there is no proven path it says so, and reports a path in the opposite direction, a file-level import path, or a possible path through unresolved interface calls (clearly marked as unproven).',
     inputSchema: {
       type: 'object',
       properties: {
         from: target(`Start. ${TARGET_HELP}`),
-        to: target(`Destination. ${TARGET_HELP}`),
+        to: target(`Destination (an external package is accepted here). ${TARGET_HELP}`),
         limit: {
           type: 'integer',
           minimum: 1,
           maximum: 3,
           default: 3,
-          description: 'Alternative paths (default 3).',
+          description: 'Alternative paths (default 3; folders and packages give the shortest one).',
         },
       },
       required: ['from', 'to'],
@@ -1606,7 +2265,7 @@ export const TOOLS: ToolDefinition[] = [
     name: 'rastro_routes',
     title: 'HTTP routes',
     description:
-      'HTTP routes found in the code (Express, Fastify, Hono, NestJS, Next.js): method, full path (or why it is unknown, e.g. an unproven mount prefix), framework, handler and file:line. Filter by substring (`filter`, matched against path, handler and file), `method` or `framework`.',
+      'HTTP routes found in the code (Express, Fastify, Hono, NestJS, Next.js): method, full path (or why it is unknown, e.g. an unproven mount prefix), framework, handler (or "handler not identified") and file:line. Filter by substring (`filter`, matched against path, handler and file), `method` or `framework`; paginate with `limit` and `offset`.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1626,9 +2285,15 @@ export const TOOLS: ToolDefinition[] = [
           description: 'Only routes of this framework.',
         },
         limit: limit(500, 100),
+        offset: offset('the routes'),
       },
       additionalProperties: false,
     },
     run: routes,
   },
 ];
+
+export const TOOLS: ToolDefinition[] = TOOL_LIST.map((tool) => ({
+  ...tool,
+  run: withPartialNote(tool.run),
+}));

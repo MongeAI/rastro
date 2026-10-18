@@ -121,6 +121,30 @@ describe('watchProject (ao vivo)', () => {
     await waitFor(() => watcher!.watched === before);
   });
 
+  it('pasta apagada e recriada no mesmo lugar: as edições seguintes dentro dela são vistas', async () => {
+    const root = project();
+    const seen: string[][] = [];
+    watcher = watchProject(root, (files) => seen.push(files), { delayMs: 20 });
+    // rm -rf src && mkdir src && escreve src/b.ts
+    fs.rmSync(path.join(root, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src/b.ts'), 'export const b = 1;\n');
+    await waitFor(() => seen.length > 0);
+    await pause(100);
+    // o .refresh() da reanálise (aqui, feito à mão) não pode manter o watch da pasta antiga
+    watcher.refresh();
+    seen.length = 0;
+    fs.writeFileSync(path.join(root, 'src/b.ts'), 'export const b = 2;\n');
+    await waitFor(() => seen.flat().includes('src/b.ts'));
+    seen.length = 0;
+    fs.mkdirSync(path.join(root, 'src/lib'));
+    await waitFor(() => seen.length > 0);
+    await pause(50);
+    seen.length = 0;
+    fs.writeFileSync(path.join(root, 'src/lib/c.ts'), 'export const c = 1;\n');
+    await waitFor(() => seen.flat().includes('src/lib/c.ts'));
+  });
+
   it('refresh() depois de uma reanálise segue o .gitignore atual', () => {
     const root = project();
     watcher = watchProject(root, () => {}, { delayMs: 50 });
@@ -161,6 +185,21 @@ describe('watchProject (varredura)', () => {
 
     fs.rmSync(path.join(root, 'src/lib/b.ts'));
     await waitFor(() => seen.flat().includes('src/lib/b.ts'));
+  });
+
+  it('flush() compara na hora, sem esperar o intervalo da varredura', async () => {
+    const root = project();
+    const seen: string[][] = [];
+    watcher = watchProject(root, (files) => seen.push(files), {
+      polling: true,
+      delayMs: 0,
+      pollMs: 3_600_000,
+    });
+    expect(watcher.mode).toBe('polling');
+    fs.writeFileSync(path.join(root, 'src/a.ts'), 'export const a = 333;\n');
+    watcher.flush();
+    await pause(5);
+    expect(seen.flat()).toEqual(['src/a.ts']);
   });
 
   it('erro de um watch já aberto também cai para a varredura', async () => {
