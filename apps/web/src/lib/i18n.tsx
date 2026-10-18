@@ -313,9 +313,9 @@ const pt = {
     newFiles: 'Arquivos novos',
     broken: 'Possivelmente quebrado',
     brokenHint:
-      'Referências ao que mudou que não resolvem no código atual: import de arquivo removido ou renomeado, nome que deixou de ser exportado, membro que sumiu. Não são relações comprovadas.',
+      'Referências ao que mudou que não resolvem no código atual: import de arquivo removido ou renomeado, nome que deixou de ser exportado, membro que sumiu, nome que não existe mais no arquivo alterado. Não são relações comprovadas.',
     brokenWhy: (
-      why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing',
+      why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing' | 'name-missing',
     ): string =>
       why === 'file-deleted'
         ? 'arquivo removido'
@@ -323,7 +323,9 @@ const pt = {
           ? 'arquivo renomeado'
           : why === 'not-exported'
             ? 'não é mais exportado'
-            : 'membro inexistente',
+            : why === 'member-missing'
+              ? 'membro inexistente'
+              : 'nome não declarado no arquivo',
     legendChanged: 'mudou',
     legendImpacted: 'afetado',
   },
@@ -705,7 +707,7 @@ const en: Messages = {
     newFiles: 'New files',
     broken: 'Possibly broken',
     brokenHint:
-      'References to what changed that do not resolve in the current code: imports of deleted or renamed files, names no longer exported, missing members. Not proven relationships.',
+      'References to what changed that do not resolve in the current code: imports of deleted or renamed files, names no longer exported, missing members, names no longer declared in the changed file. Not proven relationships.',
     brokenWhy: (why) =>
       why === 'file-deleted'
         ? 'file deleted'
@@ -713,7 +715,9 @@ const en: Messages = {
           ? 'file renamed'
           : why === 'not-exported'
             ? 'no longer exported'
-            : 'no such member',
+            : why === 'member-missing'
+              ? 'no such member'
+              : 'name not declared in the file',
     legendChanged: 'changed',
     legendImpacted: 'affected',
   },

@@ -161,11 +161,13 @@ servidor MCP só fala pelo stdio.
     brokenWhy: (kind: 'import' | 'call', why: BrokenWhy, reference: string, target: string) =>
       why === 'member-missing'
         ? `chama ${reference}, mas o tipo (declarado em ${target}) não tem esse membro`
-        : kind === 'import'
-          ? why === 'not-exported'
-            ? `importa ${reference} de ${target}, que não exporta esse nome`
-            : `importa ${reference}, mas ${target} foi ${why === 'file-deleted' ? 'removido' : 'renomeado'}`
-          : `chama ${reference}, importado de ${target} (${why === 'not-exported' ? 'que não exporta esse nome' : why === 'file-deleted' ? 'removido' : 'renomeado'})`,
+        : why === 'name-missing'
+          ? `chama ${reference}, que não está declarado nem importado em ${target}`
+          : kind === 'import'
+            ? why === 'not-exported'
+              ? `importa ${reference} de ${target}, que não exporta esse nome`
+              : `importa ${reference}, mas ${target} foi ${why === 'file-deleted' ? 'removido' : 'renomeado'}`
+            : `chama ${reference}, importado de ${target} (${why === 'not-exported' ? 'que não exporta esse nome' : why === 'file-deleted' ? 'removido' : 'renomeado'})`,
     times: (count: number) => `(${count} vezes)`,
     routes: 'Rotas HTTP envolvidas',
     tests: 'Testes para rodar',
@@ -511,11 +513,13 @@ MCP server only talks over stdio.
     brokenWhy: (kind, why, reference, target) =>
       why === 'member-missing'
         ? `calls ${reference}, but the type (declared in ${target}) has no such member`
-        : kind === 'import'
-          ? why === 'not-exported'
-            ? `imports ${reference} from ${target}, which does not export that name`
-            : `imports ${reference}, but ${target} was ${why === 'file-deleted' ? 'deleted' : 'renamed'}`
-          : `calls ${reference}, imported from ${target} (${why === 'not-exported' ? 'which does not export that name' : why === 'file-deleted' ? 'deleted' : 'renamed'})`,
+        : why === 'name-missing'
+          ? `calls ${reference}, which is not declared or imported in ${target}`
+          : kind === 'import'
+            ? why === 'not-exported'
+              ? `imports ${reference} from ${target}, which does not export that name`
+              : `imports ${reference}, but ${target} was ${why === 'file-deleted' ? 'deleted' : 'renamed'}`
+            : `calls ${reference}, imported from ${target} (${why === 'not-exported' ? 'which does not export that name' : why === 'file-deleted' ? 'deleted' : 'renamed'})`,
     times: (count) => `(${count} times)`,
     routes: 'HTTP routes involved',
     tests: 'Tests to run',

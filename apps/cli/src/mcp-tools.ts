@@ -1649,6 +1649,7 @@ const brokenWhy: Record<BrokenReference['why'], string> = {
   'file-renamed': 'the file was renamed or moved',
   'not-exported': 'the changed file does not export that name',
   'member-missing': 'the type, declared in the changed file, has no such member',
+  'name-missing': 'the changed file no longer declares or imports that name',
 };
 
 function brokenLine(b: BrokenReference): string {

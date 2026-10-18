@@ -27,9 +27,10 @@ export interface BrokenReference {
   /**
    * `file-deleted`/`file-renamed`: o arquivo importado não existe mais nesse caminho;
    * `not-exported`: o arquivo alterado não exporta o nome; `member-missing`: o tipo declarado
-   * no arquivo alterado não tem o membro chamado.
+   * no arquivo alterado não tem o membro chamado; `name-missing`: o arquivo alterado (TypeScript)
+   * chama um nome que não está declarado nem importado nele.
    */
-  why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing';
+  why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing' | 'name-missing';
   /** Onde aparece (a primeira ocorrência) e quantas vezes. */
   evidence?: Evidence;
   count: number;
@@ -307,7 +308,35 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
     }
   }
 
-  // chamadas sem declaração: a um nome importado que sumiu, ou a um membro que o tipo não tem
+  // nomes soltos sem declaração em arquivos não alterados (ex.: globais de testes sem os tipos
+  // instalados): faltavam antes da mudança, então não contam como quebrados por ela. Os que
+  // vêm de um import quebrado pela mudança (acima) não contam como "faltavam antes".
+  const missingElsewhere = new Set<string>();
+  const loose = (node: GraphNode) => {
+    const reference = node.meta?.reference ?? node.name;
+    // só `nome()` sem nada com esse nome no escopo (o analisador confere): um nome importado
+    // de um pacote não instalado também não resolve, mas continua declarado
+    return node.kind === 'unresolved' &&
+      node.meta?.reason === 'symbol-not-found' &&
+      node.meta.undeclared === true &&
+      /^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(reference)
+      ? reference
+      : undefined;
+  };
+  for (const node of index.nodes.values()) {
+    const name = loose(node);
+    const file = name ? index.fileOf(node.id) : undefined;
+    if (
+      name &&
+      file &&
+      !changed.has(file.qualifiedName ?? file.name) &&
+      !missingNames.get(file.id)?.has(name)
+    )
+      missingElsewhere.add(name);
+  }
+
+  // chamadas sem declaração: a um nome importado que sumiu, a um membro que o tipo não tem ou,
+  // dentro de um arquivo alterado, a um nome que não existe mais nele (função renomeada)
   for (const node of index.nodes.values()) {
     if (node.kind !== 'unresolved' || node.meta?.reason !== 'symbol-not-found') continue;
     const reference = node.meta.reference ?? node.name;
@@ -322,6 +351,21 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
       const names = fileId ? missingNames.get(fileId) : undefined;
       const hit = names?.get(reference.split('.')[0]!);
       if (hit) ({ target, why } = hit);
+      else {
+        const file = index.fileOf(node.id);
+        const path = file && (file.qualifiedName ?? file.name);
+        const name = loose(node);
+        if (
+          path &&
+          name &&
+          changed.has(path) &&
+          /\.[cm]?tsx?$/.test(path) &&
+          !missingElsewhere.has(name)
+        ) {
+          target = path;
+          why = 'name-missing';
+        }
+      }
     }
     if (!target || !why) continue;
     for (const edge of index.incoming(node.id, ['calls'])) {

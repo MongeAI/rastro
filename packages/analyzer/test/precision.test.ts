@@ -836,6 +836,26 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
     expect(node(g, 'unresolved:src/use.ts#call:c.nope')?.meta?.receiverFile).toBe('src/app.ts');
   });
 
+  it('nome() sem nada no escopo fica marcado; importado de pacote ausente, não', async () => {
+    const root = makeProject({
+      'src/use.ts': [
+        "import clsx from 'pacote-ausente';",
+        "import { thing } from 'outro-ausente';",
+        'export function go() {',
+        '  clsx();',
+        '  thing();',
+        '  sumiu();',
+        '  return parseInt("1");',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    expect(node(g, 'unresolved:src/use.ts#call:sumiu')?.meta?.undeclared).toBe(true);
+    for (const name of ['clsx', 'thing'])
+      expect(node(g, `unresolved:src/use.ts#call:${name}`)?.meta?.undeclared).toBeUndefined();
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');

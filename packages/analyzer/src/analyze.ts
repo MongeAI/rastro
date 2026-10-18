@@ -1200,6 +1200,8 @@ export function addUnresolvedNode(
   candidates: string[] = [],
   /** Chamada `obj.x()` sem o membro `x`: o arquivo que declara o tipo de `obj`. */
   receiverFile?: string,
+  /** Chamada `nome()` em TypeScript sem nenhum valor `nome` no escopo. */
+  undeclared = false,
 ): string {
   const base = nodeId.unresolved(file, kind, reference);
   let id = base;
@@ -1228,6 +1230,7 @@ export function addUnresolvedNode(
         reference,
         ...(candidates.length ? { candidates } : {}),
         ...(receiverFile ? { receiverFile } : {}),
+        ...(undeclared ? { undeclared } : {}),
       },
     });
     if (kind !== 'import') {
@@ -2160,6 +2163,17 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           ? receiverFileOf(ctx, callee.getExpression().compilerNode, callee.getName())
           : undefined;
       if (Node.isIdentifier(callee) || receiverIsThis || receiverFile) {
+        // `nome()` sem nada com esse nome no escopo: nem declarado, nem importado (um import de
+        // pacote não instalado ainda declara o nome), nem global
+        const undeclared =
+          Node.isIdentifier(callee) &&
+          (file.language === 'ts' || file.language === 'tsx') &&
+          !ctx.checker.resolveName(
+            callee.getText(),
+            callee.compilerNode,
+            ts.SymbolFlags.Value | ts.SymbolFlags.Alias,
+            false,
+          );
         const target = addUnresolvedNode(
           ctx,
           file.relative,
@@ -2169,6 +2183,7 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           call,
           [],
           receiverFile,
+          undeclared,
         );
         ctx.builder.addEdge({
           kind: 'calls',

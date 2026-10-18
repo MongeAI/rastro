@@ -359,6 +359,10 @@
               "description": "Chamada não resolvida obj.x() em TypeScript: arquivo que declara o tipo de obj, sem o membro x.",
               "type": "string"
             },
+            "undeclared": {
+              "description": "Chamada não resolvida nome() em TypeScript: nenhum valor com esse nome existe no escopo.",
+              "type": "boolean"
+            },
             "abstractMembers": {
               "type": "array",
               "items": {

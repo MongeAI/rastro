@@ -288,6 +288,27 @@ describe('possivelmente quebrado pela mudança', () => {
     ]);
   });
 
+  it('função renomeada ainda chamada pelo nome antigo no próprio arquivo alterado', async () => {
+    setLang('en');
+    const math =
+      'export function sum(a: number, b: number) {\n  return a + b;\n}\n\nexport function twice(n: number) {\n  return sum(n, n);\n}\n';
+    // `describe` sem os tipos instalados falta também num arquivo que não mudou: não conta
+    const spec = 'describe("x", () => {});\n';
+    // `use.ts` também chama `sum`, mas pelo import que a mudança quebrou: não é "faltava antes"
+    const use = "import { sum } from './math';\n\nexport const three = () => sum(1, 2);\n";
+    const root = gitProject(
+      { 'src/math.ts': math + spec, 'src/use.ts': use, 'test/other.test.ts': spec },
+      ({ write }) => write('src/math.ts', math.replace('function sum', 'function add') + spec),
+    );
+    expect(await brokenOf(root)).toEqual([
+      ['import', 'use.ts', 'sum', 'src/math.ts', 'not-exported', 'src/use.ts:1'],
+      ['call', 'twice', 'sum', 'src/math.ts', 'name-missing', 'src/math.ts:6'],
+      ['call', 'three', 'sum', 'src/math.ts', 'not-exported', 'src/use.ts:3'],
+    ]);
+    const text = renderImpact(buildImpactReport(await graphWithChanges(root)), 'text');
+    expect(text).toContain('calls sum, which is not declared or imported in src/math.ts');
+  });
+
   it('nada quebrado: nenhuma seção nova', async () => {
     setLang('en');
     const report = buildImpactReport(await graphWithChanges(changedProject()));

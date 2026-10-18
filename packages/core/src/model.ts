@@ -133,6 +133,11 @@ export interface NodeMeta {
    * tipo de `obj`, que não tem o membro `x` (erro de compilação, ex.: método renomeado).
    */
   receiverFile?: string;
+  /**
+   * Para chamadas não resolvidas `nome()` em TypeScript: nenhum valor com esse nome existe no
+   * escopo (nem declarado, nem importado, nem global). É um erro de compilação.
+   */
+  undeclared?: boolean;
   /** Para classes: interfaces (ou classes) da cláusula `implements`, como escritas no código. */
   implements?: string[];
   /**
