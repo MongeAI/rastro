@@ -36,6 +36,8 @@ import {
 } from './export.js';
 import { checkGit, collectChanges, GitError } from './git.js';
 import { getLang, langArg, parseLang, setLang, t } from './i18n.js';
+import { runMcp } from './mcp.js';
+import { IN_ANALYSIS_WORKER } from './mcp-project.js';
 import { startServer, type RunningServer } from './server.js';
 import { watchProject } from './watch.js';
 import {
@@ -167,6 +169,7 @@ async function main(argv: string[]): Promise<void> {
         since: { type: 'string' },
         'trust-git-config': { type: 'boolean' },
         watch: { type: 'boolean', short: 'w' },
+        'no-watch': { type: 'boolean' },
         format: { type: 'string', short: 'f' },
         level: { type: 'string' },
         folder: { type: 'string' },
@@ -189,12 +192,18 @@ async function main(argv: string[]): Promise<void> {
   if (values.help || positionals.length === 0)
     return void process.stdout.write(t().help(RASTRO_VERSION));
 
-  const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare', 'impact'];
+  const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare', 'impact', 'mcp'];
   const [first, ...rest] = positionals;
-  // "rastro analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho
-  const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
+  // "rastro analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho.
+  // "rastro mcp" é sempre o comando (o caminho é opcional): um cliente de IA que o configura
+  // nunca deve abrir o navegador porque a pasta atual tem uma subpasta "mcp"
+  const isCommand =
+    commands.includes(first!) && (rest.length > 0 || first === 'mcp' || !fs.existsSync(first!));
   const command = isCommand ? first! : 'open';
-  const target = isCommand ? rest[0] : first;
+  // mcp sem caminho: a pasta do projeto que o Claude Code informa ao servidor, senão a atual
+  const target = isCommand
+    ? (rest[0] ?? (command === 'mcp' ? process.env.CLAUDE_PROJECT_DIR?.trim() || '.' : undefined))
+    : first;
   // argumentos a mais falham (o compare recebe dois arquivos; os outros comandos, um)
   const extra = isCommand ? rest.slice(command === 'compare' ? 2 : 1) : rest;
   if (extra.length) fail(`${u.unexpectedArg(extra[0]!)}\n${u.seeHelp}`);
@@ -247,11 +256,21 @@ async function main(argv: string[]): Promise<void> {
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1)) fail(u.maxFiles);
   // opções que nunca teriam efeito falham, em vez de serem ignoradas em silêncio
+  if (values.watch && command === 'mcp') fail(u.mcpWatches);
   if (values.watch && command !== 'open') fail(u.watchOnly);
-  // o impact de uma pasta sempre lê o git; os outros comandos só com --changes ou --since
+  if (values['no-watch'] && command !== 'mcp') fail(u.onlyWith('--no-watch', 'mcp'));
+  if (command === 'mcp') {
+    // as mudanças do git vêm a cada chamada do rastro_impact (--out, --port e --no-open já
+    // falham acima: o mcp não grava nada nem abre navegador)
+    if (values.changes) fail(u.mcpGitPerCall('--changes'));
+    if (values.since !== undefined) fail(u.mcpGitPerCall('--since'));
+  }
+  // o impact de uma pasta sempre lê o git (e o mcp, a cada chamada do rastro_impact); os
+  // outros comandos só com --changes ou --since
   if (
     values['trust-git-config'] &&
     command !== 'impact' &&
+    command !== 'mcp' &&
     !values.changes &&
     values.since === undefined
   )
@@ -481,6 +500,18 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  if (command === 'mcp') {
+    const root = path.resolve(target);
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) fail(u.dirNotFound(root));
+    await runMcp({
+      root,
+      discover,
+      watch: !values['no-watch'],
+      trustGitConfig: !!values['trust-git-config'],
+    });
+    return;
+  }
+
   if (command === 'serve') {
     let graph: RastroGraph;
     try {
@@ -593,6 +624,8 @@ function startWatch(
   process.stderr.write(dim(`  ${watcher.mode === 'live' ? t().watch.live : t().watch.polling}\n`));
 }
 
-main(process.argv.slice(2)).catch((err: unknown) =>
-  fail(err instanceof Error ? err.message : String(err)),
-);
+// a worker de análise do `rastro mcp` carrega este mesmo arquivo: lá, só a worker roda
+if (!IN_ANALYSIS_WORKER)
+  main(process.argv.slice(2)).catch((err: unknown) =>
+    fail(err instanceof Error ? err.message : String(err)),
+  );

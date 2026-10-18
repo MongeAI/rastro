@@ -140,3 +140,63 @@ export function findPaths(
   const backward = kShortest(index, to, from, kinds, maxDepth, limit);
   return { paths: backward, reversed: backward.length > 0 };
 }
+
+/** Um passo de um caminho que pode depender de chamadas não resolvidas. */
+export interface PossibleStep {
+  /** Relação usada; num passo possível, a chamada não resolvida (com a evidência). */
+  edge: GraphEdge;
+  /** Nó alcançado: o destino da relação ou, num passo possível, a implementação candidata. */
+  to: string;
+  /** `true` quando o passo só existe se a chamada for para esta implementação candidata. */
+  possible: boolean;
+}
+
+/**
+ * "Talvez A chegue em B": o menor caminho que, além das relações resolvidas, aceita como passo
+ * uma chamada não resolvida (por interface ou método abstrato) até uma das implementações
+ * candidatas (`meta.candidates`). Nunca é prova: o alvo real só existe em execução. Serve
+ * para dizer, quando não há caminho comprovado, que um caminho _possível_ existe. Devolve
+ * `null` se nem assim houver caminho, ou se o menor caminho não usar nenhum passo possível
+ * (aí `findPaths` já o encontra).
+ */
+export function findPossiblePath(
+  index: GraphIndex,
+  from: string,
+  to: string,
+  options: { maxDepth?: number; kinds?: readonly EdgeKind[] } = {},
+): PossibleStep[] | null {
+  const kinds = options.kinds ?? PATH_EDGE_KINDS;
+  const maxDepth = options.maxDepth ?? 12;
+  if (from === to || !index.node(from) || !index.node(to)) return null;
+  const previous = new Map<string, { from: string; step: PossibleStep }>();
+  const depth = new Map<string, number>([[from, 0]]);
+  const queue = [from];
+  for (let head = 0; head < queue.length; head++) {
+    const current = queue[head]!;
+    const d = depth.get(current)!;
+    if (d >= maxDepth) continue;
+    const steps: PossibleStep[] = [];
+    for (const edge of index.outgoing(current, kinds)) {
+      if (edge.resolution === 'resolved') steps.push({ edge, to: edge.target, possible: false });
+      else if (edge.resolution === 'unresolved')
+        for (const candidate of index.node(edge.target)?.meta?.candidates ?? [])
+          if (index.node(candidate)) steps.push({ edge, to: candidate, possible: true });
+    }
+    // ordem estável; com o mesmo destino, o passo comprovado vem antes do possível
+    steps.sort((a, b) => compareStrings(a.to, b.to) || Number(a.possible) - Number(b.possible));
+    for (const step of steps) {
+      if (depth.has(step.to)) continue;
+      depth.set(step.to, d + 1);
+      previous.set(step.to, { from: current, step });
+      if (step.to !== to) {
+        queue.push(step.to);
+        continue;
+      }
+      const path: PossibleStep[] = [];
+      for (let cur = to; cur !== from; cur = previous.get(cur)!.from)
+        path.unshift(previous.get(cur)!.step);
+      return path.some((s) => s.possible) ? path : null;
+    }
+  }
+  return null;
+}

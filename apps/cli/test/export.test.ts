@@ -393,7 +393,7 @@ describe.skipIf(!fs.existsSync(bundled))('opções que não teriam efeito (CLI e
     const res = run(['analyze', fixture, '--stdout', '--trust-git-config']);
     expect(res.status).toBe(1);
     expect(res.stderr).toContain(
-      '--trust-git-config só tem efeito com "rastro impact" ou junto com',
+      '--trust-git-config só tem efeito com "rastro impact", "rastro mcp" ou junto com',
     );
   });
 });

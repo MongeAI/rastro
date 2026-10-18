@@ -36,6 +36,9 @@ Uso:
   rastro impact <caminho|grafo.json>
                                     o impacto das mudanças do git: o que mudou, quem pode ser
                                     afetado, rotas e testes (texto, markdown ou json)
+  rastro mcp [caminho]              servidor MCP (stdio) para agentes de IA consultarem o
+                                    grafo: Claude Code, Cursor, VS Code... (padrão: a pasta
+                                    do projeto do Claude Code, ou a pasta atual)
 
 Opções:
   -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário); no export,
@@ -61,13 +64,15 @@ Opções:
       --since <ref>         marca o que mudou desde que a branch saiu de <ref> (ex.: main)
       --trust-git-config    permite rodar o git mesmo com comandos no .git/config
   -w, --watch               reanalisa ao salvar arquivos e atualiza o mapa ao vivo
+      --no-watch            (mcp) não observa os arquivos (o grafo fica o da primeira análise)
       --lang <en|pt>        idioma das mensagens (padrão: RASTRO_LANG, depois o idioma do
                             sistema em LC_ALL, LC_MESSAGES ou LANG; sem nenhum, inglês)
   -h, --help                mostra esta ajuda
   -v, --version             mostra a versão
 
 O Rastro só lê arquivos: não executa o projeto, não instala dependências e não
-envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
+envia nada para a internet. A interface fica disponível apenas em 127.0.0.1; o
+servidor MCP só fala pelo stdio.
 `,
   /** Etapas da análise (o texto padrão do analisador, em português). */
   progress: (event: ProgressEvent): string => progressMessage(event),
@@ -90,10 +95,14 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     notTogether: (a: string, b: string) => `${a} e ${b} não podem ser usados juntos.`,
     maxFiles: '--max-files precisa ser um inteiro positivo.',
     watchOnly: '--watch só funciona ao abrir o mapa (rastro <caminho>).',
+    mcpWatches:
+      '--watch não se aplica a "mcp": ele já observa o projeto (use --no-watch para desligar).',
+    mcpGitPerCall: (flag: string) =>
+      `${flag} não se aplica a "mcp": o agente pede as mudanças do git a cada chamada (ferramenta rastro_impact, opção since).`,
     needsFolder: (flag: string, command: string) =>
       `${flag} não se aplica a "rastro ${command}" com um JSON salvo: só vale ao analisar uma pasta.`,
     trustNeedsChanges:
-      '--trust-git-config só tem efeito com "rastro impact" ou junto com --changes ou --since.',
+      '--trust-git-config só tem efeito com "rastro impact", "rastro mcp" ou junto com --changes ou --since.',
     dirNotFound: (dir: string) => `diretório não encontrado: ${dir}`,
     pathNotFound: (p: string) => `caminho não encontrado: ${p}`,
     compareNeedsTwo: 'informe dois arquivos JSON. Exemplo: rastro compare antes.json depois.json',
@@ -191,6 +200,14 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
       `não foi possível observar as pastas do projeto (${reason}); o Rastro vai procurar mudanças a cada 1,5 s.`,
     limitHint:
       'No Linux, o limite vem de fs.inotify.max_user_watches e max_user_instances (sysctl); aumentá-los devolve o modo instantâneo.',
+  },
+  mcp: {
+    serving: (root: string) => `servidor MCP de ${root} no stdio; aguardando o cliente.`,
+    ttyHint:
+      'este comando fala o Model Context Protocol pelo stdin/stdout e é feito para ser iniciado por um cliente de IA (Claude Code, Cursor, VS Code); veja o README. Ctrl+D encerra.',
+    analyzed: (ms: number, files: number, sequence: number) =>
+      `${sequence === 1 ? 'análise pronta' : 'reanalisado'} em ${ms} ms · ${n(files, 'arquivo', 'arquivos')}`,
+    failed: (error: string) => `a análise falhou (a próxima chamada tenta de novo): ${error}`,
   },
   validate: {
     invalid: 'inválido',
@@ -343,6 +360,9 @@ Usage:
   rastro impact <path|graph.json>
                                     the impact of the git changes: what changed, what could be
                                     affected, routes and tests (text, markdown or json)
+  rastro mcp [path]                 MCP server (stdio) so AI agents can query the graph:
+                                    Claude Code, Cursor, VS Code... (default: the Claude Code
+                                    project folder, or the current folder)
 
 Options:
   -o, --out <file>          where to save the JSON (default: user cache); with export,
@@ -368,13 +388,15 @@ Options:
       --since <ref>         highlight what changed since the branch forked from <ref> (e.g. main)
       --trust-git-config    run git even if .git/config defines commands
   -w, --watch               re-analyze when files are saved and update the map live
+      --no-watch            (mcp) do not watch files (the graph stays as first analyzed)
       --lang <en|pt>        message language (default: RASTRO_LANG, then the system locale
                             from LC_ALL, LC_MESSAGES or LANG; if none is set, English)
   -h, --help                show this help
   -v, --version             show the version
 
 Rastro only reads files: it never runs your project, installs dependencies or
-sends anything over the network. The interface is only served on 127.0.0.1.
+sends anything over the network. The interface is only served on 127.0.0.1; the
+MCP server only talks over stdio.
 `,
   progress: (event) => {
     switch (event.code) {
@@ -412,10 +434,14 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     notTogether: (a, b) => `${a} and ${b} cannot be used together.`,
     maxFiles: '--max-files must be a positive integer.',
     watchOnly: '--watch only works when opening the map (rastro <path>).',
+    mcpWatches:
+      '--watch does not apply to "mcp": it already watches the project (use --no-watch to turn it off).',
+    mcpGitPerCall: (flag) =>
+      `${flag} does not apply to "mcp": the agent asks for git changes on each call (rastro_impact tool, since option).`,
     needsFolder: (flag, command) =>
       `${flag} does not apply to "rastro ${command}" with a saved JSON: it only works when analyzing a folder.`,
     trustNeedsChanges:
-      '--trust-git-config only has an effect with "rastro impact" or together with --changes or --since.',
+      '--trust-git-config only has an effect with "rastro impact", "rastro mcp" or together with --changes or --since.',
     dirNotFound: (dir) => `directory not found: ${dir}`,
     pathNotFound: (p) => `path not found: ${p}`,
     compareNeedsTwo: 'pass two JSON files. Example: rastro compare before.json after.json',
@@ -506,6 +532,14 @@ sends anything over the network. The interface is only served on 127.0.0.1.
       `could not watch the project folders (${reason}); Rastro will check for changes every 1.5 s.`,
     limitHint:
       'On Linux, the limit comes from fs.inotify.max_user_watches and max_user_instances (sysctl); raising them restores instant updates.',
+  },
+  mcp: {
+    serving: (root) => `MCP server for ${root} on stdio; waiting for the client.`,
+    ttyHint:
+      'this command speaks the Model Context Protocol over stdin/stdout and is meant to be started by an AI client (Claude Code, Cursor, VS Code); see the README. Ctrl+D quits.',
+    analyzed: (ms, files, sequence) =>
+      `${sequence === 1 ? 'analysis ready' : 're-analyzed'} in ${ms} ms · ${n(files, 'file', 'files')}`,
+    failed: (error) => `analysis failed (the next call retries): ${error}`,
   },
   validate: {
     invalid: 'invalid',

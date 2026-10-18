@@ -125,16 +125,32 @@ export function computeChangeImpact(index: GraphIndex, changes: ChangeSet): Chan
     .filter((n) => n && n.kind !== 'file')
     .sort((a, b) => compareStrings(a.id, b.id));
 
-  const involved = [...changedEntities, ...changedFiles, ...impactedList.map((i) => i.node)];
-  const routes = uniqueSorted(involved.filter((n) => n.kind === 'route'));
-  const tests = uniqueSorted(
-    involved
-      .map((n) => (n.kind === 'file' ? n : index.fileOf(n.id)))
-      .filter((f): f is GraphNode => !!f && isTestFile(f.qualifiedName ?? f.name)),
-  );
+  const { routes, tests } = routesAndTests(index, [
+    ...changedEntities,
+    ...changedFiles,
+    ...impactedList.map((i) => i.node),
+  ]);
 
   changedFiles.sort((a, b) => compareStrings(a.id, b.id));
   return { changedFiles, outsideGraph, changedEntities, impacted: impactedList, routes, tests };
+}
+
+/**
+ * Rotas HTTP e arquivos de teste entre as entidades envolvidas (o que mudou e quem depende
+ * disso): as rotas para revisar e os testes para rodar, sem repetição e em ordem estável.
+ */
+export function routesAndTests(
+  index: GraphIndex,
+  involved: readonly GraphNode[],
+): { routes: GraphNode[]; tests: GraphNode[] } {
+  return {
+    routes: uniqueSorted(involved.filter((n) => n.kind === 'route')),
+    tests: uniqueSorted(
+      involved
+        .map((n) => (n.kind === 'file' ? n : index.fileOf(n.id)))
+        .filter((f): f is GraphNode => !!f && isTestFile(f.qualifiedName ?? f.name)),
+    ),
+  };
 }
 
 function uniqueSorted(nodes: GraphNode[]): GraphNode[] {

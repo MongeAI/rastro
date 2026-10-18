@@ -4,10 +4,11 @@ import {
   kindLabels,
   RASTRO_VERSION,
   type ChangedFile,
+  type ChangeSet,
   type GraphNode,
   type RastroGraph,
 } from '@rastro/core';
-import { computeChangeImpact, GraphIndex } from '@rastro/graph';
+import { computeChangeImpact, GraphIndex, type ChangeImpact } from '@rastro/graph';
 import { getLang, t } from './i18n.js';
 import { bold, cyan, dim, safeText, yellow } from './term.js';
 
@@ -81,21 +82,33 @@ function item(n: GraphNode): ImpactItem {
   };
 }
 
-/** Monta o relatório a partir de um grafo com mudanças do git (`graph.changes`). */
-export function buildImpactReport(graph: RastroGraph): ImpactReport {
-  const changes = graph.changes;
-  if (!changes) throw new Error('graph without changes');
-  const index = new GraphIndex(graph);
+/**
+ * O cálculo por trás do relatório (também usado pelo `rastro mcp`): o impacto das mudanças e
+ * o que mudou — as entidades alteradas e os arquivos alterados sem nenhuma entidade alterada
+ * dentro (código no topo do arquivo, arquivo novo ou renomeado). Quem já aparece como afetado
+ * fica só lá.
+ */
+export function changesWithImpact(
+  index: GraphIndex,
+  changes: ChangeSet,
+): { impact: ChangeImpact; changed: GraphNode[] } {
   const impact = computeChangeImpact(index, changes);
-  // arquivos alterados sem nenhuma entidade alterada dentro (código no topo do arquivo,
-  // arquivo novo ou renomeado); quem já aparece como afetado fica só lá
   const impactedIds = new Set(impact.impacted.map((i) => i.node.id));
   const fileLevel = impact.changedFiles.filter(
     (f) =>
       !impactedIds.has(f.id) &&
       !impact.changedEntities.some((e) => index.fileOf(e.id)?.id === f.id),
   );
-  const changed = [...impact.changedEntities, ...fileLevel]
+  return { impact, changed: [...impact.changedEntities, ...fileLevel] };
+}
+
+/** Monta o relatório a partir de um grafo com mudanças do git (`graph.changes`). */
+export function buildImpactReport(graph: RastroGraph): ImpactReport {
+  const changes = graph.changes;
+  if (!changes) throw new Error('graph without changes');
+  const index = new GraphIndex(graph);
+  const { impact, changed: changedNodes } = changesWithImpact(index, changes);
+  const changed = changedNodes
     .map(item)
     .sort((a, b) => compareStrings(a.file ?? '', b.file ?? '') || (a.line ?? 0) - (b.line ?? 0));
   const tests = impact.tests.map((f) => f.qualifiedName ?? f.name).sort(compareStrings);
