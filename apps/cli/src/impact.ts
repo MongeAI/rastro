@@ -62,8 +62,13 @@ export interface ImpactReport {
 const MAX_NAME = 160;
 const clip = (s: string) => (s.length > MAX_NAME ? `${s.slice(0, MAX_NAME - 1)}…` : s);
 
+/** Como na interface: rota como `GET /x`, método como `Classe.metodo`. */
 const display = (n: GraphNode) =>
-  clip(n.qualifiedName && n.kind !== 'file' && n.kind !== 'module' ? n.qualifiedName : n.name);
+  clip(
+    n.kind !== 'route' && n.qualifiedName && n.kind !== 'file' && n.kind !== 'module'
+      ? n.qualifiedName
+      : n.name,
+  );
 
 function item(n: GraphNode): ImpactItem {
   const file = n.location?.file ?? (n.kind === 'file' ? n.qualifiedName : undefined);

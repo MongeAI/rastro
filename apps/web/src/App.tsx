@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  graphIssues,
   validateGraph,
+  validationText,
   type EdgeKind,
   type Lang,
   type NodeKind,
@@ -59,7 +61,7 @@ import { PALETTES, type ThemeName } from './lib/theme';
 type Load =
   | { status: 'loading' }
   | { status: 'ready'; graph: RastroGraph; fromServer: boolean; updatedAt?: number }
-  | { status: 'error'; message: (t: Messages) => string; canPickFile: boolean };
+  | { status: 'error'; message: (t: Messages, lang: Lang) => string; canPickFile: boolean };
 
 /** Versão do grafo informada pelo servidor (modo --watch). */
 const versionOf = (res: Response) => Number(res.headers.get('X-Rastro-Version')) || 0;
@@ -86,17 +88,19 @@ export function App() {
 }
 
 function Loader({ onLang }: { onLang(lang: Lang): void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   /** Versão do grafo mostrado (cabeçalho X-Rastro-Version do servidor; 0 = desconhecida). */
   const graphVersion = useRef(0);
 
   const openGraph = useCallback((data: unknown, fromServer: boolean) => {
-    const result = validateGraph(data);
+    const result = graphIssues(data, 5);
     if (!result.valid) {
       setLoad({
         status: 'error',
-        message: (tr) => tr.load.invalid(result.errors.slice(0, 5).join('\n')),
+        // os problemas vêm com código: o texto sai no idioma atual da interface
+        message: (tr, lang) =>
+          tr.load.invalid(result.issues.map((issue) => validationText(issue, lang)).join('\n')),
         canPickFile: true,
       });
       return;
@@ -226,7 +230,7 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
       >
         <Logo size={36} />
         <h1 className="screen-title">Rastro</h1>
-        <p className="screen-message">{load.message(t)}</p>
+        <p className="screen-message">{load.message(t, lang)}</p>
         {load.canPickFile && (
           <label className="button">
             {t.load.openJson}
