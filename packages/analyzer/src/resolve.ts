@@ -270,6 +270,8 @@ const NODE_MODULES_SEGMENT = /\/node_modules(\/|$)/;
  */
 export class ModuleResolver {
   private readonly declaredByDir = new Map<string, DeclaredPackage>();
+  /** Arquivo → pacote do qual ele é o ponto de entrada (ver `packageEntryName`). */
+  private readonly entryNames = new Map<string, string | undefined>();
   private readonly base: DirConfig;
   /** Pasta (absoluta, com `/`) → configuração que vale para ela. */
   private readonly configByDir = new Map<string, DirConfig>();
@@ -465,10 +467,98 @@ export class ModuleResolver {
       }
       return { kind: 'unresolved', reason: 'module-not-found' };
     }
+    const alias = this.resolvePathAlias(specifier, config.options);
+    if (alias === 'asset-missing') {
+      // alias do projeto (ex.: `@/gerado/x` de código gerado que não existe): não é um pacote
+      const name = packageNameOf(specifier);
+      if (this.isDeclared(name, fromAbsolute))
+        return { kind: 'package', name, builtin: false, declared: true };
+      return { kind: 'unresolved', reason: 'module-not-found' };
+    }
+    if (alias) return alias;
     const name = packageNameOf(specifier);
     if (this.isDeclared(name, fromAbsolute))
       return { kind: 'package', name, builtin: false, declared: true };
     return { kind: 'unresolved', reason: 'undeclared-package' };
+  }
+
+  /**
+   * `paths` do tsconfig para o que o compilador não resolve sozinho: arquivos que não são código
+   * (`@/styles/globals.css` → `styles/globals.css`, como já acontece com `./x.css`). Um alias
+   * que casa mas cujo destino não existe devolve `asset-missing`: é um módulo do projeto que
+   * falta, não um pacote npm não declarado. O padrão `*` sozinho (que casa com qualquer pacote)
+   * não conta. Destinos fora da raiz ou em node_modules não viram arquivos do projeto.
+   */
+  private resolvePathAlias(
+    specifier: string,
+    options: ts.CompilerOptions,
+  ): Extract<ResolvedTarget, { kind: 'asset' }> | 'asset-missing' | undefined {
+    const paths = options.paths;
+    const base = (options as { pathsBasePath?: string }).pathsBasePath ?? options.baseUrl;
+    if (!paths || !base) return undefined;
+    // como o compilador: o padrão de prefixo mais longo vence
+    const matches: Array<{ prefixLength: number; captured: string; targets: string[] }> = [];
+    for (const [pattern, targets] of Object.entries(paths)) {
+      const star = pattern.indexOf('*');
+      if (star === -1) {
+        if (pattern === specifier) matches.push({ prefixLength: Infinity, captured: '', targets });
+        continue;
+      }
+      const prefix = pattern.slice(0, star);
+      const suffix = pattern.slice(star + 1);
+      if (!prefix && !suffix) continue;
+      if (
+        specifier.length >= prefix.length + suffix.length &&
+        specifier.startsWith(prefix) &&
+        specifier.endsWith(suffix)
+      )
+        matches.push({
+          prefixLength: prefix.length,
+          captured: specifier.slice(prefix.length, specifier.length - suffix.length),
+          targets,
+        });
+    }
+    if (!matches.length) return undefined;
+    matches.sort((a, b) => b.prefixLength - a.prefixLength);
+    for (const { captured, targets } of matches) {
+      for (const target of targets) {
+        const candidate = toPosix(path.resolve(base, target.replace('*', captured)));
+        if (
+          candidate.startsWith(`${this.root}/`) &&
+          !NODE_MODULES_SEGMENT.test(candidate.slice(this.root.length)) &&
+          isRegularFile(candidate)
+        )
+          return { kind: 'asset', absolute: candidate };
+      }
+    }
+    return 'asset-missing';
+  }
+
+  /**
+   * Nome do pacote cujo ponto de entrada (`main`, `exports["."]` ou `index.js` do package.json
+   * mais próximo) é exatamente este arquivo. No repositório do próprio framework, os exemplos
+   * usam `require('../..')` em vez de `require('express')`: é o mesmo módulo, comprovado pelo
+   * package.json. Qualquer outro arquivo do pacote (ex.: `lib/express.js`) não conta.
+   */
+  packageEntryName(absoluteFile: string): string | undefined {
+    if (this.entryNames.has(absoluteFile)) return this.entryNames.get(absoluteFile);
+    let found: string | undefined;
+    for (let dir = path.posix.dirname(absoluteFile); ; dir = path.posix.dirname(dir)) {
+      if (dir !== this.root && !dir.startsWith(`${this.root}/`)) break;
+      const manifest = readPackageManifest(dir);
+      if (manifest?.name) {
+        if (
+          packageEntries(manifest).some((entry) =>
+            sameFile(path.posix.join(dir, entry), absoluteFile),
+          )
+        )
+          found = manifest.name;
+        break;
+      }
+      if (dir === this.root || path.posix.dirname(dir) === dir) break;
+    }
+    this.entryNames.set(absoluteFile, found);
+    return found;
   }
 
   /** O pacote está declarado no package.json mais próximo do arquivo (ou em algum acima, até a raiz)? */
@@ -500,6 +590,64 @@ export class ModuleResolver {
       if (posix === this.root || path.dirname(dir) === dir) return undefined;
     }
   }
+}
+
+/** Arquivo comum (não segue links simbólicos). */
+function isRegularFile(file: string): boolean {
+  try {
+    return fs.lstatSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+interface PackageManifest {
+  name?: string;
+  main?: string;
+  exports?: unknown;
+}
+
+/** package.json de uma pasta (apenas leitura do JSON; links simbólicos são ignorados). */
+function readPackageManifest(dir: string): PackageManifest | undefined {
+  const file = path.join(dir, 'package.json');
+  try {
+    if (!fs.lstatSync(file).isFile()) return undefined;
+    const pkg = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+    return {
+      ...(typeof pkg.name === 'string' && pkg.name ? { name: pkg.name } : {}),
+      ...(typeof pkg.main === 'string' ? { main: pkg.main } : {}),
+      exports: pkg.exports,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pontos de entrada declarados: `exports["."]` (texto ou condições), `main`, senão `index.js`. */
+function packageEntries(manifest: PackageManifest): string[] {
+  const entries: string[] = [];
+  const collect = (value: unknown, depth: number) => {
+    if (typeof value === 'string') entries.push(value);
+    else if (value && typeof value === 'object' && !Array.isArray(value) && depth < 4)
+      for (const [key, inner] of Object.entries(value))
+        if (!key.startsWith('.') && key !== 'types') collect(inner, depth + 1);
+  };
+  const exp = manifest.exports;
+  if (typeof exp === 'string') entries.push(exp);
+  else if (exp && typeof exp === 'object' && !Array.isArray(exp)) {
+    const record = exp as Record<string, unknown>;
+    // `{ ".": ... }` (subcaminhos) ou só condições (`{ "require": ..., "import": ... }`)
+    if ('.' in record) collect(record['.'], 0);
+    else collect(record, 0);
+  }
+  entries.push(manifest.main ?? 'index.js');
+  return entries;
+}
+
+/** O ponto de entrada (com as extensões que o Node completa) é este arquivo? */
+function sameFile(entry: string, absoluteFile: string): boolean {
+  const normalized = path.posix.normalize(entry);
+  return [normalized, `${normalized}.js`, `${normalized}/index.js`].includes(absoluteFile);
 }
 
 interface DeclaredPackage {

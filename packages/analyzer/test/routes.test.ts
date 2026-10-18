@@ -248,6 +248,21 @@ describe('NestJS (nest-api)', () => {
       mountedAt: ['/api'],
     });
   });
+
+  it('o export de uma classe com decorator aponta para a linha do export', () => {
+    const exported = edge(
+      g,
+      'exports',
+      'file:src/app.module.ts',
+      'class:src/app.module.ts#AppModule',
+    );
+    expect(exported?.evidence[0]).toMatchObject({
+      line: 7,
+      snippet: 'export class AppModule {}',
+    });
+    // a classe continua começando no decorator (mudar o decorator é mudar a classe)
+    expect(node(g, 'class:src/app.module.ts#AppModule')?.location?.startLine).toBe(6);
+  });
 });
 
 describe('Next.js (next-app)', () => {
@@ -766,5 +781,102 @@ describe('regra da casa: nenhuma rota inventada', () => {
     const b = await analyzeProject(fixture('express-mounted'));
     const strip = (g: RastroGraph) => JSON.stringify({ nodes: g.nodes, edges: g.edges });
     expect(strip(a)).toBe(strip(b));
+  });
+});
+
+describe('repositório do próprio framework (express-self, fastify-self)', () => {
+  let express: RastroGraph;
+  let fastify: RastroGraph;
+  beforeAll(async () => {
+    expectNoNodeModules('express-self');
+    expectNoNodeModules('fastify-self');
+    express = await analyzeProject(fixture('express-self'));
+    fastify = await analyzeProject(fixture('fastify-self'));
+  });
+
+  it('são grafos válidos', () => {
+    expect(validateGraph(express)).toEqual({ valid: true, errors: [] });
+    expect(validateGraph(fastify)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("require('../..') é o Express quando o arquivo é o ponto de entrada do package.json", () => {
+    // `var app = module.exports = express()`: o valor de app é o de express()
+    expect(node(express, 'route:examples/hello/index.js#app GET /')?.meta).toMatchObject({
+      framework: 'express',
+      fullPath: '/',
+    });
+    // montagem entre arquivos com require('../../') e app.use('/api', require('./api'))
+    expect(node(express, 'route:examples/multi/api.js#api GET /users')?.meta).toMatchObject({
+      fullPath: '/api/users',
+      mountedAt: ['/api'],
+    });
+    expect(
+      handler(
+        express,
+        'route:examples/multi/api.js#api GET /users',
+        'fn:examples/multi/api.js#listUsers',
+      ),
+    ).toEqual(ROUTE_HANDLER);
+  });
+
+  it('outro arquivo do pacote (lib/express.js) não comprova o framework', () => {
+    expect(routeIds(express).some((id) => id.startsWith('route:examples/internal/'))).toBe(false);
+  });
+
+  it('rotas encadeadas em várias linhas apontam para a linha de cada método', () => {
+    const get = node(express, 'route:examples/hello/index.js#app GET /book');
+    const post = node(express, 'route:examples/hello/index.js#app POST /book');
+    expect(get?.location?.startLine).toBe(13);
+    expect(post?.location?.startLine).toBe(16);
+    const contains = edge(express, 'contains', 'file:examples/hello/index.js', post!.id);
+    expect(contains?.evidence[0]).toMatchObject({
+      line: 16,
+      snippet: '.post(function (req, res) {',
+    });
+  });
+
+  it("require('../fastify') chega ao fastify.d.ts, mas o ponto de entrada é o fastify.js", () => {
+    expect(node(fastify, 'route:examples/app.js#fastify GET /hello')?.meta?.fullPath).toBe(
+      '/hello',
+    );
+    expect(node(fastify, 'route:examples/app.js#instance GET /ping')?.meta).toMatchObject({
+      fullPath: '/v1/ping',
+      mountedAt: ['/v1'],
+    });
+  });
+
+  it('handler declarado dentro de outra função não vira "sem declaração"', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"fastify":"5"}}',
+      'server.js': [
+        "const app = require('fastify')();",
+        'function setup() {',
+        '  function handler(req, reply) {}',
+        "  app.get('/local', handler);",
+        '}',
+        'setup();',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(routeIds(g)).toEqual(['route:server.js#app GET /local']);
+    expect(g.nodes.some((n) => n.id === 'unresolved:server.js#call:handler')).toBe(false);
+  });
+
+  it('receptor que não é um nome vira um texto curto (sem colar palavras)', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"hono":"4"}}',
+      'app.ts': [
+        "import { Hono } from 'hono';",
+        'export default new Hono()',
+        "  .get('/a', (c) => c.text('a'))",
+        "  .post('/b', (c) => c.text('b'));",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(routeIds(g).sort()).toEqual([
+      'route:app.ts#new Hono(…) GET /a',
+      'route:app.ts#new Hono(…) POST /b',
+    ]);
+    expect(node(g, 'route:app.ts#new Hono(…) POST /b')?.location?.startLine).toBe(4);
   });
 });

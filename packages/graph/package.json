@@ -17,7 +17,7 @@
   ],
   "sideEffects": false,
   "dependencies": {
-    "@rastro/core": "0.1.0"
+    "@rastro/core": "0.2.0"
   },
   "repository": {
     "type": "git",

@@ -371,7 +371,7 @@ const pt = {
       'O caminho do módulo é calculado em tempo de execução, então não pode ser resolvido estaticamente.',
     'unknown-base-class': 'A classe base não pôde ser localizada.',
     'not-analyzed':
-      'O alvo está em um arquivo do projeto que ficou fora da análise (excluído, ignorado pelo .gitignore ou grande demais).',
+      'O alvo está em um arquivo do projeto que ficou fora da análise (excluído, ignorado pelo .gitignore, grande demais ou uma declaração de tipos .d.ts, que nunca é analisada).',
   } satisfies Record<UnresolvedReason, string>,
   discovery: {
     'static-ast': 'lido da árvore sintática',
@@ -747,7 +747,7 @@ const en: Messages = {
       'The module path is computed at runtime, so it cannot be resolved statically.',
     'unknown-base-class': 'The base class could not be located.',
     'not-analyzed':
-      'The target lives in a project file that was left out of the analysis (excluded, ignored by .gitignore or too large).',
+      'The target lives in a project file that was left out of the analysis (excluded, ignored by .gitignore, too large, or a .d.ts type declaration, which is never analyzed).',
   },
   discovery: {
     'static-ast': 'read from the syntax tree',

@@ -563,10 +563,21 @@ function projectName(root: string): string {
   return path.basename(root);
 }
 
+/**
+ * Onde um trecho começa no texto. Uma chamada de método (`a.b(...)`) começa no nome do método:
+ * numa cadeia em várias linhas (`Test.createTestingModule({...})` ⏎ `.compile()`), o início da
+ * expressão inteira fica linhas acima, numa linha que não contém a chamada.
+ */
+function startOf(node: ts.Node): ts.Node {
+  return ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+    ? node.expression.name
+    : node;
+}
+
 export function rangeOf(file: string, node: Node | ts.Node): SourceRange {
   const compiler = node instanceof Node ? node.compilerNode : node;
   const sf = compiler.getSourceFile();
-  const start = sf.getLineAndCharacterOfPosition(compiler.getStart(sf));
+  const start = sf.getLineAndCharacterOfPosition(startOf(compiler).getStart(sf));
   const end = sf.getLineAndCharacterOfPosition(compiler.getEnd());
   return {
     file,
@@ -575,6 +586,43 @@ export function rangeOf(file: string, node: Node | ts.Node): SourceRange {
     endLine: end.line + 1,
     endColumn: end.character + 1,
   };
+}
+
+const MAX_REFERENCE = 100;
+const MAX_LITERAL_IN_REFERENCE = 20;
+
+/**
+ * Texto curto de uma expressão chamada, para nomear referências não resolvidas:
+ * `app.get(…).post`, `new Hono(…).basePath`, `handlers[…].run`. Argumentos viram `(…)` e
+ * trechos que não são nomes viram `…`: o texto original sem espaços chegava a centenas de
+ * caracteres e colava palavras (`x instanceof Erro` virava `xinstanceofErro`). Numa cadeia
+ * longa demais fica o final, que é o nome chamado.
+ */
+export function referenceText(expr: ts.Node): string {
+  const text = referenceParts(expr, 0);
+  return text.length > MAX_REFERENCE ? `…${text.slice(text.length - MAX_REFERENCE + 1)}` : text;
+}
+
+function referenceParts(n: ts.Node, depth: number): string {
+  if (depth > 40) return '…';
+  const inner = (e: ts.Node) => referenceParts(e, depth + 1);
+  if (ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) return n.text;
+  if (n.kind === ts.SyntaxKind.ThisKeyword) return 'this';
+  if (n.kind === ts.SyntaxKind.SuperKeyword) return 'super';
+  if (ts.isMetaProperty(n)) return `${ts.tokenToString(n.keywordToken)}.${n.name.text}`;
+  if (ts.isPropertyAccessExpression(n))
+    return `${inner(n.expression)}${n.questionDotToken ? '?.' : '.'}${n.name.text}`;
+  if (ts.isElementAccessExpression(n))
+    return `${inner(n.expression)}${n.questionDotToken ? '?.' : ''}[…]`;
+  if (ts.isCallExpression(n)) return `${inner(n.expression)}${n.questionDotToken ? '?.' : ''}(…)`;
+  if (ts.isNewExpression(n)) return `new ${inner(n.expression)}(…)`;
+  if (ts.isNonNullExpression(n)) return `${inner(n.expression)}!`;
+  if (ts.isParenthesizedExpression(n)) return '(…)';
+  if (ts.isStringLiteralLike(n) || ts.isNumericLiteral(n)) {
+    const text = n.getText();
+    return text.length <= MAX_LITERAL_IN_REFERENCE && !/[\r\n]/.test(text) ? text : '…';
+  }
+  return '…';
 }
 
 export function evidenceAt(ctx: Ctx, file: string, node: Node | ts.Node): Evidence {
@@ -1083,11 +1131,8 @@ function extractImports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       }
     }
     const bare = !imp.specifier.startsWith('.') && !path.isAbsolute(imp.specifier);
-    if (
-      (target.kind === 'file' || target.kind === 'asset') &&
-      bare &&
-      !ctx.filesByAbs.has(target.absolute)
-    ) {
+    // ('asset' vindo de especificador sem ponto é um alias de `paths`: `@/styles/x.css`)
+    if (target.kind === 'file' && bare && !ctx.filesByAbs.has(target.absolute)) {
       // pacote do workspace sem código-fonte correspondente: tratamos como pacote
       const name = packageNameOf(imp.specifier);
       target = { kind: 'package', name, builtin: false, declared: true };
@@ -1234,7 +1279,7 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       const evidence =
         (!sameFile && exportStatementEvidence(ctx, file, sf, name)) ||
         (decl && toPosix(decl.getSourceFile().fileName) === file.absolute
-          ? evidenceAt(ctx, file.relative, decl)
+          ? evidenceAt(ctx, file.relative, exportKeywordOf(decl) ?? decl)
           : undefined);
       ctx.builder.addEdge({
         kind: 'exports',
@@ -1247,6 +1292,16 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       });
     }
   }
+}
+
+/**
+ * A palavra `export` de uma declaração. Numa classe com decorators (`@Module({...})` em várias
+ * linhas antes de `export class AppModule`), a declaração começa no decorator, numa linha que
+ * não contém o export.
+ */
+function exportKeywordOf(decl: ts.Node): ts.Node | undefined {
+  if (!ts.canHaveModifiers(decl)) return undefined;
+  return ts.getModifiers(decl)?.find((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
 
 /** Evidência do `export ... from` que reexporta um nome. */
@@ -1381,6 +1436,12 @@ export function resolveSymbolTargets(
       );
       continue;
     }
+    const reexported = commonJsReexport(ctx, decl, depth);
+    if (reexported) {
+      // `module.exports = require('./lib/app')`: o valor exportado é o do módulo exigido
+      targets.push(...reexported);
+      continue;
+    }
     if (isLocalFunction(decl)) {
       targets.push({ kind: 'local' });
       continue;
@@ -1424,6 +1485,51 @@ function isInsideProject(ctx: Ctx, absolute: string): boolean {
 /** `const x = ...` (um `let`/`var` pode ser reatribuído, então o alvo não é garantido). */
 function isConstDeclaration(decl: ts.VariableDeclaration): boolean {
   return (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0;
+}
+
+/**
+ * Reexportação CommonJS: `module.exports = require('./lib/app')` (padrão do index.js de muitos
+ * pacotes) e `exports.static = require('serve-static')`. O valor é o `module.exports` do módulo
+ * exigido; um pacote sem tipos instalados é externo. Só com especificador literal.
+ */
+function commonJsReexport(ctx: Ctx, decl: ts.Node, depth: number): SymbolTarget[] | undefined {
+  let assignment: ts.BinaryExpression | undefined;
+  if (ts.isBinaryExpression(decl) && isModuleExports(decl.left)) assignment = decl;
+  else if (
+    ts.isPropertyAccessExpression(decl) &&
+    ts.isBinaryExpression(decl.parent) &&
+    decl.parent.left === decl &&
+    (isModuleExports(decl.expression) ||
+      (ts.isIdentifier(decl.expression) && decl.expression.text === 'exports'))
+  )
+    assignment = decl.parent;
+  if (!assignment || assignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return undefined;
+  const right = unwrapExpression(assignment.right);
+  if (
+    !ts.isCallExpression(right) ||
+    !ts.isIdentifier(right.expression) ||
+    right.expression.text !== 'require' ||
+    right.arguments.length !== 1 ||
+    !ts.isStringLiteralLike(right.arguments[0]!)
+  )
+    return undefined;
+  const specifier = right.arguments[0]!;
+  const exported = ctx.checker
+    .getSymbolAtLocation(specifier)
+    ?.exports?.get(ts.InternalSymbolName.ExportEquals);
+  if (exported) return resolveSymbolTargets(ctx, exported, depth + 1);
+  const target = ctx.resolver.resolve(specifier.text, toPosix(decl.getSourceFile().fileName));
+  return target.kind === 'package' ? [{ kind: 'external' }] : undefined;
+}
+
+/** `module.exports` */
+function isModuleExports(node: ts.Node): boolean {
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'module' &&
+    node.name.text === 'exports'
+  );
 }
 
 /** Propriedade de um objeto literal atribuído a `const` ou a `module.exports`. */
@@ -1624,9 +1730,7 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       nameNode = callee.getNameNode();
       const receiver = callee.getExpression();
       receiverIsThis = receiver.getKind() === SyntaxKind.ThisKeyword;
-      reference = receiverIsThis
-        ? `this.${callee.getName()}`
-        : callee.getText().replace(/\s+/g, '');
+      reference = receiverIsThis ? `this.${callee.getName()}` : referenceText(callee.compilerNode);
     } else if (Node.isElementAccessExpression(callee)) {
       ctx.counters.computedCalls++;
       continue;
