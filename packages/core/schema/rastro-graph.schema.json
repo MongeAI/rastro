@@ -394,6 +394,13 @@
               "description": "Chamada não resolvida obj.x() em TypeScript: arquivo que declara o tipo de obj, sem o membro x.",
               "type": "string"
             },
+            "aliasTargets": {
+              "description": "Import não resolvido por alias de paths ou baseUrl: caminhos do projeto (sem extensão) para onde levaria.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exportsIncomplete": {
               "description": "Arquivo cuja lista exportNames pode estar incompleta (export * de módulo não visto, exports dinâmicos em CommonJS).",
               "type": "boolean"

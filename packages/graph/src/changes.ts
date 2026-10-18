@@ -210,6 +210,11 @@ export function specifierCandidates(importer: string, specifier: string): string
   const slash = importer.lastIndexOf('/');
   const base = joinPath(slash >= 0 ? importer.slice(0, slash) : '', specifier);
   if (base === undefined) return [];
+  return pathCandidates(base);
+}
+
+/** Arquivos que um caminho sem resolução (`src/x`, `src/x.js`) pode ser, como no TypeScript. */
+function pathCandidates(base: string): string[] {
   const ext = /\.[cm]?jsx?$/.exec(base)?.[0];
   const stem = ext ? base.slice(0, -ext.length) : base;
   return [
@@ -265,13 +270,19 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
   // imports de arquivos removidos ou renomeados (o especificador não resolve mais)
   if (gone.size)
     for (const node of index.nodes.values()) {
-      if (node.kind !== 'unresolved' || node.meta?.reason !== 'module-not-found') continue;
+      if (node.kind !== 'unresolved') continue;
+      // especificador relativo, ou alias de `paths`/`baseUrl` (o analisador guarda os destinos)
+      const aliasTargets = node.meta?.aliasTargets ?? [];
+      if (node.meta?.reason !== 'module-not-found' && !aliasTargets.length) continue;
       for (const edge of index.incoming(node.id, ['imports'])) {
         const importer = index.node(edge.source);
         const specifier = edge.meta?.specifier ?? node.meta?.reference ?? node.name;
         if (!importer || importer.kind !== 'file') continue;
         const importerPath = importer.qualifiedName ?? importer.name;
-        const target = specifierCandidates(importerPath, specifier).find((c) => gone.has(c));
+        const target = [
+          ...specifierCandidates(importerPath, specifier),
+          ...aliasTargets.flatMap(pathCandidates),
+        ].find((c) => gone.has(c));
         if (!target) continue;
         const why = gone.get(target)!;
         found.push({

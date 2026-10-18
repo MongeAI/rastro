@@ -358,7 +358,15 @@ export type ResolvedTarget =
   | { kind: 'file'; absolute: string }
   | { kind: 'asset'; absolute: string }
   | { kind: 'package'; name: string; builtin: boolean; declared: boolean; outsideRoot?: boolean }
-  | { kind: 'unresolved'; reason: 'module-not-found' | 'undeclared-package' };
+  | {
+      kind: 'unresolved';
+      reason: 'module-not-found' | 'undeclared-package';
+      /**
+       * Caminhos do projeto (relativos à raiz, sem a extensão) para onde um alias de `paths`
+       * ou o `baseUrl` levaria o especificador, sem arquivo lá.
+       */
+      aliasTargets?: string[];
+    };
 
 interface ResolutionConfig {
   options: ts.CompilerOptions;
@@ -583,13 +591,43 @@ export class ModuleResolver {
       const name = packageNameOf(specifier);
       if (this.isDeclared(name, fromAbsolute))
         return { kind: 'package', name, builtin: false, declared: true };
-      return { kind: 'unresolved', reason: 'module-not-found' };
+      return this.withAliasTargets(
+        { kind: 'unresolved', reason: 'module-not-found' },
+        this.pathAliasTargets(specifier, config.options),
+      );
     }
     if (alias) return alias;
     const name = packageNameOf(specifier);
     if (this.isDeclared(name, fromAbsolute))
       return { kind: 'package', name, builtin: false, declared: true };
-    return { kind: 'unresolved', reason: 'undeclared-package' };
+    // com `baseUrl`, o especificador também é procurado a partir dele (`src/lib/x`)
+    const baseUrl = config.options.baseUrl;
+    return this.withAliasTargets(
+      { kind: 'unresolved', reason: 'undeclared-package' },
+      baseUrl ? [toPosix(path.resolve(baseUrl, specifier))] : [],
+    );
+  }
+
+  /** Junta ao não resolvido os destinos (dentro da raiz, fora de node_modules) do alias. */
+  private withAliasTargets(
+    target: Extract<ResolvedTarget, { kind: 'unresolved' }>,
+    absolutes: string[],
+  ): ResolvedTarget {
+    const inside = absolutes
+      .filter(
+        (a) =>
+          a.startsWith(`${this.root}/`) && !NODE_MODULES_SEGMENT.test(a.slice(this.root.length)),
+      )
+      .map((a) => a.slice(this.root.length + 1));
+    return inside.length ? { ...target, aliasTargets: [...new Set(inside)] } : target;
+  }
+
+  /** Destinos (absolutos) do padrão de `paths` que vale para o especificador. */
+  private pathAliasTargets(specifier: string, options: ts.CompilerOptions): string[] {
+    const base = (options as { pathsBasePath?: string }).pathsBasePath ?? options.baseUrl;
+    const best = base ? bestPathPattern(specifier, options.paths) : undefined;
+    if (!base || !best) return [];
+    return best.targets.map((t) => toPosix(path.resolve(base, t.replace('*', best.captured))));
   }
 
   /**

@@ -473,6 +473,35 @@ describe('possivelmente quebrado pela mudança', () => {
     ]);
   });
 
+  it('arquivo removido importado por um alias de paths (ou pelo baseUrl)', async () => {
+    setLang('en');
+    const root = gitProject(
+      {
+        'tsconfig.json': '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}',
+        'src/lib/fmt.ts': 'export function fmt(s: string) {\n  return s;\n}\n',
+        'src/lib/util/index.ts': 'export const u = 1;\n',
+        'src/page.ts':
+          "import { fmt } from '@/lib/fmt';\nimport { u } from 'src/lib/util';\nimport { nunca } from '@/nunca';\nexport const y = fmt('a') + u + nunca;\n",
+      },
+      ({ git }) => {
+        git('rm', '-q', 'src/lib/fmt.ts');
+        git('rm', '-q', 'src/lib/util/index.ts');
+      },
+    );
+    expect(await brokenOf(root)).toEqual([
+      ['import', 'page.ts', '@/lib/fmt', 'src/lib/fmt.ts', 'file-deleted', 'src/page.ts:1'],
+      [
+        'import',
+        'page.ts',
+        'src/lib/util',
+        'src/lib/util/index.ts',
+        'file-deleted',
+        'src/page.ts:2',
+      ],
+      ['call', 'page.ts', 'fmt', 'src/lib/fmt.ts', 'file-deleted', 'src/page.ts:4'],
+    ]);
+  });
+
   it('nada quebrado: nenhuma seção nova', async () => {
     setLang('en');
     const report = buildImpactReport(await graphWithChanges(changedProject()));

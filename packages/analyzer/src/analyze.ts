@@ -1391,6 +1391,9 @@ function extractImports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
         target.reason,
         imp.node,
       );
+      const unresolved = ctx.builder.getNode(targetId);
+      if (unresolved && target.aliasTargets)
+        unresolved.meta = { ...unresolved.meta, aliasTargets: target.aliasTargets };
       ctx.builder.addEdge({
         kind: 'imports',
         source: fileId,

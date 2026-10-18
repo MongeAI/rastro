@@ -138,6 +138,12 @@ export interface NodeMeta {
   /** Para nós não resolvidos: o texto original da referência. */
   reference?: string;
   /**
+   * Para imports não resolvidos por um alias de `paths` (`@/lib/x`) ou pelo `baseUrl`: os
+   * caminhos do projeto (relativos à raiz, sem extensão) para onde o especificador levaria.
+   * Nenhum arquivo existe lá (por isso não resolveu).
+   */
+  aliasTargets?: string[];
+  /**
    * Para chamadas não resolvidas por interface ou método abstrato: ids das implementações
    * _possíveis_ no projeto (métodos de classes que declaram `implements` da interface, ou que
    * estendem a classe abstrata). Nunca são relações resolvidas: o alvo real só existe em execução.
