@@ -11,6 +11,7 @@ import {
 import {
   computeChangeImpact,
   GraphIndex,
+  routesAndTests,
   type BrokenReference,
   type ChangeImpact,
 } from '@rastro/graph';
@@ -126,7 +127,12 @@ function item(n: GraphNode): ImpactItem {
 export function changesWithImpact(
   index: GraphIndex,
   changes: ChangeSet,
-): { impact: ChangeImpact; changed: GraphNode[] } {
+): {
+  impact: ChangeImpact;
+  changed: GraphNode[];
+  /** Rotas e testes que só chegam ao que mudou por uma referência possivelmente quebrada. */
+  viaBroken: { routes: GraphNode[]; tests: GraphNode[] };
+} {
   const impact = computeChangeImpact(index, changes);
   const impactedIds = new Set(impact.impacted.map((i) => i.node.id));
   const fileLevel = impact.changedFiles.filter(
@@ -134,7 +140,37 @@ export function changesWithImpact(
       !impactedIds.has(f.id) &&
       !impact.changedEntities.some((e) => index.fileOf(e.id)?.id === f.id),
   );
-  return { impact, changed: [...impact.changedEntities, ...fileLevel] };
+  return {
+    impact,
+    changed: [...impact.changedEntities, ...fileLevel],
+    viaBroken: reachedViaBroken(index, impact),
+  };
+}
+
+/**
+ * Quem faz uma referência possivelmente quebrada (import de arquivo removido, nome que sumiu)
+ * deixou de ter a relação comprovada com o que mudou, mas é justamente o que pode falhar: os
+ * testes e as rotas que dependem dele (por relações comprovadas) também devem rodar. Um
+ * arquivo com import quebrado conta por inteiro (o módulo nem carrega).
+ */
+function reachedViaBroken(
+  index: GraphIndex,
+  impact: ChangeImpact,
+): { routes: GraphNode[]; tests: GraphNode[] } {
+  if (!impact.broken.length) return { routes: [], tests: [] };
+  const seeds = new Map<string, GraphNode>();
+  for (const { from } of impact.broken) {
+    seeds.set(from.id, from);
+    if (from.kind === 'file') for (const d of index.descendants(from.id)) seeds.set(d.id, d);
+  }
+  const reached = index.impactOfAll(seeds.keys());
+  const found = routesAndTests(index, [...seeds.values(), ...reached.map((i) => i.node)]);
+  const routes = new Set(impact.routes.map((n) => n.id));
+  const tests = new Set(impact.tests.map((n) => n.id));
+  return {
+    routes: found.routes.filter((n) => !routes.has(n.id)),
+    tests: found.tests.filter((n) => !tests.has(n.id)),
+  };
 }
 
 /** Monta o relatório a partir de um grafo com mudanças do git (`graph.changes`). */
@@ -142,11 +178,15 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
   const changes = graph.changes;
   if (!changes) throw new Error('graph without changes');
   const index = new GraphIndex(graph);
-  const { impact, changed: changedNodes } = changesWithImpact(index, changes);
+  const { impact, changed: changedNodes, viaBroken } = changesWithImpact(index, changes);
+  const routes = [...impact.routes, ...viaBroken.routes];
   const changed = changedNodes
     .map(item)
     .sort((a, b) => compareStrings(a.file ?? '', b.file ?? '') || (a.line ?? 0) - (b.line ?? 0));
-  const tests = impact.tests.map((f) => f.qualifiedName ?? f.name).sort(compareStrings);
+  // testes que dependem de algo possivelmente quebrado também rodam (podem falhar por isso)
+  const tests = [...impact.tests, ...viaBroken.tests]
+    .map((f) => f.qualifiedName ?? f.name)
+    .sort(compareStrings);
   const rules = graph.rules ? buildCheckReport(graph, index) : undefined;
   const introduced = rules?.summary.introduced;
   return {
@@ -159,7 +199,7 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
       // como na aba Mudanças: entidades (funções, classes, métodos, rotas) alteradas
       changed: impact.changedEntities.length,
       impacted: impact.impacted.length,
-      routes: impact.routes.length,
+      routes: routes.length,
       tests: tests.length,
       outsideGraph: impact.outsideGraph.length,
       broken: impact.broken.length,
@@ -177,7 +217,7 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
         })(),
       },
     })),
-    routes: impact.routes.map(item),
+    routes: routes.map(item),
     tests,
     outsideGraph: impact.outsideGraph.map((f) => ({ file: f.file, status: f.status })),
     broken: impact.broken.map((b) => ({

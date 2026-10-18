@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { AnalysisSession, type DiscoverOptions } from '@rastro/analyzer';
 import type { RastroGraph } from '@rastro/core';
@@ -144,6 +146,11 @@ export interface Snapshot {
   sequence: number;
   /** Insights calculados na primeira vez que alguém pede (e guardados até a próxima análise). */
   insights(): Insights;
+  /**
+   * Sem observar arquivos (`--no-watch`): os arquivos analisados que mudaram no disco depois da
+   * análise, entre os pedidos. Com observação, sempre vazio (o grafo é refeito antes).
+   */
+  changedSince(files: Iterable<string>): string[];
 }
 
 export interface LiveProjectOptions {
@@ -289,7 +296,7 @@ export class LiveProject {
         this.running = undefined;
         if (this.closed) return undefined;
         const wallMs = Math.round(performance.now() - started);
-        this.snapshot = makeSnapshot(graph, ++this.sequence, wallMs);
+        this.snapshot = makeSnapshot(graph, ++this.sequence, wallMs, !this.watching);
         // pastas novas ou removidas, .gitignore alterado: observa o conjunto atual (depois da
         // resposta: percorrer as pastas de um projeto grande leva tempo na thread principal)
         setImmediate(() => {
@@ -323,20 +330,43 @@ export class LiveProject {
   }
 }
 
-function makeSnapshot(graph: RastroGraph, sequence: number, wallMs: number): Snapshot {
+/** Data e tamanho de um arquivo (`undefined` se não existe mais). */
+function stampOf(file: string): string | undefined {
+  const stat = fs.statSync(file, { throwIfNoEntry: false });
+  return stat ? `${stat.mtimeMs}:${stat.size}` : undefined;
+}
+
+function makeSnapshot(
+  graph: RastroGraph,
+  sequence: number,
+  wallMs: number,
+  stamp: boolean,
+): Snapshot {
   const index = new GraphIndex(graph);
   let insights: Insights | undefined;
+  const analyzedFiles = new Set(
+    graph.nodes
+      .filter((n) => n.kind === 'file' && n.meta?.analyzed !== false)
+      .map((n) => n.qualifiedName ?? n.name),
+  );
+  // sem observação, o grafo nunca é refeito: guarda como cada arquivo estava, para as
+  // ferramentas que leem o disco agora (código, git) avisarem quando ele não bate mais
+  const root = graph.project.root;
+  const stamps = new Map<string, string | undefined>();
+  if (stamp) for (const file of analyzedFiles) stamps.set(file, stampOf(path.join(root, file)));
   return {
     graph,
     index,
-    analyzedFiles: new Set(
-      graph.nodes
-        .filter((n) => n.kind === 'file' && n.meta?.analyzed !== false)
-        .map((n) => n.qualifiedName ?? n.name),
-    ),
+    analyzedFiles,
     finishedAt: Date.now(),
     wallMs,
     sequence,
     insights: () => (insights ??= computeInsights(index, 10)),
+    changedSince: (files) =>
+      stamp
+        ? [...new Set(files)].filter(
+            (f) => stamps.has(f) && stamps.get(f) !== stampOf(path.join(root, f)),
+          )
+        : [],
   };
 }

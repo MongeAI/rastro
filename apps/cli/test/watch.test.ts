@@ -63,7 +63,9 @@ describe('pastas observadas', () => {
     expect(isRelevantChange('src/a.ts')).toBe(true);
     expect(isRelevantChange('tsconfig.base.json')).toBe(true);
     expect(isRelevantChange('node_modules/pkg/index.js')).toBe(false);
-    expect(isRelevantChange('src/types.d.ts')).toBe(false);
+    // o compilador lê os .d.ts do projeto (tipos de interfaces chamadas, por exemplo)
+    expect(isRelevantChange('src/types.d.ts')).toBe(true);
+    expect(isRelevantChange('dist/types.d.ts')).toBe(false);
     expect(isRelevantChange('README.md')).toBe(false);
   });
 });

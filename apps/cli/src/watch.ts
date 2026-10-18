@@ -17,12 +17,14 @@ const CONFIG_FILES = new Set([
   'rastro.rules.json',
 ]);
 
-/** O arquivo alterado importa para a análise? (código JS/TS ou configuração, fora de pastas ignoradas) */
+/**
+ * O arquivo alterado importa para a análise? (código JS/TS, `.d.ts` escritos à mão — o
+ * compilador os lê para resolver tipos — ou configuração, fora de pastas ignoradas)
+ */
 export function isRelevantChange(relative: string): boolean {
   const parts = relative.split(/[\\/]/);
   if (parts.some((p) => IGNORED.has(p))) return false;
   const name = parts[parts.length - 1] ?? '';
-  if (/\.d\.[mc]?ts$/.test(name)) return false;
   return !!languageOf(name) || CONFIG_FILES.has(name) || /^tsconfig\..*\.json$/.test(name);
 }
 

@@ -173,6 +173,8 @@ export interface ToolDefinition {
 /** Limite do texto devolvido (clientes guardam em arquivo respostas acima de ~50 mil caracteres). */
 const MAX_OUTPUT = 40_000;
 const MAX_SOURCE_LINES = 120;
+/** Caracteres do trecho de código numa resposta (120 linhas de 400 passariam do limite total). */
+const MAX_SOURCE_CHARS = 16_000;
 /** Linha de código mais longa mostrada (arquivos minificados têm linhas de centenas de KB). */
 const MAX_SOURCE_LINE = 400;
 const TOP = 10;
@@ -664,7 +666,8 @@ function lookup(snapshot: Snapshot, input: string): GraphNode | undefined {
   const query = call ? call[1]! : input;
 
   const p = normalizePath(query, snapshot.graph.project.root);
-  const atLine = /^(.+?):(\d+)(?:-(\d+)|:(\d+))?$/.exec(p);
+  // `s`: um caminho com quebra de linha (escrita como `\n` e já desfeita) também casa
+  const atLine = /^(.+?):(\d+)(?:-(\d+)|:(\d+))?$/s.exec(p);
   if (atLine) {
     const file = fileAt(index, atLine[1]!);
     if (file) {
@@ -1581,6 +1584,12 @@ function sourceSection(snapshot: Snapshot, node: GraphNode, out: Out): void {
     out.push('No source for this kind of entity.');
     return;
   }
+  if (snapshot.changedSince([loc.file]).length) {
+    out.push(
+      `Source not shown: ${tick(loc.file, 300)} changed on disk after the analysis and this server runs with \`--no-watch\`, so its lines no longer match the graph. Read the file directly, or restart the server (without \`--no-watch\`) to re-analyze.`,
+    );
+    return;
+  }
   const result = readSource(snapshot.graph.project.root, loc.file, snapshot.analyzedFiles);
   if (result.status !== 200 || result.body.content === undefined) {
     const why: Record<number, string> = {
@@ -1595,23 +1604,26 @@ function sourceSection(snapshot: Snapshot, node: GraphNode, out: Out): void {
   if (all.length > 1 && all[all.length - 1] === '') all.pop();
   const first = node.kind === 'file' ? 1 : loc.startLine;
   const last = node.kind === 'file' ? all.length : Math.min(loc.endLine, all.length);
-  const shownLast = Math.min(last, first + MAX_SOURCE_LINES - 1);
-  const width = String(shownLast).length;
-  const lines = all
-    .slice(first - 1, shownLast)
-    // caracteres de controle e separadores de linha do arquivo viram escapes; linhas enormes
-    // (código minificado) são cortadas
-    .map(
-      (line, i) =>
-        `${String(first + i).padStart(width)}  ${clip(line.replace(UNSAFE_IN_CODE, escapeChar), MAX_SOURCE_LINE)}`,
-    );
+  const maxLast = Math.min(last, first + MAX_SOURCE_LINES - 1);
+  const width = String(maxLast).length;
+  // caracteres de controle e separadores de linha do arquivo viram escapes; linhas enormes
+  // (código minificado) são cortadas; o trecho para (em linha inteira) no limite de caracteres
+  const lines: string[] = [];
+  let size = 0;
+  for (let n = first; n <= maxLast; n++) {
+    const line = `${String(n).padStart(width)}  ${clip(all[n - 1]!.replace(UNSAFE_IN_CODE, escapeChar), MAX_SOURCE_LINE)}`;
+    if (lines.length && size + line.length + 1 > MAX_SOURCE_CHARS) break;
+    lines.push(line);
+    size += line.length + 1;
+  }
+  const shownLast = first + lines.length - 1;
   // a cerca é mais longa que qualquer sequência de crases do trecho: nada nele a fecha
   let longest = 0;
   for (const l of lines)
     for (const run of l.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
   const fence = '`'.repeat(Math.max(3, longest + 1));
   out.push(
-    `${tick(loc.file, 300)} lines ${first}-${shownLast}${shownLast < last ? ` of ${first}-${last} (truncated to ${MAX_SOURCE_LINES} lines; ask for a narrower entity, e.g. a method)` : ''}:`,
+    `${tick(loc.file, 300)} lines ${first}-${shownLast}${shownLast < last ? ` of ${first}-${last} (truncated to ${shownLast < maxLast ? `${MAX_SOURCE_CHARS} characters` : `${MAX_SOURCE_LINES} lines`}; ask for a narrower entity, e.g. a method, or read the file)` : ''}:`,
   );
   out.push(`${fence}${loc.file.match(/\.([cm]?[jt]sx?)$/)?.[1] ?? ''}`, lines.join('\n'), fence);
 }
@@ -1692,7 +1704,6 @@ function brokenLine(b: BrokenReference): string {
 function impact(args: Args, ctx: ToolContext): string {
   const { index, graph } = ctx.snapshot;
   const page = paged(args, 30, 200);
-  const max = page.limit;
   const format = (args.format as (typeof IMPACT_FORMATS)[number] | undefined) ?? 'full';
   const targets = args.targets as string[] | undefined;
   if (targets && (args.since !== undefined || args.changes !== undefined))
@@ -1710,6 +1721,12 @@ function impact(args: Args, ctx: ToolContext): string {
   let broken: BrokenReference[] = [];
   /** Modo git: as mudanças (para conferir as regras de arquitetura). */
   let gitScope: ChangeSet | undefined;
+  /** Modo git com `--no-watch`: aviso de arquivos alterados depois da análise. */
+  let stale: string | undefined;
+  /** Rotas e testes que só chegam ao que mudou por uma referência possivelmente quebrada. */
+  const viaBroken = new Set<string>();
+  const brokenTag = (n: GraphNode) =>
+    viaBroken.has(n.id) ? ' (depends on a possibly broken reference below)' : '';
   let title: string;
   let summary: string;
   /** Seção "o que mudou" (só aparece no formato completo, depois das rotas e dos testes). */
@@ -1734,7 +1751,7 @@ function impact(args: Args, ctx: ToolContext): string {
     const shown = starts;
     changedSection = () => {
       out.section(`Targets (${shown.length})`);
-      out.list(shown, describe, { limit: max, maxLimit: 200 });
+      out.list(shown, describe, page);
     };
   } else {
     const since = typeof args.since === 'string' ? args.since : undefined;
@@ -1756,11 +1773,15 @@ function impact(args: Args, ctx: ToolContext): string {
     title = `# Impact of ${label}`;
     if (!changes.files.length) return out.push(title, 'No changed files.').toString();
     gitScope = changes;
+    stale = staleNote(ctx, changes);
     const result = changesWithImpact(index, changes);
     starts = result.changed;
     impacted = result.impact.impacted;
-    routes = result.impact.routes;
-    tests = result.impact.tests;
+    // rotas e testes que dependem de uma referência possivelmente quebrada também entram,
+    // marcados (podem falhar justamente por ela)
+    routes = [...result.impact.routes, ...result.viaBroken.routes];
+    tests = [...result.impact.tests, ...result.viaBroken.tests];
+    for (const n of [...result.viaBroken.routes, ...result.viaBroken.tests]) viaBroken.add(n.id);
     broken = result.impact.broken;
     const s = result.impact;
     const byStatus = new Map<string, ChangedFile>(changes.files.map((f) => [f.file, f]));
@@ -1784,7 +1805,7 @@ function impact(args: Args, ctx: ToolContext): string {
       out.list(
         starts,
         (n) => (n.kind === 'file' ? `${tick(nameOf(n))} ${fileLabel(n)}` : describe(n)),
-        { limit: max, maxLimit: 200 },
+        page,
       );
       if (s.outsideGraph.length) {
         out.section(
@@ -1794,7 +1815,7 @@ function impact(args: Args, ctx: ToolContext): string {
           s.outsideGraph,
           (f) =>
             `${tick(f.file, 300)} (${f.status === 'added' ? 'new' : f.status}${f.previous ? ` from ${tick(f.previous, 300)}` : ''})`,
-          { limit: max, maxLimit: 200 },
+          page,
         );
       }
     };
@@ -1807,14 +1828,23 @@ function impact(args: Args, ctx: ToolContext): string {
     if (n.kind === 'file' || n.kind === 'class' || n.kind === 'module')
       for (const d of index.descendants(n.id)) seeds.add(d.id);
   }
-  const possible = [...seeds].flatMap((id) => possibleCallers(index, id));
+  // uma chamada só conta uma vez (ela pode cair em várias das implementações alteradas), e quem
+  // já está entre os alvos não é "afetado" por eles
+  const seen = new Set<string>();
+  const possible = [...seeds]
+    .flatMap((id) => possibleCallers(index, id))
+    .filter((p) => {
+      if (seeds.has(p.caller.id) || seen.has(p.edge.id)) return false;
+      seen.add(p.edge.id);
+      return true;
+    });
 
   if (format === 'tests') {
+    out.push(`${title} — tests to run`, ...(stale ? [stale] : []));
     out.push(
-      `${title} — tests to run`,
-      `${plural(tests.length, 'test file')} changed or depend (through proven relationships) on what changed${tests.length ? ':' : '.'}`,
+      `${plural(tests.length, 'test file')} changed or depend (through proven relationships) on what changed${viaBroken.size ? ' or on a reference it possibly broke' : ''}${tests.length ? ':' : '.'}`,
     );
-    out.list(tests, (n) => tick(nameOf(n), 300), page);
+    out.list(tests, (n) => `${tick(nameOf(n), 300)}${brokenTag(n)}`, page);
     out.push(
       '',
       `_Tests reaching the change only through unresolved calls (callbacks, dynamic calls) are not listed${possible.length || broken.length ? `; ${plural(possible.length, 'possible caller')} and ${plural(broken.length, 'possibly broken reference')} are in \`format: "full"\`` : ''}._`,
@@ -1822,24 +1852,20 @@ function impact(args: Args, ctx: ToolContext): string {
     return out.toString();
   }
 
-  out.push(title, summary);
+  out.push(title, ...(stale ? [stale] : []), summary);
   // o que o agente mais quer primeiro: rotas e testes
   if (routes.length) {
     out.section(`HTTP routes involved (${routes.length})`);
     out.list(
       routes,
       (n) =>
-        `${tick(routeLabel(n))} · ${whereOf(n)}${n.meta?.fullPath ? '' : ' (full path unknown)'}`,
-      { limit: max, maxLimit: 200 },
+        `${tick(routeLabel(n))} · ${whereOf(n)}${n.meta?.fullPath ? '' : ' (full path unknown)'}${brokenTag(n)}`,
+      page,
     );
   }
   out.section(`Test files to run (${tests.length})`);
   if (!tests.length) out.push('No test file is linked to the change by proven relationships.');
-  out.list(tests, (n) => tick(nameOf(n), 300), {
-    limit: max,
-    maxLimit: 200,
-    hint: '`format: "tests"` lists them all (with `offset`)',
-  });
+  out.list(tests, (n) => `${tick(nameOf(n), 300)}${brokenTag(n)}`, page);
   if (gitScope) {
     const loaded = loadRules(ctx);
     if (loaded && !loaded.rules)
@@ -1862,7 +1888,7 @@ function impact(args: Args, ctx: ToolContext): string {
     out.section(
       `Possibly broken by this change (${broken.length}; references to what changed that do not resolve in the current code — they may have been broken before)`,
     );
-    out.list(broken, brokenLine, { limit: max, maxLimit: 200 });
+    out.list(broken, brokenLine, page);
   }
 
   if (format === 'summary') {
@@ -1894,7 +1920,7 @@ function impact(args: Args, ctx: ToolContext): string {
       possible,
       (p) =>
         `${describe(p.caller)} ${p.how} → maybe ${tick(nameOf(index.node(p.target)!))} — ${evidenceOf(p.edge)}`,
-      { limit: max, maxLimit: 200 },
+      page,
     );
   }
   out.push(
@@ -1923,6 +1949,21 @@ function loadRules(ctx: ToolContext): LoadedRules | undefined {
   if (!file) return undefined;
   if (file.issues) return { source: file.source, issues: file.issues };
   return { source: file.source, ...parseRules(file.config) };
+}
+
+/**
+ * `--no-watch`: arquivos alterados (segundo o git) que mudaram no disco depois da análise. As
+ * linhas do diff são de agora; o grafo, de antes: o aviso diz que o resultado pode errar.
+ */
+function staleNote(ctx: ToolContext, changes: ChangeSet): string | undefined {
+  const stale = ctx.snapshot.changedSince(changes.files.map((f) => f.file));
+  if (!stale.length) return undefined;
+  return `**Warning:** ${plural(stale.length, 'changed file')} (${stale
+    .slice(0, 5)
+    .map((f) => tick(f, 200))
+    .join(
+      ', ',
+    )}${stale.length > 5 ? ', …' : ''}) changed on disk after the analysis and this server runs with \`--no-watch\`: the changed lines are mapped onto an older graph and may point at the wrong entities. Restart the server (without \`--no-watch\`) for an exact answer.`;
 }
 
 /** As mudanças do git pedidas (`changes: true` ou `since`), ou nenhuma. */
@@ -2045,6 +2086,8 @@ function rulesTool(args: Args, ctx: ToolContext): string {
   out.push(
     `# Architecture rules — ${tick(loaded.source, 300)} (${plural(loaded.rules.length, 'rule')})`,
   );
+  const stale = changes && staleNote(ctx, changes);
+  if (stale) out.push(stale);
   const failing = (severity: Rule['severity']) =>
     result.outcomes.filter(
       (o) => o.rule.severity === severity && o.violations.some((v) => !changes || v.introduced),
@@ -2475,7 +2518,7 @@ const TOOL_LIST: ToolDefinition[] = [
             '`full` (default), `summary` (summary, routes, tests, possibly broken) or `tests` (only the test files to run).',
         },
         limit: limit(200, 30),
-        offset: offset('the "could be affected" list (and the test list with `format: "tests"`)'),
+        offset: offset('each list'),
       },
       additionalProperties: false,
     },

@@ -873,6 +873,128 @@ describe('rastro_routes', () => {
   });
 });
 
+describe('revisão: respostas que não podiam enganar', () => {
+  const write = (root: string, rel: string, content: string) => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), content);
+  };
+  const gitInit = (root: string) => {
+    const git = (...args: string[]) =>
+      execFileSync(
+        'git',
+        ['-c', 'user.name=T', '-c', 'user.email=t@x', '-c', 'commit.gpgsign=false', ...args],
+        { cwd: root, stdio: 'pipe' },
+      );
+    git('init', '-q');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+  };
+
+  it('--no-watch: código e mudanças do git avisam quando o arquivo mudou depois da análise', async () => {
+    const root = tmp('rastro-mcp-stale-');
+    write(root, 'src/math.ts', 'export function twice(n: number) {\n  return n * 2;\n}\n');
+    write(
+      root,
+      'src/app.ts',
+      "import { twice } from './math';\nexport const a = () => twice(1);\n",
+    );
+    gitInit(root);
+    const session = open(root);
+    expect((await session.call('rastro_entity', { target: 'twice', source: true })).text).toContain(
+      'return n * 2;',
+    );
+    write(
+      root,
+      'src/math.ts',
+      "import fs from 'fs';\n// a\n// b\nexport function twice(n: number) {\n  return n * 2;\n}\n",
+    );
+    const source = (await session.call('rastro_entity', { target: 'twice', source: true })).text;
+    expect(source).toContain('Source not shown: `src/math.ts` changed on disk after the analysis');
+    expect(source).not.toContain('// b');
+    const impact = (await session.call('rastro_impact', {})).text;
+    expect(impact).toContain(
+      '**Warning:** 1 changed file (`src/math.ts`) changed on disk after the analysis',
+    );
+  });
+
+  it('testes e rotas que dependem de uma referência possivelmente quebrada entram, marcados', async () => {
+    const root = tmp('rastro-mcp-viabroken-');
+    write(root, 'src/shapes.ts', 'export function area() {\n  return 1;\n}\n');
+    write(
+      root,
+      'src/user.ts',
+      "import { area } from './shapes';\nexport function load() {\n  return area();\n}\n",
+    );
+    write(root, 'test/user.test.ts', "import { load } from '../src/user';\nload();\n");
+    gitInit(root);
+    fs.rmSync(path.join(root, 'src/shapes.ts'));
+    const session = open(root);
+    const tests = (await session.call('rastro_impact', { format: 'tests' })).text;
+    expect(tests).toContain('- `test/user.test.ts` (depends on a possibly broken reference below)');
+    expect(tests).toContain('or on a reference it possibly broke');
+  });
+
+  it('código com linhas longas: trecho inteiro, faixa real e cerca fechada', async () => {
+    const root = tmp('rastro-mcp-long-');
+    const body = Array.from({ length: 130 }, (_, i) => `  const v${i} = '${'x'.repeat(400)}';`);
+    write(root, 'src/big.ts', `export function big() {\n${body.join('\n')}\n}\n`);
+    const { text } = await open(root).call('rastro_entity', { target: 'big', source: true });
+    const range = /lines 1-(\d+) of 1-132 \(truncated to 16000 characters/.exec(text);
+    expect(range, text.slice(0, 400)).toBeTruthy();
+    const last = Number(range![1]);
+    expect(text).toContain(`${String(last).padStart(2)}  `);
+    expect(text).not.toContain(`${last + 1}  `);
+    expect(
+      text
+        .trimEnd()
+        .split('\n')
+        .filter((l) => /^```/.test(l)),
+    ).toHaveLength(2);
+  });
+
+  it('impacto no modo git: toda lista pagina com offset', async () => {
+    const root = tmp('rastro-mcp-page-');
+    write(root, 'src/keep.ts', 'export const k = 1;\n');
+    gitInit(root);
+    write(
+      root,
+      'src/many.ts',
+      Array.from({ length: 45 }, (_, i) => `export function f${i}() {\n  return ${i};\n}\n`).join(
+        '',
+      ),
+    );
+    const session = open(root);
+    const first = (await session.call('rastro_impact', { limit: 20 })).text;
+    expect(first).toContain('`offset: 20` for the next page');
+    const last = (await session.call('rastro_impact', { limit: 20, offset: 40 })).text;
+    // a última página traz os últimos (a ordem é a dos ids)
+    expect(last).toContain('`f9` function');
+    expect(last).not.toContain('more (');
+  });
+
+  it('caminho com quebra de linha volta como arquivo:linha', async () => {
+    const root = tmp('rastro-mcp-nl-');
+    write(root, 'src/new\nline.ts', 'export function nl() {\n  return 1;\n}\n');
+    const session = open(root);
+    const { text, isError } = await session.call('rastro_entity', {
+      target: 'src/new\\nline.ts:1',
+    });
+    expect(isError, text).toBe(false);
+    expect(text).toContain('# `nl` — function');
+  });
+
+  it('chamador possível conta uma vez e quem está entre os alvos fica de fora', async () => {
+    const { text } = await on('oop').call('rastro_impact', { targets: ['src/animals.ts'] });
+    const section = /## Possibly affected \((\d+);[^\n]*\n((?:- .*\n?)*)/.exec(text);
+    if (section) {
+      const lines = section[2]!.trim().split('\n');
+      expect(Number(section[1])).toBe(lines.length);
+      expect(new Set(lines).size).toBe(lines.length);
+      expect(section[2]).not.toMatch(/`src\/animals\.ts:\d+`/);
+    }
+  });
+});
+
 describe('análise: falhas, concorrência e atualização', () => {
   it('falha da análise vira isError; a chamada seguinte tenta de novo', async () => {
     const root = fixture('express-api');

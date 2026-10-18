@@ -214,6 +214,36 @@ const APP =
   "import { sum } from './math.js';\nimport { ghost } from './missing';\n\nexport function total() {\n  return sum(1, 2) + ghost();\n}\n";
 
 describe('possivelmente quebrado pela mudança', () => {
+  it('testes que dependem de quem tem uma referência quebrada também rodam', async () => {
+    const root = changedProject({
+      'src/user.ts':
+        "import { sum } from './math';\nexport function load() {\n  return sum(1, 1);\n}\n",
+      'test/user.test.ts': "import { load } from '../src/user';\nload();\n",
+    });
+    execFileSync('git', ['add', '-A'], { cwd: root });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=T',
+        '-c',
+        'user.email=t@x',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-qm',
+        'u',
+      ],
+      { cwd: root },
+    );
+    fs.rmSync(path.join(root, 'src/math.ts'));
+    const report = buildImpactReport(await graphWithChanges(root));
+    expect(report.broken.map((b) => b.from.name)).toContain('user.ts');
+    // user.ts não tem mais relação comprovada com math.ts, mas é o que vai falhar
+    expect(report.tests).toContain('test/user.test.ts');
+    expect(report.summary.tests).toBe(report.tests.length);
+  });
+
   const brokenOf = async (root: string) =>
     buildImpactReport(await graphWithChanges(root)).broken.map((b) => [
       b.kind,
