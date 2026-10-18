@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "bench": "node scripts/bench.mjs",
     "typecheck": "tsc -b packages/core packages/graph packages/analyzer apps/cli && npm run typecheck -w @rastro/web",
     "lint": "eslint .",
     "format": "prettier --write .",

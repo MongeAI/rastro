@@ -27,3 +27,16 @@ jobs:
         env:
           CHROME_PATH: /usr/bin/google-chrome
       - run: npm pack --dry-run -w apps/cli
+
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      # projetos sintéticos de 100, 1000 e 5000 arquivos; falha se passar dos limites
+      - run: node scripts/bench.mjs 100 1000 5000 --check
