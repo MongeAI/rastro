@@ -1,10 +1,5 @@
-import {
-  EDGE_KIND_LABELS,
-  NODE_KIND_LABELS,
-  type EdgeKind,
-  type NodeKind,
-  type RastroGraph,
-} from '@rastro/core';
+import type { EdgeKind, NodeKind, RastroGraph } from '@rastro/core';
+import { useI18n } from '../lib/i18n';
 import type { Level } from '../lib/levels';
 import { EDITORS, type EditorId } from '../lib/editor';
 import type { LayoutMode } from './GraphCanvas';
@@ -22,28 +17,7 @@ export const NODE_KIND_ORDER: NodeKind[] = [
 ];
 export const EDGE_KIND_ORDER: EdgeKind[] = ['imports', 'calls', 'extends', 'exports', 'depends_on'];
 
-const LEVELS: Array<[Level, string]> = [
-  ['modules', 'Pastas'],
-  ['files', 'Arquivos'],
-  ['symbols', 'Símbolos'],
-];
-
-const LEVEL_HINTS: Record<Level, string> = {
-  modules:
-    'Cada pasta é um bloco; as linhas somam os imports entre elas. Duplo clique abre a pasta.',
-  files:
-    'Arquivos agrupados por pasta. Duplo clique em um arquivo com + mostra suas funções e classes.',
-  symbols: 'Funções, classes e métodos de todos os arquivos, com as chamadas entre eles.',
-};
-
-const EDGE_HINTS: Record<EdgeKind, string> = {
-  contains: '',
-  imports: 'arquivo → arquivo ou pacote',
-  calls: 'função/método → o que ela chama',
-  extends: 'classe → classe base',
-  exports: 'arquivo → o que ele exporta',
-  depends_on: 'módulo → módulo (derivado dos imports)',
-};
+const LEVELS: Level[] = ['modules', 'files', 'symbols'];
 
 interface Props {
   graph: RastroGraph;
@@ -68,12 +42,14 @@ interface Props {
 
 export function Sidebar(p: Props) {
   const { stats } = p.graph;
+  const { t, labels } = useI18n();
+  const s = t.sidebar;
   return (
-    <aside className="sidebar" id="rastro-sidebar" aria-label="Filtros e legenda">
+    <aside className="sidebar" id="rastro-sidebar" aria-label={s.aria}>
       <section className="side-section">
-        <h2 className="side-title">Nível de detalhe</h2>
-        <div className="segmented three" role="radiogroup" aria-label="Nível de detalhe">
-          {LEVELS.map(([id, label]) => (
+        <h2 className="side-title">{s.level}</h2>
+        <div className="segmented three" role="radiogroup" aria-label={s.level}>
+          {LEVELS.map((id) => (
             <button
               key={id}
               type="button"
@@ -85,37 +61,35 @@ export function Sidebar(p: Props) {
                 if (
                   id === 'symbols' &&
                   p.symbolCount > 1000 &&
-                  !confirm(
-                    `Mostrar ${p.symbolCount} símbolos de uma vez pode levar vários segundos e deixar o mapa difícil de ler. Dica: use a busca ou dê dois cliques nos arquivos que interessam. Continuar mesmo assim?`,
-                  )
+                  !confirm(s.confirmSymbols(p.symbolCount))
                 )
                   return;
                 p.onLevel(id);
               }}
             >
-              {label}
+              {s.levels[id]}
             </button>
           ))}
         </div>
-        <p className="side-hint">{LEVEL_HINTS[p.level]}</p>
+        <p className="side-hint">{s.levelHints[p.level]}</p>
         <label className="field">
-          <span>Organização</span>
+          <span>{s.layout}</span>
           <select
             className="select"
             value={p.layout}
             onChange={(e) => p.onLayout(e.target.value as LayoutMode)}
           >
-            <option value="hierarchical">Hierárquica (fluxo de dependências)</option>
-            <option value="organic">Orgânica (por proximidade)</option>
+            <option value="hierarchical">{s.hierarchical}</option>
+            <option value="organic">{s.organic}</option>
           </select>
         </label>
       </section>
 
       <section className="side-section">
         <div className="side-title-row">
-          <h2 className="side-title">Nós</h2>
+          <h2 className="side-title">{s.nodes}</h2>
           <button type="button" className="link-button" onClick={p.onReset}>
-            restaurar
+            {s.reset}
           </button>
         </div>
         <ul className="filter-list">
@@ -130,7 +104,7 @@ export function Sidebar(p: Props) {
                     onChange={() => p.onToggleNodeKind(kind)}
                   />
                   <KindDot kind={kind} />
-                  <span className="filter-label">{NODE_KIND_LABELS[kind]}</span>
+                  <span className="filter-label">{labels.node[kind]}</span>
                   <span className="filter-count">{count}</span>
                 </label>
               </li>
@@ -140,20 +114,20 @@ export function Sidebar(p: Props) {
       </section>
 
       <section className="side-section">
-        <h2 className="side-title">Relações</h2>
+        <h2 className="side-title">{s.edges}</h2>
         <ul className="filter-list">
           {EDGE_KIND_ORDER.map((kind) => {
             const count = stats.edgesByKind[kind] ?? 0;
             return (
               <li key={kind}>
-                <label className={`filter${count === 0 ? ' empty' : ''}`} title={EDGE_HINTS[kind]}>
+                <label className={`filter${count === 0 ? ' empty' : ''}`} title={s.edgeHints[kind]}>
                   <input
                     type="checkbox"
                     checked={p.edgeKinds.has(kind)}
                     onChange={() => p.onToggleEdgeKind(kind)}
                   />
                   <span className={`edge-swatch e-${kind}`} aria-hidden="true" />
-                  <span className="filter-label">{EDGE_KIND_LABELS[kind]}</span>
+                  <span className="filter-label">{labels.edge[kind]}</span>
                   <span className="filter-count">{count}</span>
                 </label>
               </li>
@@ -166,7 +140,7 @@ export function Sidebar(p: Props) {
             checked={p.hideTypeOnly}
             onChange={(e) => p.onHideTypeOnly(e.target.checked)}
           />
-          Ocultar imports só de tipo
+          {s.hideTypeOnly}
         </label>
         <label className="toggle">
           <input
@@ -174,33 +148,33 @@ export function Sidebar(p: Props) {
             checked={p.highlightNeighbors}
             onChange={(e) => p.onHighlightNeighbors(e.target.checked)}
           />
-          Destacar vizinhos ao selecionar
+          {s.highlightNeighbors}
         </label>
       </section>
 
       <section className="side-section">
-        <h2 className="side-title">Legenda das linhas</h2>
+        <h2 className="side-title">{s.legend}</h2>
         <ul className="legend">
           <li>
-            <span className="line-sample solid" /> resolvida no projeto
+            <span className="line-sample solid" /> {s.legendResolved}
           </li>
           <li>
-            <span className="line-sample dashed" /> externa (pacote ou Node.js)
+            <span className="line-sample dashed" /> {s.legendExternal}
           </li>
           <li>
-            <span className="line-sample unresolved" /> não resolvida
+            <span className="line-sample unresolved" /> {s.legendUnresolved}
           </li>
           <li>
-            <span className="line-sample dotted" /> import só de tipo / export
+            <span className="line-sample dotted" /> {s.legendDotted}
           </li>
           <li>
-            <span className="cycle-sample" /> ciclo de importação
+            <span className="cycle-sample" /> {s.legendCycle}
           </li>
         </ul>
       </section>
 
       <section className="side-section">
-        <h2 className="side-title">Abrir arquivos em</h2>
+        <h2 className="side-title">{s.openFilesIn}</h2>
         <select
           className="select"
           value={p.editor}

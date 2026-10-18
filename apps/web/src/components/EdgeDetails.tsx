@@ -1,12 +1,7 @@
-import {
-  EDGE_KIND_LABELS,
-  NODE_KIND_LABELS,
-  RESOLUTION_LABELS,
-  type GraphEdge,
-} from '@rastro/core';
+import type { GraphEdge } from '@rastro/core';
 import type { GraphIndex, ViewEdge } from '@rastro/graph';
 import { absolutePath, EDITORS, type EditorId } from '../lib/editor';
-import { DISCOVERY_TEXT, plural } from '../lib/explain';
+import { useI18n } from '../lib/i18n';
 import { IconClose } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -22,6 +17,7 @@ const MAX_MEMBERS = 80;
 
 /** Detalhes de uma linha do mapa: as relações reais que ela representa e suas evidências. */
 export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props) {
+  const { t, labels } = useI18n();
   const source = index.node(edge.source);
   const target = index.node(edge.target);
   const members = edge.members
@@ -43,14 +39,14 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
         <div className="details-kind">
           <span className="kind-badge">
             <span className={`edge-swatch e-${edge.kind}`} aria-hidden="true" />
-            Relação · {EDGE_KIND_LABELS[edge.kind]}
+            {t.edge.relation} · {labels.edge[edge.kind]}
           </span>
           <button
             type="button"
             className="icon-button"
             onClick={onClose}
-            aria-label="Fechar detalhes"
-            title="Fechar (Esc)"
+            aria-label={t.common.close}
+            title={t.common.closeEsc}
           >
             <IconClose />
           </button>
@@ -64,7 +60,7 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
                 className="rel-item edge-end"
                 onClick={() => onNavigate(n.id)}
               >
-                <span className="muted small">{i === 0 ? 'de' : 'para'}</span>
+                <span className="muted small">{i === 0 ? t.edge.from : t.edge.to}</span>
                 <KindDot kind={n.kind} />
                 <span className="rel-name">{name(n.id)}</span>
               </button>
@@ -72,28 +68,18 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
           )}
         </div>
         <div className="chips">
-          <span className="tag">{RESOLUTION_LABELS[edge.resolution]}</span>
-          <span className="tag">{plural(edge.count, 'ocorrência', 'ocorrências')}</span>
-          {edge.aggregated && (
-            <span className="tag">
-              {plural(members.length, 'relação somada', 'relações somadas')}
-            </span>
-          )}
-          {edge.typeOnly && <span className="tag">só tipos</span>}
+          <span className="tag">{labels.resolution[edge.resolution]}</span>
+          <span className="tag">{t.edge.occurrences(edge.count)}</span>
+          {edge.aggregated && <span className="tag">{t.edge.summed(members.length)}</span>}
+          {edge.typeOnly && <span className="tag">{t.edge.typesOnly}</span>}
         </div>
       </header>
 
-      {edge.aggregated && (
-        <p className="muted small details-section">
-          Esta linha reúne várias relações do mesmo tipo entre os mesmos blocos do mapa (por
-          exemplo, arquivos dentro de pastas recolhidas). Abra as pastas (duplo clique) para ver
-          cada uma separadamente.
-        </p>
-      )}
+      {edge.aggregated && <p className="muted small details-section">{t.edge.aggregatedHint}</p>}
 
       <section className="details-section">
         <h3 className="section-title">
-          {edge.aggregated ? 'Relações somadas' : 'Evidências'}{' '}
+          {edge.aggregated ? t.edge.summedTitle : t.edge.evidence}{' '}
           <span className="count">
             {edge.aggregated ? members.length : members.reduce((n, m) => n + m.evidence.length, 0)}
           </span>
@@ -120,18 +106,17 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
                   </button>
                 </div>
               )}
-              <p className="muted small member-meta" title={DISCOVERY_TEXT[m.discovery]}>
-                {NODE_KIND_LABELS[index.node(m.target)?.kind ?? 'file']} ·{' '}
-                {DISCOVERY_TEXT[m.discovery]}
+              <p className="muted small member-meta" title={t.discovery[m.discovery]}>
+                {labels.node[index.node(m.target)?.kind ?? 'file']} · {t.discovery[m.discovery]}
                 {m.meta?.specifier ? ` · '${m.meta.specifier}'` : ''}
-                {m.meta?.viaDeclaration ? ' · ligada via declaração .d.ts' : ''}
+                {m.meta?.viaDeclaration ? t.edge.viaDeclaration : ''}
               </p>
               {m.evidence.map((ev) => (
                 <a
                   key={`${ev.file}:${ev.line}:${ev.column}`}
                   className="evidence"
                   href={EDITORS[editor].url(absolutePath(root, ev.file), ev.line, ev.column)}
-                  title="Abrir este trecho no editor"
+                  title={t.common.openSnippet}
                 >
                   <span className="evidence-loc">
                     {ev.file}:{ev.line}
@@ -141,14 +126,14 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
               ))}
               {(m.meta?.count ?? 0) > m.evidence.length && (
                 <p className="muted small">
-                  … e mais {(m.meta?.count ?? 0) - m.evidence.length} ocorrências.
+                  {t.edge.moreOccurrences((m.meta?.count ?? 0) - m.evidence.length)}
                 </p>
               )}
             </li>
           ))}
         </ul>
         {members.length > MAX_MEMBERS && (
-          <p className="muted small">… e mais {members.length - MAX_MEMBERS} relações.</p>
+          <p className="muted small">{t.edge.moreRelations(members.length - MAX_MEMBERS)}</p>
         )}
       </section>
     </div>

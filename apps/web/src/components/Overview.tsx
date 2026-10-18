@@ -1,6 +1,6 @@
-import { NODE_KIND_LABELS, type NodeKind, type RastroGraph } from '@rastro/core';
+import type { NodeKind, RastroGraph } from '@rastro/core';
 import type { GraphIndex } from '@rastro/graph';
-import { REASON_TEXT } from '../lib/explain';
+import { useI18n } from '../lib/i18n';
 import { displayPath } from '../lib/paths';
 import { KindDot } from './KindBadge';
 
@@ -23,6 +23,8 @@ const CARD_KINDS: NodeKind[] = [
 /** Resumo da análise, exibido quando nada está selecionado. */
 export function Overview({ graph, index, onNavigate }: Props) {
   const { stats } = graph;
+  const { t, labels, locale } = useI18n();
+  const o = t.overview;
   const r = stats.edgesByResolution;
   const total = (r.resolved ?? 0) + (r.external ?? 0) + (r.unresolved ?? 0) || 1;
   const unresolved = graph.nodes.filter((n) => n.kind === 'unresolved');
@@ -32,7 +34,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
   return (
     <div className="details overview">
       <header className="details-head">
-        <p className="eyebrow">Resumo da análise</p>
+        <p className="eyebrow">{o.eyebrow}</p>
         <h2 className="details-name">{graph.project.name}</h2>
         <p className="details-sub mono" title={graph.project.root}>
           {displayPath(graph.project.root)}
@@ -40,11 +42,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
       </header>
 
       {stats.files === 0 ? (
-        <div className="callout warn">
-          Nenhum arquivo JavaScript ou TypeScript foi encontrado neste projeto. Confira se o caminho
-          está certo e se os arquivos não estão em pastas ignoradas (node_modules, dist, build ou o
-          .gitignore).
-        </div>
+        <div className="callout warn">{o.noFiles}</div>
       ) : (
         <>
           <div className="stat-grid">
@@ -55,26 +53,21 @@ export function Overview({ graph, index, onNavigate }: Props) {
               >
                 <span className="stat-value">{stats.nodesByKind[k] ?? 0}</span>
                 <span className="stat-label">
-                  <KindDot kind={k} /> {NODE_KIND_LABELS[k]}
-                  {k === 'file' || k === 'unresolved' ? '' : ''}
+                  <KindDot kind={k} /> {labels.node[k]}
                 </span>
               </div>
             ))}
             <div className="stat">
               <span className="stat-value">{stats.importCycles.length}</span>
               <span className="stat-label">
-                <span className="kind-dot cycle-dot" /> Ciclos
+                <span className="kind-dot cycle-dot" /> {o.cycles}
               </span>
             </div>
           </div>
 
           <section className="details-section">
-            <h3 className="section-title">Relações encontradas</h3>
-            <div
-              className="res-bar"
-              role="img"
-              aria-label="Proporção de relações resolvidas, externas e não resolvidas"
-            >
+            <h3 className="section-title">{o.relationsFound}</h3>
+            <div className="res-bar" role="img" aria-label={o.relationsAria}>
               <span
                 className="res-resolved"
                 style={{ width: `${((r.resolved ?? 0) / total) * 100}%` }}
@@ -90,13 +83,13 @@ export function Overview({ graph, index, onNavigate }: Props) {
             </div>
             <ul className="res-legend">
               <li>
-                <span className="sw res-resolved" /> {r.resolved ?? 0} resolvidas no projeto
+                <span className="sw res-resolved" /> {o.resolved(r.resolved ?? 0)}
               </li>
               <li>
-                <span className="sw res-external" /> {r.external ?? 0} externas
+                <span className="sw res-external" /> {o.external(r.external ?? 0)}
               </li>
               <li>
-                <span className="sw res-unresolved" /> {r.unresolved ?? 0} não resolvidas
+                <span className="sw res-unresolved" /> {o.unresolved(r.unresolved ?? 0)}
               </li>
             </ul>
           </section>
@@ -104,7 +97,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
           {stats.importCycles.length > 0 && (
             <section className="details-section">
               <h3 className="section-title">
-                Ciclos de importação <span className="count">{stats.importCycles.length}</span>
+                {o.importCycles} <span className="count">{stats.importCycles.length}</span>
               </h3>
               <ul className="cycle-list">
                 {stats.importCycles.slice(0, 20).map((cycle) => (
@@ -130,12 +123,9 @@ export function Overview({ graph, index, onNavigate }: Props) {
           {unresolved.length > 0 && (
             <section className="details-section">
               <h3 className="section-title">
-                Não resolvidos <span className="count">{unresolved.length}</span>
+                {o.unresolvedTitle} <span className="count">{unresolved.length}</span>
               </h3>
-              <p className="muted small">
-                O Rastro não inventa conexões: estas referências existem no código, mas o destino
-                não pôde ser comprovado.
-              </p>
+              <p className="muted small">{o.unresolvedHint}</p>
               <ul className="rel-list">
                 {unresolved.slice(0, 40).map((n) => (
                   <li key={n.id}>
@@ -143,7 +133,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
                       type="button"
                       className="rel-item"
                       onClick={() => onNavigate(n.id)}
-                      title={n.meta?.reason ? REASON_TEXT[n.meta.reason] : undefined}
+                      title={n.meta?.reason ? t.reasons[n.meta.reason] : undefined}
                     >
                       <KindDot kind="unresolved" />
                       <span className="rel-name mono">{n.name}</span>
@@ -156,15 +146,15 @@ export function Overview({ graph, index, onNavigate }: Props) {
           )}
 
           <section className="details-section">
-            <h3 className="section-title">Fora do grafo, por cautela</h3>
+            <h3 className="section-title">{o.leftOut}</h3>
             <dl className="kv">
-              <dt>Chamadas para bibliotecas e APIs nativas</dt>
+              <dt>{o.externalCalls}</dt>
               <dd>{stats.externalCallsSkipped}</dd>
-              <dt>Chamadas em objetos sem tipo conhecido</dt>
+              <dt>{o.unknownReceiver}</dt>
               <dd>{stats.unknownReceiverCalls}</dd>
-              <dt>Chamadas por nome calculado (obj[x]())</dt>
+              <dt>{o.computedCalls}</dt>
               <dd>{stats.computedCalls}</dd>
-              <dt>Chamadas a funções locais (declaradas dentro de outras)</dt>
+              <dt>{o.localCalls}</dt>
               <dd>{stats.localCalls ?? 0}</dd>
             </dl>
           </section>
@@ -174,7 +164,7 @@ export function Overview({ graph, index, onNavigate }: Props) {
       {warnings.length > 0 && (
         <section className="details-section">
           <h3 className="section-title">
-            Avisos <span className="count">{warnings.length}</span>
+            {o.warnings} <span className="count">{warnings.length}</span>
           </h3>
           <ul className="diag-list">
             {warnings.slice(0, 30).map((d, i) => (
@@ -193,22 +183,20 @@ export function Overview({ graph, index, onNavigate }: Props) {
       )}
 
       <section className="details-section">
-        <h3 className="section-title">Como explorar</h3>
+        <h3 className="section-title">{o.howTo}</h3>
         <ul className="tips">
-          <li>
-            Clique em um nó para ver detalhes, código e relações. <kbd>Esc</kbd> limpa a seleção.
-          </li>
-          <li>Dois cliques em um arquivo com “+” mostram as funções e classes dele.</li>
-          <li>
-            <kbd>/</kbd> abre a busca. “Focar vizinhança” isola uma entidade e suas conexões.
-          </li>
-          <li>Linhas tracejadas vermelhas são referências que não puderam ser resolvidas.</li>
+          {o.tips.map((tip) => (
+            <li key={tip}>{tip}</li>
+          ))}
         </ul>
       </section>
 
       <p className="muted small details-section">
-        Analisado em {generated.toLocaleString('pt-BR')} · {stats.durationMs} ms · TypeScript{' '}
-        {graph.analyzer.typescriptVersion}
+        {o.analyzedAt(
+          generated.toLocaleString(locale),
+          stats.durationMs,
+          graph.analyzer.typescriptVersion,
+        )}
         {graph.project.tsconfig ? ` · ${graph.project.tsconfig}` : ''}
       </p>
     </div>

@@ -13,9 +13,9 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 1. Mundo: interface em inglês e português
 
-- ⬜ i18n completo da interface (EN/PT), escolhido automaticamente pelo idioma do navegador, com seletor manual salvo.
+- ✅ i18n completo da interface (EN/PT), escolhido automaticamente pelo idioma do navegador, com seletor manual salvo.
 - ⬜ Mensagens da CLI em EN/PT (variável `LANG`/`--lang`).
-- ⬜ Textos de motivos ("não resolvido porque…") e legendas traduzidos.
+- ✅ Textos de motivos ("não resolvido porque…") e legendas traduzidos.
 
 ### 2. Mudanças e impacto (git): "o que este PR afeta?"
 

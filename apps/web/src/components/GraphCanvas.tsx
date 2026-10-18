@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import cytoscape, { type Core, type ElementDefinition, type NodeSingular } from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import layoutUtilities from 'cytoscape-layout-utilities';
-import { EDGE_KIND_LABELS, NODE_KIND_LABELS, type EdgeKind, type NodeKind } from '@rastro/core';
+import type { EdgeKind, NodeKind } from '@rastro/core';
+import { useI18n } from '../lib/i18n';
 import type { GraphView, ViewNode } from '@rastro/graph';
 import { computeElkPositions, LayoutCancelled } from '../lib/elkLayout';
 import { buildStyle, displayLabel, estimateNodeWidth } from '../lib/graphStyle';
@@ -71,6 +72,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   const firstLayout = useRef(true);
   const handlers = useRef(props);
   handlers.current = props;
+  // os eventos do Cytoscape são registrados uma vez; leem o idioma atual por esta referência
+  const i18n = useI18n();
+  const i18nRef = useRef(i18n);
+  i18nRef.current = i18n;
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const [busy, setBusy] = useState(false);
   /** Fator de ampliação dos rótulos dos grupos (lido pelo estilo, sem criar regras novas). */
@@ -228,15 +233,16 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       const n = e.target as NodeSingular;
       n.addClass('hover');
       if (containerRef.current) containerRef.current.style.cursor = 'pointer';
-      const kind = NODE_KIND_LABELS[n.data('kind') as NodeKind];
+      const { t, labels } = i18nRef.current;
+      const kind = labels.node[n.data('kind') as NodeKind];
       const hint = n.data('collapsed')
-        ? 'duplo clique para abrir a pasta'
+        ? t.tooltip.openFolder
         : n.data('expandable')
           ? n.data('expanded')
-            ? 'duplo clique para recolher os símbolos'
-            : 'duplo clique para ver funções e classes'
+            ? t.tooltip.collapseSymbols
+            : t.tooltip.showSymbols
           : n.isParent() && n.data('kind') === 'module'
-            ? 'duplo clique para recolher a pasta'
+            ? t.tooltip.collapseFolder
             : '';
       const pos = n.renderedPosition();
       show(
@@ -250,11 +256,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       const edge = e.target;
       if (containerRef.current) containerRef.current.style.cursor = 'pointer';
       const count = edge.data('count') as number;
-      const label = EDGE_KIND_LABELS[edge.data('kind') as EdgeKind];
+      const { t, labels } = i18nRef.current;
+      const label = labels.edge[edge.data('kind') as EdgeKind];
       const mid = edge.renderedMidpoint();
       show(
         `${edge.source().data('full')} → ${edge.target().data('full')}`,
-        `${label}${count > 1 ? ` · ${count}×` : ''}${edge.data('aggregated') ? ' · soma das relações internas' : ''} · clique para ver as evidências`,
+        `${label}${count > 1 ? ` · ${count}×` : ''}${edge.data('aggregated') ? t.tooltip.aggregated : ''}${t.tooltip.clickEvidence}`,
         mid.x,
         mid.y,
       );
@@ -534,7 +541,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
         ref={containerRef}
         className="graph-canvas"
         role="application"
-        aria-label="Mapa interativo do código"
+        aria-label={i18n.t.stage.mapAria}
       />
       {tooltip && (
         <div className="graph-tooltip" style={{ left: tooltip.x, top: tooltip.y }} role="tooltip">
@@ -544,7 +551,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       )}
       {busy && (
         <div className="layout-busy" aria-live="polite">
-          Organizando o mapa…
+          {i18n.t.stage.organizing}
         </div>
       )}
     </>

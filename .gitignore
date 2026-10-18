@@ -22,3 +22,6 @@ coverage/
 /apps/cli/README.md
 /apps/cli/LICENSE
 *.tgz
+
+# ferramentas locais (worktrees de agentes, configurações)
+.claude/

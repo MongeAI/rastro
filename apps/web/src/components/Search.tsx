@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GraphIndex } from '@rastro/graph';
-import { NODE_KIND_LABELS } from '@rastro/core';
+import { useI18n } from '../lib/i18n';
 import { IconSearch } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -12,6 +12,7 @@ interface Props {
 const optionId = (i: number) => `search-option-${i}`;
 
 export function Search({ index, onPick }: Props) {
+  const { t, labels } = useI18n();
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -67,8 +68,8 @@ export function Search({ index, onPick }: Props) {
       <input
         ref={inputRef}
         type="search"
-        placeholder="Buscar arquivo, função, classe…"
-        aria-label="Buscar no grafo"
+        placeholder={t.top.searchPlaceholder}
+        aria-label={t.top.searchAria}
         aria-expanded={showList}
         aria-controls="search-results"
         aria-autocomplete="list"
@@ -110,9 +111,7 @@ export function Search({ index, onPick }: Props) {
           ref={listRef}
           onMouseDown={(e) => e.preventDefault()}
         >
-          {results.length === 0 && (
-            <div className="search-empty">Nada encontrado para “{query}”.</div>
-          )}
+          {results.length === 0 && <div className="search-empty">{t.top.nothingFound(query)}</div>}
           {results.map((r, i) => {
             const file =
               r.node.location?.file ?? (r.node.kind === 'file' ? r.node.qualifiedName : undefined);
@@ -135,7 +134,7 @@ export function Search({ index, onPick }: Props) {
                     : r.node.name}
                 </span>
                 <span className="search-meta">
-                  {NODE_KIND_LABELS[r.node.kind]}
+                  {labels.node[r.node.kind]}
                   {file ? ` · ${file}` : ''}
                 </span>
               </button>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { highlightLines } from '../lib/highlight';
+import { useI18n } from '../lib/i18n';
 
 interface Props {
   file: string;
@@ -35,6 +36,7 @@ const CONTEXT = 3;
 const MAX_LINES = 80;
 
 export function SourceView({ file, startLine, endLine, available, highlightRange = true }: Props) {
+  const { t } = useI18n();
   const [state, setState] = useState<State>({ status: 'loading' });
   const [showAll, setShowAll] = useState(false);
   const firstHighlight = useRef<HTMLDivElement>(null);
@@ -59,16 +61,11 @@ export function SourceView({ file, startLine, endLine, available, highlightRange
   }, [file, available]);
 
   if (!available) {
-    return (
-      <p className="muted small">
-        O código não está disponível neste modo (grafo aberto a partir de um arquivo JSON). Use o
-        caminho e as linhas acima para localizar o trecho no editor.
-      </p>
-    );
+    return <p className="muted small">{t.source.unavailable}</p>;
   }
   if (state.status === 'loading') return <div className="source skeleton" aria-busy="true" />;
   if (state.status === 'error')
-    return <p className="muted small">Não foi possível carregar o código: {state.message}</p>;
+    return <p className="muted small">{t.source.failed(state.message)}</p>;
 
   const total = state.lines.length;
   const from = showAll ? 1 : Math.max(1, startLine - CONTEXT);
@@ -79,7 +76,7 @@ export function SourceView({ file, startLine, endLine, available, highlightRange
 
   return (
     <div className="source-wrap">
-      <pre className="source" tabIndex={0} aria-label={`Código de ${file}, linhas ${from} a ${to}`}>
+      <pre className="source" tabIndex={0} aria-label={t.source.aria(file, from, to)}>
         {state.lines.slice(from - 1, to).map((line, i) => {
           const n = from + i;
           const inRange = highlightRange && n >= startLine && n <= endLine;
@@ -104,7 +101,7 @@ export function SourceView({ file, startLine, endLine, available, highlightRange
       </pre>
       {truncated && (
         <button type="button" className="link-button" onClick={() => setShowAll(true)}>
-          Ver arquivo inteiro ({total} linhas)
+          {t.source.showWhole(total)}
         </button>
       )}
     </div>

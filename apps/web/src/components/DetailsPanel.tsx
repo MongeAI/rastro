@@ -1,16 +1,8 @@
 import { useMemo, useState } from 'react';
-import {
-  EDGE_KIND_INVERSE_LABELS,
-  EDGE_KIND_LABELS,
-  NODE_KIND_LABELS,
-  RESOLUTION_LABELS,
-  type EdgeKind,
-  type GraphEdge,
-  type GraphNode,
-} from '@rastro/core';
+import { type EdgeKind, type GraphEdge, type GraphNode } from '@rastro/core';
 import type { GraphIndex } from '@rastro/graph';
 import { absolutePath, copyText, EDITORS, type EditorId } from '../lib/editor';
-import { DISCOVERY_TEXT, plural, REASON_TEXT } from '../lib/explain';
+import { useI18n, type Messages } from '../lib/i18n';
 import { IconClose, IconCopy, IconExpand, IconExternal, IconLayers, IconTarget } from './Icons';
 import { KindBadge, KindDot } from './KindBadge';
 import { SourceView } from './SourceView';
@@ -41,6 +33,7 @@ const MAX_ITEMS = 60;
 
 export function DetailsPanel(p: Props) {
   const { index } = p;
+  const { t, labels } = useI18n();
   const node = index.node(p.nodeId);
   const [copied, setCopied] = useState(false);
   const [showImpact, setShowImpact] = useState(false);
@@ -86,8 +79,8 @@ export function DetailsPanel(p: Props) {
             type="button"
             className="icon-button"
             onClick={p.onClose}
-            aria-label="Fechar detalhes"
-            title="Fechar (Esc)"
+            aria-label={t.common.close}
+            title={t.common.closeEsc}
           >
             <IconClose />
           </button>
@@ -102,25 +95,26 @@ export function DetailsPanel(p: Props) {
           <p className="details-sub mono">{node.qualifiedName}</p>
         )}
         {node.kind === 'module' && <p className="details-sub mono">{node.qualifiedName}/</p>}
-        <Chips node={node} />
+        <Chips node={node} t={t} />
       </header>
 
       {reason && (
         <div className="callout warn">
-          <strong>Referência não resolvida.</strong> {REASON_TEXT[reason]}
+          <strong>{t.details.unresolvedTitle}</strong> {t.reasons[reason]}
           {node.meta?.reference && <code className="callout-code">{node.meta.reference}</code>}
         </div>
       )}
       {node.meta?.inCycle && (
         <div className="callout cycle">
-          Este arquivo faz parte de um <strong>ciclo de importação</strong>: ele depende, direta ou
-          indiretamente, de quem depende dele.
+          {t.details.cycleBefore}
+          <strong>{t.details.cycleStrong}</strong>
+          {t.details.cycleAfter}
         </div>
       )}
 
       {filePath && (
         <section className="details-section">
-          <h3 className="section-title">Localização</h3>
+          <h3 className="section-title">{t.details.location}</h3>
           <div className="location">
             <span className="mono">
               {filePath}
@@ -135,34 +129,34 @@ export function DetailsPanel(p: Props) {
                 className="button"
                 href={editorUrl(filePath, loc?.startLine ?? 1, loc?.startColumn ?? 1)}
               >
-                <IconExternal /> Abrir no editor
+                <IconExternal /> {t.common.openInEditor}
               </a>
             )}
             <button type="button" className="button ghost" onClick={copyLocation}>
-              <IconCopy /> {copied ? 'Copiado!' : 'Copiar caminho'}
+              <IconCopy /> {copied ? t.common.copied : t.common.copyPath}
             </button>
           </div>
         </section>
       )}
 
       <section className="details-section">
-        <h3 className="section-title">Explorar</h3>
+        <h3 className="section-title">{t.details.explore}</h3>
         <div className="button-row">
           <button
             type="button"
             className={`button${focused ? ' on' : ''}`}
             onClick={() => p.onFocus(focused ? null : node.id)}
-            title="Mostra só esta entidade e suas conexões"
+            title={t.details.focusTitle}
           >
-            <IconTarget /> {focused ? 'Sair do foco' : 'Focar vizinhança'}
+            <IconTarget /> {focused ? t.details.leaveFocus : t.details.focus}
           </button>
           <button
             type="button"
             className="button ghost"
             onClick={() => p.onExpandNeighbors(node.id)}
-            title="Adiciona ao mapa as entidades conectadas, mantendo o resto"
+            title={t.details.expandTitle}
           >
-            <IconExpand /> Expandir conexões
+            <IconExpand /> {t.details.expand}
           </button>
           {node.kind === 'file' && children.length > 0 && !p.allSymbols && (
             <button
@@ -170,7 +164,7 @@ export function DetailsPanel(p: Props) {
               className="button ghost"
               onClick={() => p.onToggleExpand(node.id)}
             >
-              <IconLayers /> {p.expanded ? 'Recolher símbolos' : 'Mostrar símbolos'}
+              <IconLayers /> {p.expanded ? t.details.hideSymbols : t.details.showSymbols}
             </button>
           )}
           {node.kind === 'module' && children.some((c) => c.kind === 'file') && (
@@ -179,13 +173,13 @@ export function DetailsPanel(p: Props) {
               className="button ghost"
               onClick={() => p.onToggleModule(node.id)}
             >
-              <IconLayers /> {p.moduleCollapsed ? 'Abrir pasta no mapa' : 'Recolher pasta no mapa'}
+              <IconLayers /> {p.moduleCollapsed ? t.details.openFolder : t.details.collapseFolder}
             </button>
           )}
         </div>
         {focused && (
           <div className="depth">
-            <span className="muted small">Distância</span>
+            <span className="muted small">{t.details.distanceLabel}</span>
             {[1, 2, 3].map((d) => (
               <button
                 key={d}
@@ -208,7 +202,7 @@ export function DetailsPanel(p: Props) {
           <section className="details-section" key={kind}>
             {out.length > 0 && (
               <RelationList
-                title={EDGE_KIND_LABELS[kind]}
+                title={labels.edge[kind]}
                 edges={out}
                 direction="out"
                 {...{ index, onNavigate: p.onNavigate, editorUrl }}
@@ -216,7 +210,7 @@ export function DetailsPanel(p: Props) {
             )}
             {inc.length > 0 && (
               <RelationList
-                title={EDGE_KIND_INVERSE_LABELS[kind]}
+                title={labels.edgeInverse[kind]}
                 edges={inc}
                 direction="in"
                 {...{ index, onNavigate: p.onNavigate, editorUrl }}
@@ -226,17 +220,17 @@ export function DetailsPanel(p: Props) {
         );
       })}
       {!outgoing.length && !incoming.length && node.kind !== 'module' && (
-        <p className="muted small details-section">Nenhuma relação conhecida além da hierarquia.</p>
+        <p className="muted small details-section">{t.details.noRelations}</p>
       )}
 
       {children.length > 0 && (
         <section className="details-section">
           <h3 className="section-title">
             {node.kind === 'module'
-              ? 'Conteúdo'
+              ? t.details.content
               : node.kind === 'class'
-                ? 'Membros'
-                : 'Definido aqui'}{' '}
+                ? t.details.members
+                : t.details.definedHere}{' '}
             <span className="count">{children.length}</span>
           </h3>
           <ul className="rel-list">
@@ -246,34 +240,29 @@ export function DetailsPanel(p: Props) {
                   <KindDot kind={c.kind} />
                   <span className="rel-name">{c.name}</span>
                   {c.location && <span className="rel-loc">:{c.location.startLine}</span>}
-                  {c.meta?.exported && <span className="tag">exportado</span>}
+                  {c.meta?.exported && <span className="tag">{t.common.exported}</span>}
                 </button>
               </li>
             ))}
           </ul>
           {children.length > MAX_ITEMS && (
-            <p className="muted small">… e mais {children.length - MAX_ITEMS}.</p>
+            <p className="muted small">{t.common.andMore(children.length - MAX_ITEMS)}</p>
           )}
         </section>
       )}
 
       {node.kind !== 'package' && node.kind !== 'module' && (
         <section className="details-section">
-          <h3 className="section-title">Impacto de uma alteração</h3>
+          <h3 className="section-title">{t.details.impact}</h3>
           {!showImpact ? (
             <button type="button" className="button ghost" onClick={() => setShowImpact(true)}>
-              Calcular quem pode ser afetado
+              {t.details.computeImpact}
             </button>
           ) : impact.length === 0 ? (
-            <p className="muted small">
-              Nenhuma entidade conhecida depende desta (considerando só relações resolvidas).
-            </p>
+            <p className="muted small">{t.details.noImpact}</p>
           ) : (
             <>
-              <p className="muted small">
-                {plural(impact.length, 'entidade depende', 'entidades dependem')} desta, direta ou
-                indiretamente (chamadas, imports e herança resolvidos).
-              </p>
+              <p className="muted small">{t.details.impactCount(impact.length)}</p>
               <ul className="rel-list">
                 {impact.slice(0, MAX_ITEMS).map((i) => (
                   <li key={i.node.id}>
@@ -282,7 +271,7 @@ export function DetailsPanel(p: Props) {
                       className="rel-item"
                       onClick={() => p.onNavigate(i.node.id)}
                     >
-                      <span className="depth-pill" title="distância">
+                      <span className="depth-pill" title={t.common.distance}>
                         {i.depth}
                       </span>
                       <KindDot kind={i.node.kind} />
@@ -291,7 +280,7 @@ export function DetailsPanel(p: Props) {
                           ? i.node.qualifiedName
                           : i.node.name}
                       </span>
-                      <span className="rel-loc">{EDGE_KIND_LABELS[i.via.kind].toLowerCase()}</span>
+                      <span className="rel-loc">{labels.edge[i.via.kind].toLowerCase()}</span>
                     </button>
                   </li>
                 ))}
@@ -303,7 +292,7 @@ export function DetailsPanel(p: Props) {
 
       {loc && node.meta?.analyzed !== false && node.kind !== 'module' && (
         <section className="details-section">
-          <h3 className="section-title">Código</h3>
+          <h3 className="section-title">{t.details.code}</h3>
           <SourceView
             file={loc.file}
             startLine={node.kind === 'file' ? 1 : loc.startLine}
@@ -315,7 +304,7 @@ export function DetailsPanel(p: Props) {
       )}
       {file && file.id !== node.id && (
         <p className="muted small details-section">
-          Arquivo:{' '}
+          {t.details.file}{' '}
           <button type="button" className="link-button" onClick={() => p.onNavigate(file.id)}>
             {file.qualifiedName}
           </button>
@@ -325,29 +314,29 @@ export function DetailsPanel(p: Props) {
   );
 }
 
-function Chips({ node }: { node: GraphNode }) {
+function Chips({ node, t }: { node: GraphNode; t: Messages }) {
+  const c = t.details.chips;
   const m = node.meta ?? {};
   const chips: string[] = [];
-  if (m.exported) chips.push(m.defaultExport ? 'export default' : 'exportado');
+  if (m.exported) chips.push(m.defaultExport ? c.defaultExport : c.exported);
   if (m.async) chips.push('async');
   if (m.static) chips.push('static');
   if (m.memberKind && m.memberKind !== 'method')
     chips.push(
       {
-        constructor: 'construtor',
-        getter: 'getter',
-        setter: 'setter',
-        property: 'propriedade-função',
+        constructor: c.constructor,
+        getter: c.getter,
+        setter: c.setter,
+        property: c.property,
         method: '',
       }[m.memberKind],
     );
   if (m.language) chips.push(m.language.toUpperCase());
-  if (m.lines) chips.push(`${m.lines} linhas`);
-  if (m.analyzed === false) chips.push('não analisado');
-  if (m.builtin) chips.push('nativo do Node.js');
-  else if (node.kind === 'package')
-    chips.push(m.declared ? 'declarado no package.json' : 'não declarado');
-  if (m.outsideRoot) chips.push('fora da raiz');
+  if (m.lines) chips.push(c.lines(m.lines));
+  if (m.analyzed === false) chips.push(c.notAnalyzed);
+  if (m.builtin) chips.push(c.builtin);
+  else if (node.kind === 'package') chips.push(m.declared ? c.declared : c.undeclared);
+  if (m.outsideRoot) chips.push(c.outsideRoot);
   if (m.framework) chips.push(m.framework);
   if (!chips.length) return null;
   return (
@@ -379,6 +368,7 @@ function RelationList({
   editorUrl,
 }: RelationListProps) {
   const [expanded, setExpanded] = useState(false);
+  const { t, labels } = useI18n();
   const sorted = [...edges].sort((a, b) => {
     const na = index.node(direction === 'out' ? a.target : a.source)?.name ?? '';
     const nb = index.node(direction === 'out' ? b.target : b.source)?.name ?? '';
@@ -402,7 +392,7 @@ function RelationList({
                 type="button"
                 className="rel-item"
                 onClick={() => onNavigate(other.id)}
-                title={`${NODE_KIND_LABELS[other.kind]} · ${RESOLUTION_LABELS[e.resolution]} · ${DISCOVERY_TEXT[e.discovery]}`}
+                title={`${labels.node[other.kind]} · ${labels.resolution[e.resolution]} · ${t.discovery[e.discovery]}`}
               >
                 <KindDot kind={other.kind} />
                 <span className="rel-name">
@@ -412,21 +402,21 @@ function RelationList({
                 </span>
                 {e.resolution !== 'resolved' && (
                   <span className={`tag res-${e.resolution}`}>
-                    {e.resolution === 'external' ? 'externo' : 'não resolvido'}
+                    {e.resolution === 'external' ? t.details.external : t.details.unresolved}
                   </span>
                 )}
-                {e.meta?.typeOnly && <span className="tag">tipo</span>}
+                {e.meta?.typeOnly && <span className="tag">{t.details.typeTag}</span>}
                 {e.meta?.callKind === 'new' && <span className="tag">new</span>}
                 {e.meta?.callKind === 'jsx' && <span className="tag">JSX</span>}
                 {e.meta?.callKind === 'route-handler' && <span className="tag">handler</span>}
-                {e.meta?.reexport && <span className="tag">reexporta</span>}
+                {e.meta?.reexport && <span className="tag">{t.details.reexports}</span>}
                 {count > 1 && <span className="rel-count">{count}×</span>}
               </button>
               {ev && (
                 <a
                   className="evidence"
                   href={editorUrl(ev.file, ev.line, ev.column)}
-                  title="Abrir este trecho no editor"
+                  title={t.common.openSnippet}
                 >
                   <span className="evidence-loc">
                     {ev.file}:{ev.line}
@@ -440,7 +430,7 @@ function RelationList({
       </ul>
       {sorted.length > visible.length && (
         <button type="button" className="link-button" onClick={() => setExpanded(true)}>
-          Mostrar todas ({sorted.length})
+          {t.common.showAll(sorted.length)}
         </button>
       )}
     </>

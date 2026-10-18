@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { validateGraph, type EdgeKind, type NodeKind, type RastroGraph } from '@rastro/core';
+import {
+  validateGraph,
+  type EdgeKind,
+  type Lang,
+  type NodeKind,
+  type RastroGraph,
+} from '@rastro/core';
 import { computeView, GraphIndex, groupableModules } from '@rastro/graph';
 import { DetailsPanel } from './components/DetailsPanel';
 import { EdgeDetails } from './components/EdgeDetails';
@@ -24,13 +30,14 @@ import { NODE_KIND_ORDER, Sidebar } from './components/Sidebar';
 import { downloadBlob, downloadText, slug } from './lib/download';
 import { EDITORS, readPref, writePref, type EditorId } from './lib/editor';
 import type { Level } from './lib/levels';
+import { detectLang, I18nProvider, useI18n, type Messages } from './lib/i18n';
 import { displayPath } from './lib/paths';
 import { PALETTES, type ThemeName } from './lib/theme';
 
 type Load =
   | { status: 'loading' }
   | { status: 'ready'; graph: RastroGraph; fromServer: boolean }
-  | { status: 'error'; message: string; canPickFile: boolean };
+  | { status: 'error'; message: (t: Messages) => string; canPickFile: boolean };
 
 const DEFAULT_EDGES: EdgeKind[] = ['imports', 'calls', 'extends'];
 /** Pacotes externos começam ocultos no mapa para não poluir; continuam nos filtros e nos detalhes. */
@@ -38,6 +45,23 @@ const DEFAULT_NODES: NodeKind[] = NODE_KIND_ORDER.filter((k) => k !== 'package')
 const SYMBOL_KINDS: NodeKind[] = ['function', 'class', 'method', 'route'];
 
 export function App() {
+  // idioma: o escolhido pelo usuário ou o do navegador
+  const [lang, setLang] = useState<Lang>(() =>
+    detectLang(readPref('lang', '', ['pt', 'en']) || null),
+  );
+  useEffect(() => {
+    writePref('lang', lang);
+    document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
+  }, [lang]);
+  return (
+    <I18nProvider lang={lang}>
+      <Loader onLang={setLang} />
+    </I18nProvider>
+  );
+}
+
+function Loader({ onLang }: { onLang(lang: Lang): void }) {
+  const { t } = useI18n();
   const [load, setLoad] = useState<Load>({ status: 'loading' });
 
   const openGraph = useCallback((data: unknown, fromServer: boolean) => {
@@ -45,7 +69,7 @@ export function App() {
     if (!result.valid) {
       setLoad({
         status: 'error',
-        message: `O arquivo não é um grafo válido do Rastro:\n${result.errors.slice(0, 5).join('\n')}`,
+        message: (tr) => tr.load.invalid(result.errors.slice(0, 5).join('\n')),
         canPickFile: true,
       });
       return;
@@ -59,20 +83,18 @@ export function App() {
         if (res.status === 401) {
           setLoad({
             status: 'error',
-            message:
-              'Acesso negado: esta página precisa do endereço completo exibido no terminal (ele inclui um token de acesso). Copie a URL que o comando "rastro" mostrou e abra de novo.',
+            message: (tr) => tr.load.denied,
             canPickFile: true,
           });
           return;
         }
-        if (!res.ok) throw new Error(`O servidor respondeu ${res.status}.`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         openGraph(await res.json(), true);
       })
       .catch(() =>
         setLoad({
           status: 'error',
-          message:
-            'Nenhum grafo foi carregado. Rode "rastro <caminho-do-projeto>" no terminal, ou abra um JSON exportado pelo Rastro.',
+          message: (tr) => tr.load.noGraph,
           canPickFile: true,
         }),
       );
@@ -85,7 +107,7 @@ export function App() {
       .catch((err: Error) =>
         setLoad({
           status: 'error',
-          message: `Não foi possível ler ${file.name}: ${err.message}`,
+          message: (tr) => tr.load.cannotRead(file.name, err.message),
           canPickFile: true,
         }),
       );
@@ -95,8 +117,8 @@ export function App() {
     return (
       <div className="screen-center">
         <Logo size={36} />
-        <div className="spinner" aria-label="Carregando" />
-        <p className="muted">Carregando o grafo…</p>
+        <div className="spinner" aria-label={t.load.loadingAria} />
+        <p className="muted">{t.load.loading}</p>
       </div>
     );
   }
@@ -113,10 +135,10 @@ export function App() {
       >
         <Logo size={36} />
         <h1 className="screen-title">Rastro</h1>
-        <p className="screen-message">{load.message}</p>
+        <p className="screen-message">{load.message(t)}</p>
         {load.canPickFile && (
           <label className="button">
-            Abrir arquivo .json
+            {t.load.openJson}
             <input
               type="file"
               accept=".json,application/json"
@@ -125,14 +147,30 @@ export function App() {
             />
           </label>
         )}
-        <p className="muted small">Você também pode arrastar o arquivo para esta janela.</p>
+        <p className="muted small">{t.load.dropHint}</p>
       </div>
     );
   }
-  return <Explorer key={load.graph.generatedAt} graph={load.graph} fromServer={load.fromServer} />;
+  return (
+    <Explorer
+      key={load.graph.generatedAt}
+      graph={load.graph}
+      fromServer={load.fromServer}
+      onLang={onLang}
+    />
+  );
 }
 
-function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boolean }) {
+function Explorer({
+  graph,
+  fromServer,
+  onLang,
+}: {
+  graph: RastroGraph;
+  fromServer: boolean;
+  onLang(lang: Lang): void;
+}) {
+  const { t, lang } = useI18n();
   const index = useMemo(() => new GraphIndex(graph), [graph]);
   const groupable = useMemo(() => groupableModules(index), [index]);
   const groupableSet = useMemo(() => new Set(groupable), [groupable]);
@@ -385,10 +423,7 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
   const exportPng = () => {
     const blob = canvas.current?.png(PALETTES[theme].bg);
     if (blob && blob.size > 0) downloadBlob(`${slug(graph.project.name)}.rastro.png`, blob);
-    else
-      alert(
-        'Não foi possível gerar a imagem deste mapa (grande demais para o navegador). Tente um nível menos detalhado ou use o foco.',
-      );
+    else alert(t.stage.pngFailed);
   };
 
   // o mesmo botão abre a gaveta (telas estreitas) ou recolhe o painel (telas largas)
@@ -432,10 +467,10 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
           type="button"
           className="icon-button"
           onClick={toggleSidebar}
-          aria-label={sidebarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
+          aria-label={sidebarVisible ? t.top.hideFilters : t.top.showFilters}
           aria-expanded={sidebarVisible}
           aria-controls="rastro-sidebar"
-          title={sidebarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
+          title={sidebarVisible ? t.top.hideFilters : t.top.showFilters}
         >
           <IconMenu />
         </button>
@@ -459,25 +494,29 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
               setSelectedId(null);
               setSelectedEdgeId(null);
             }}
-            title="Resumo da análise"
-            aria-label="Resumo da análise"
+            title={t.top.summaryTitle}
+            aria-label={t.top.summaryTitle}
           >
-            <IconInfo /> <span className="hide-narrow">Resumo</span>
+            <IconInfo /> <span className="hide-narrow">{t.top.summary}</span>
+          </button>
+          <button type="button" className="button" onClick={exportJson} title={t.top.exportTitle}>
+            <IconDownload /> <span className="hide-narrow">{t.top.export}</span> JSON
           </button>
           <button
             type="button"
-            className="button"
-            onClick={exportJson}
-            title="Baixar o grafo completo em JSON"
+            className="lang-button"
+            onClick={() => onLang(lang === 'pt' ? 'en' : 'pt')}
+            aria-label={`${t.top.language}: ${t.langName}`}
+            title={`${t.top.language}: ${t.langName}`}
           >
-            <IconDownload /> <span className="hide-narrow">Exportar</span> JSON
+            {lang === 'pt' ? 'PT' : 'EN'}
           </button>
           <button
             type="button"
             className="icon-button"
-            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-            aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
-            title={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+            aria-label={theme === 'dark' ? t.top.useLight : t.top.useDark}
+            title={theme === 'dark' ? t.top.lightTheme : t.top.darkTheme}
           >
             {theme === 'dark' ? <IconSun /> : <IconMoon />}
           </button>
@@ -534,23 +573,23 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
         <div className="stage-top">
           {focusNode && (
             <div className="focus-pill">
-              Foco:{' '}
+              {t.stage.focus}{' '}
               <strong>
                 {focusNode.qualifiedName && focusNode.kind !== 'file'
                   ? focusNode.qualifiedName
                   : focusNode.name}
               </strong>
-              <span className="muted"> · distância {focus!.depth}</span>
+              <span className="muted">{t.stage.distance(focus!.depth)}</span>
               <button type="button" className="link-button" onClick={() => setFocus(null)}>
-                sair
+                {t.stage.leave}
               </button>
             </div>
           )}
           {pinned.size > 0 && !focus && (
             <div className="focus-pill">
-              {pinned.size} {pinned.size > 1 ? 'entidades expandidas' : 'entidade expandida'}
+              {t.stage.pinned(pinned.size)}
               <button type="button" className="link-button" onClick={() => setPinned(new Set())}>
-                limpar
+                {t.stage.clear}
               </button>
             </div>
           )}
@@ -559,39 +598,41 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
               type="button"
               className="focus-pill pill-button"
               onClick={goBack}
-              title="Voltar para a seleção anterior"
+              title={t.stage.backTitle}
             >
-              <IconBack /> Voltar
+              <IconBack /> {t.stage.back}
             </button>
           )}
         </div>
 
         {view.nodes.length === 0 && graph.stats.files > 0 && (
           <div className="stage-empty">
-            <p>Nenhum nó corresponde aos filtros atuais.</p>
+            <p>{t.stage.noMatch}</p>
             <button type="button" className="button" onClick={resetView}>
-              Restaurar visualização
+              {t.stage.reset}
             </button>
           </div>
         )}
         {graph.stats.files === 0 && (
           <div className="stage-empty">
-            <p>Este projeto não tem arquivos JavaScript ou TypeScript analisáveis.</p>
+            <p>{t.stage.noFiles}</p>
           </div>
         )}
 
         <div className="stage-status" aria-live="polite">
-          {view.nodes.length} nós · {view.edges.length} relações visíveis
-          {view.hiddenCount > 0 && <span className="muted"> · {view.hiddenCount} ocultos</span>}
+          {t.stage.status(view.nodes.length, view.edges.length)}
+          {view.hiddenCount > 0 && (
+            <span className="muted">{t.stage.hidden(view.hiddenCount)}</span>
+          )}
         </div>
 
-        <div className="zoom-controls" role="toolbar" aria-label="Controles do mapa">
+        <div className="zoom-controls" role="toolbar" aria-label={t.stage.controls}>
           <button
             type="button"
             className="icon-button"
             onClick={() => canvas.current?.zoom(1.25)}
-            aria-label="Aproximar"
-            title="Aproximar"
+            aria-label={t.stage.zoomIn}
+            title={t.stage.zoomIn}
           >
             <IconPlus />
           </button>
@@ -599,8 +640,8 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
             type="button"
             className="icon-button"
             onClick={() => canvas.current?.zoom(0.8)}
-            aria-label="Afastar"
-            title="Afastar"
+            aria-label={t.stage.zoomOut}
+            title={t.stage.zoomOut}
           >
             <IconMinus />
           </button>
@@ -608,8 +649,8 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
             type="button"
             className="icon-button"
             onClick={() => canvas.current?.fit()}
-            aria-label="Enquadrar tudo"
-            title="Enquadrar tudo (F)"
+            aria-label={t.stage.fit}
+            title={t.stage.fitShortcut}
           >
             <IconFit />
           </button>
@@ -617,8 +658,8 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
             type="button"
             className="icon-button"
             onClick={() => canvas.current?.relayout()}
-            aria-label="Reorganizar"
-            title="Reorganizar o mapa"
+            aria-label={t.stage.relayout}
+            title={t.stage.relayoutTitle}
           >
             <IconLayout />
           </button>
@@ -626,8 +667,8 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
             type="button"
             className="icon-button"
             onClick={exportPng}
-            aria-label="Salvar imagem"
-            title="Salvar imagem PNG"
+            aria-label={t.stage.savePng}
+            title={t.stage.savePngTitle}
           >
             <IconImage />
           </button>
@@ -638,10 +679,10 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
         className="panel"
         aria-label={
           panelMode === 'edge'
-            ? 'Detalhes da relação'
+            ? t.stage.panelEdge
             : panelMode === 'node'
-              ? 'Detalhes da entidade'
-              : 'Resumo da análise'
+              ? t.stage.panelNode
+              : t.stage.panelSummary
         }
       >
         {panelMode === 'edge' && selectedEdge ? (

@@ -4,3 +4,4 @@ coverage
 fixtures
 package-lock.json
 *.graph.json
+.claude
