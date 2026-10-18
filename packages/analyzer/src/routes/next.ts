@@ -42,6 +42,63 @@ const isDirectory = (p: string) => {
 };
 
 /**
+ * A configuração pode receber opções de fora do próprio texto? Espalhamento (`...shared`),
+ * `require`/`import` de valores (imports só de tipo não contam), `import()` ou o valor
+ * exportado vindo de uma chamada (`withMDX(config)`, `module.exports = withPlugins(...)`): o
+ * `basePath` pode estar lá. Lido sem executar nada.
+ */
+function opaqueConfig(file: string, text: string): boolean {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
+  /** Variável → valor inicial (para `const config = withX(...); export default config`). */
+  const initializers = new Map<string, ts.Expression>();
+  const exported: ts.Expression[] = [];
+  let opaque = false;
+  const visit = (node: ts.Node): void => {
+    if (opaque) return;
+    if (ts.isSpreadAssignment(node) || ts.isSpreadElement(node)) opaque = true;
+    else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    )
+      opaque = true;
+    else if (
+      ts.isImportDeclaration(node) &&
+      node.importClause &&
+      !node.importClause.isTypeOnly &&
+      (node.importClause.name ||
+        (node.importClause.namedBindings &&
+          (ts.isNamespaceImport(node.importClause.namedBindings) ||
+            node.importClause.namedBindings.elements.some((e) => !e.isTypeOnly))))
+    )
+      opaque = true;
+    else if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly) opaque = true;
+    else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer)
+      initializers.set(node.name.text, node.initializer);
+    else if (ts.isExportAssignment(node)) exported.push(node.expression);
+    else if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      /^(module\.exports|exports\.default)$/.test(node.left.getText(sf))
+    )
+      exported.push(node.right);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  if (opaque) return true;
+  const isCall = (e: ts.Expression, depth = 0): boolean => {
+    e = unwrapExpression(e);
+    if (ts.isCallExpression(e) || ts.isNewExpression(e)) return true;
+    if (ts.isIdentifier(e) && depth < 5) {
+      const init = initializers.get(e.text);
+      return !!init && isCall(init, depth + 1);
+    }
+    return false;
+  };
+  return exported.some((e) => isCall(e));
+}
+
+/**
  * `pageExtensions: ['page.tsx', 'api.ts']` lido sem executar o arquivo: só vale uma única
  * menção, que seja uma lista de textos literais. `undefined` sem menção; `null` quando o valor
  * só seria conhecido executando a configuração (variável, condição, espalhamento...).
@@ -107,7 +164,9 @@ function nextProject(state: RouteState, dir: string): NextProject {
     } catch {
       continue; // sem esse arquivo de configuração
     }
-    if (/\bbasePath\b/.test(text)) basePath = true;
+    // `basePath` citado, ou a configuração pode trazê-lo de fora: caminho completo desconhecido.
+    // (O `pageExtensions` de fora também não é visto: as rotas seguem as extensões padrão)
+    if (/\bbasePath\b/.test(text) || opaqueConfig(file, text)) basePath = true;
     const pageExtensions = staticPageExtensions(file, text);
     if (pageExtensions === null) {
       skipped = true;

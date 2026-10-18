@@ -791,6 +791,36 @@ describe('regra da casa: nenhuma rota inventada', () => {
     expect(home?.meta?.fullPath).toBeUndefined();
   });
 
+  it('Next.js: config que pode trazer o basePath de fora deixa o caminho completo desconhecido', async () => {
+    const fullPath = async (config: Record<string, string>) => {
+      const root = makeProject({
+        'package.json': '{"dependencies":{"next":"16"}}',
+        'config/shared.js': 'module.exports = { basePath: "/docs" };',
+        'app/about/page.tsx': 'export default function About() { return null; }',
+        ...config,
+      });
+      const g = await analyzeProject(root);
+      const about = node(g, 'route:app/about/page.tsx#next GET /about');
+      expect(about?.meta?.routePath).toBe('/about');
+      return about?.meta?.fullPath;
+    };
+    for (const config of [
+      'const shared = require("./config/shared");\nmodule.exports = { ...shared, reactStrictMode: true };',
+      'module.exports = require("./config/shared");',
+      "import shared from './config/shared.js';\nexport default shared;",
+      "import withMDX from '@next/mdx';\nexport default withMDX()({ reactStrictMode: true });",
+      'const config = withPlugins({ reactStrictMode: true });\nmodule.exports = config;',
+      "export default async () => (await import('./config/shared.js')).default;",
+    ])
+      expect(await fullPath({ 'next.config.js': config }), config).toBeUndefined();
+    // literal, com import só de tipo e em função de fase: continua comprovado
+    for (const config of [
+      "import type { NextConfig } from 'next';\nconst config: NextConfig = { reactStrictMode: true };\nexport default config;",
+      'module.exports = (phase) => ({ reactStrictMode: phase !== "x" });',
+    ])
+      expect(await fullPath({ 'next.config.ts': config }), config).toBe('/about');
+  });
+
   it('Next.js: export só de tipo com nome de método não vira rota', async () => {
     const root = makeProject({
       'package.json': '{"dependencies":{"next":"16"}}',
