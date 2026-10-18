@@ -17,6 +17,9 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 const isPositiveInt = (v: unknown) => Number.isInteger(v) && (v as number) >= 1;
 
+const DIAGNOSTIC_LEVELS = new Set(['info', 'warning', 'error']);
+const CHANGE_STATUSES = new Set(['added', 'modified', 'deleted', 'renamed']);
+
 /**
  * Valida a estrutura de um grafo e sua integridade referencial
  * (toda relação aponta para nós existentes, ids são únicos, localizações são coerentes).
@@ -53,21 +56,44 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
   if (!Array.isArray(input.diagnostics)) fail('diagnostics deve ser uma lista.');
   else
     for (const [i, d] of input.diagnostics.entries())
-      if (!isObject(d) || typeof d.code !== 'string' || typeof d.message !== 'string')
+      if (
+        !isObject(d) ||
+        typeof d.code !== 'string' ||
+        typeof d.message !== 'string' ||
+        !DIAGNOSTIC_LEVELS.has(d.level as string) ||
+        (d.params !== undefined &&
+          (!isObject(d.params) ||
+            !Object.values(d.params).every((v) => typeof v === 'string' || typeof v === 'number')))
+      )
         fail(`diagnostics[${i}] inválido.`);
   if (input.changes !== undefined) {
     const changes = input.changes;
-    if (!isObject(changes) || typeof changes.base !== 'string' || !Array.isArray(changes.files))
-      fail('changes inválido (precisa de base e files).');
+    if (
+      !isObject(changes) ||
+      typeof changes.base !== 'string' ||
+      typeof changes.baseLabel !== 'string' ||
+      typeof changes.includesUntracked !== 'boolean' ||
+      !Array.isArray(changes.files)
+    )
+      fail('changes inválido (precisa de base, baseLabel, includesUntracked e files).');
     else
       for (const [i, f] of changes.files.entries())
         if (
           !isObject(f) ||
           typeof f.file !== 'string' ||
+          !CHANGE_STATUSES.has(f.status as string) ||
+          (f.previous !== undefined && typeof f.previous !== 'string') ||
           !Array.isArray(f.ranges) ||
           !f.ranges.every(
-            (r) => Array.isArray(r) && r.length === 2 && isPositiveInt(r[0]) && isPositiveInt(r[1]),
-          )
+            (r) =>
+              Array.isArray(r) &&
+              r.length === 2 &&
+              isPositiveInt(r[0]) &&
+              isPositiveInt(r[1]) &&
+              (r[0] as number) <= (r[1] as number),
+          ) ||
+          (f.deletionsAt !== undefined &&
+            (!Array.isArray(f.deletionsAt) || !f.deletionsAt.every(isPositiveInt)))
         )
           fail(`changes.files[${i}] inválido.`);
   }
