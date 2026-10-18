@@ -499,6 +499,11 @@ function Explorer({
   useEffect(() => {
     const fromHash = () => {
       const id = new URLSearchParams(window.location.hash.slice(1)).get('n');
+      // voltar enquanto escolhe o destino de um caminho cancela a escolha (não vira o destino)
+      if (pathModeRef.current && !pathModeRef.current.to) {
+        pathModeRef.current = null;
+        setPathMode(null);
+      }
       if (id && index.node(id) && id !== selectedRef.current) navigateRef.current(id, false);
       // voltar (no navegador) até antes da primeira seleção limpa a seleção
       else if (!id && selectedRef.current) setSelectedId(null);
@@ -527,6 +532,13 @@ function Explorer({
       // ambientes sem history (ex.: arquivo local) apenas ignoram
     }
   }, [selectedId]);
+
+  // nova análise (--watch) sem a entidade selecionada (apagada ou renomeada): limpa a seleção
+  // e o histórico interno, em vez de manter um id que não existe mais
+  useEffect(() => {
+    if (selectedRef.current && !index.node(selectedRef.current)) setSelectedId(null);
+    setHistory((h) => (h.every((id) => index.node(id)) ? h : h.filter((id) => index.node(id))));
+  }, [index]);
 
   const goBack = () => {
     const prev = history[history.length - 1];
@@ -721,7 +733,15 @@ function Explorer({
   collapsedRef.current = collapsedModules;
   const setModuleOpenRef = useRef(setModuleOpen);
   setModuleOpenRef.current = setModuleOpen;
+  // só ao abrir um caminho (ou trocar de alternativa): uma nova análise (--watch) refaz o
+  // índice, mas não deve mexer de novo no mapa que a pessoa está olhando
+  const shownPath = useRef<string | null>(null);
   useEffect(() => {
+    const key = pathResult?.paths.length
+      ? `${pathModeRef.current?.from}\n${pathModeRef.current?.to}\n${activePath}`
+      : null;
+    if (key === shownPath.current) return;
+    shownPath.current = key;
     if (!pathResult?.paths.length) return;
     const ids = new Set(pathResult.paths.flatMap((p) => p.nodes));
     for (const id of ids) {
@@ -762,8 +782,12 @@ function Explorer({
     return { changed: [...changed], impacted: [...impacted] };
   }, [showChanges, changeImpact, view, index]);
   // o que mudou (e o que é afetado diretamente) aparece no mapa quando a aba está aberta
+  // só quando a aba (ou o destaque) é aberta, não a cada nova análise do --watch
+  const changesShown = useRef(false);
   useEffect(() => {
-    if (!showChanges || !changeImpact) return;
+    const was = changesShown.current;
+    changesShown.current = showChanges;
+    if (was || !showChanges || !changeImpact) return;
     const ids = [
       ...changeImpact.changedEntities.map((n) => n.id),
       ...changeImpact.impacted.filter((i) => i.depth === 1).map((i) => i.node.id),
@@ -1296,11 +1320,13 @@ function Explorer({
       <aside
         className="panel"
         aria-label={
-          panelMode === 'edge'
-            ? t.stage.panelEdge
-            : panelMode === 'node'
-              ? t.stage.panelNode
-              : t.stage.panelSummary
+          panelMode === 'path' && pathMode?.to
+            ? t.stage.panelPath
+            : panelMode === 'edge'
+              ? t.stage.panelEdge
+              : panelMode === 'node'
+                ? t.stage.panelNode
+                : t.stage.panelSummary
         }
       >
         {panelMode === 'path' && pathMode?.to && pathResult ? (

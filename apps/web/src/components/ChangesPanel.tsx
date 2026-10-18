@@ -4,6 +4,7 @@ import type { ChangeImpact } from '@rastro/graph';
 import { copyText } from '../lib/editor';
 import { useI18n } from '../lib/i18n';
 import { entityName } from '../lib/names';
+import { shellQuote } from '../lib/shell';
 import { IconCopy } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -167,12 +168,9 @@ function CopyTests({ files }: { files: string[] }) {
         className="button ghost"
         title={t.changes.copyTestsTitle}
         onClick={async () => {
-          // caminhos com espaço vão entre aspas, como numa linha de comando
-          const ok = await copyText(
-            files
-              .map((f) => (/[\s'"$`\\]/.test(f) ? `'${f.replace(/'/g, `'\\''`)}'` : f))
-              .join(' '),
-          );
+          // o texto vai para um shell: o que não for um caminho comum vai entre aspas simples
+          // (os nomes vêm do projeto analisado, e `;`, `|`, `>`… executariam comandos)
+          const ok = await copyText(files.map(shellQuote).join(' '));
           setCopied(ok);
           setTimeout(() => setCopied(false), 1400);
         }}

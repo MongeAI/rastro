@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { highlightLines } from '../lib/highlight';
 import { useI18n } from '../lib/i18n';
 
@@ -16,10 +16,20 @@ type State =
   { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; lines: string[] };
 
 const cache = new Map<string, Promise<string[]>>();
+// muda a cada clearSourceCache: o trecho aberto é lido de novo
+let revision = 0;
+const listeners = new Set<() => void>();
 
 /** Esquece o código já carregado (o projeto mudou: modo --watch). */
 export function clearSourceCache(): void {
   cache.clear();
+  revision++;
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 function fetchSource(file: string): Promise<string[]> {
@@ -45,6 +55,8 @@ export function SourceView({ file, startLine, endLine, available, highlightRange
   const [state, setState] = useState<State>({ status: 'loading' });
   const [showAll, setShowAll] = useState(false);
   const firstHighlight = useRef<HTMLDivElement>(null);
+  const rev = useSyncExternalStore(subscribe, () => revision);
+  const shownFile = useRef<string | null>(null);
 
   // ao abrir o arquivo inteiro, mantém o trecho selecionado à vista
   useEffect(() => {
@@ -52,10 +64,14 @@ export function SourceView({ file, startLine, endLine, available, highlightRange
   }, [showAll]);
 
   useEffect(() => {
-    setShowAll(false);
     if (!available) return;
+    // outro arquivo: volta ao trecho; o mesmo arquivo relido (--watch) troca o código sem piscar
+    if (shownFile.current !== file) {
+      shownFile.current = file;
+      setShowAll(false);
+      setState({ status: 'loading' });
+    }
     let alive = true;
-    setState({ status: 'loading' });
     fetchSource(file).then(
       (lines) => alive && setState({ status: 'ok', lines }),
       (err: Error) => alive && setState({ status: 'error', message: err.message }),
@@ -63,7 +79,7 @@ export function SourceView({ file, startLine, endLine, available, highlightRange
     return () => {
       alive = false;
     };
-  }, [file, available]);
+  }, [file, available, rev]);
 
   if (!available) {
     return <p className="muted small">{t.source.unavailable}</p>;

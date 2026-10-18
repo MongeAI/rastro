@@ -30,6 +30,11 @@ export function ShortcutsDialog({ onClose }: { onClose(): void }) {
             e.stopPropagation();
             onClose();
           }
+          // o botão de fechar é o único item focável: o foco não sai do diálogo
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            closeRef.current?.focus();
+          }
         }}
       >
         <header className="shortcuts-head">

@@ -10,6 +10,7 @@ import puppeteer, { type Browser } from 'puppeteer-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   bin,
+  cyEval,
   findChrome,
   fixture,
   openPage,
@@ -242,9 +243,15 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
   it('interface em inglês e troca de idioma', async () => {
     const { page, problems } = await openPage(browser, basic.url, { lang: 'en' });
     expect(await text(page, '.stage-status')).toMatch(/^\d+ nodes · \d+ visible relationships/);
+    await pick(page, 'slugify');
+    const highlighted = () => cyEval(page, (cy) => [cy.$('.chosen').length, cy.$('.faded').length]);
+    const before = await highlighted();
+    expect(before[0]).toBe(1);
     await page.click('.lang-button');
     await sleep(200);
     expect(await text(page, '.stage-status')).toMatch(/nós/);
+    // trocar o idioma não apaga o destaque da seleção no mapa
+    expect(await highlighted()).toEqual(before);
     expect(problems).toEqual([]);
     await page.close();
   });
@@ -313,6 +320,50 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
       expect(await text(page, '.details-name')).toBe('alpha');
       await pick(page, 'gamma');
       expect(await text(page, '.details-name')).toBe('gamma');
+      expect(problems).toEqual([]);
+      await page.close();
+    } finally {
+      await run.stop();
+    }
+  });
+
+  it('--watch --changes: salvar não mexe no zoom nem no trecho de código fica velho', async () => {
+    const root = gitProject({
+      'src/a.ts': 'export function alpha() {\n  return 1;\n}\n',
+      'src/b.ts': 'export function beta() {\n  return 2;\n}\n',
+    });
+    fs.writeFileSync(path.join(root, 'src/a.ts'), 'export function alpha() {\n  return 3;\n}\n');
+    const run = await startRastro([
+      root,
+      '--watch',
+      '--changes',
+      '-o',
+      path.join(graphOut, 'watch-changes.json'),
+    ]);
+    try {
+      const { page, problems } = await openPage(browser, run.url);
+      await pick(page, 'beta');
+      await page.waitForSelector('.source');
+      await waitForMap(page);
+      await cyEval(page, (cy) => {
+        cy.stop();
+        cy.zoom(2.5);
+        cy.pan({ x: -300, y: -200 });
+      });
+      const viewport = () => cyEval(page, (cy) => [cy.zoom(), cy.pan().x, cy.pan().y]);
+      const before = await viewport();
+      // três linhas a mais antes de beta: o trecho precisa ser relido do disco
+      fs.writeFileSync(
+        path.join(root, 'src/b.ts'),
+        '// um\n// dois\n// três\nexport function beta() {\n  return 2;\n}\n',
+      );
+      await page.waitForFunction(
+        () => document.querySelector('.source')?.textContent?.includes('// três'),
+        { timeout: 20_000 },
+      );
+      await sleep(500);
+      expect(await viewport()).toEqual(before);
+      expect(await text(page, '.details-name')).toBe('beta');
       expect(problems).toEqual([]);
       await page.close();
     } finally {

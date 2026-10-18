@@ -39,7 +39,9 @@ export function Search({ index, onPick, focusSignal }: Props) {
         (t instanceof HTMLInputElement && !['checkbox', 'radio'].includes(t.type)) ||
         t instanceof HTMLTextAreaElement ||
         t instanceof HTMLSelectElement;
-      if (e.key === '/' && !typing) {
+      // com um diálogo aberto (atalhos, paleta), o foco fica nele
+      const dialog = document.querySelector('[aria-modal="true"]');
+      if (e.key === '/' && !typing && !dialog) {
         e.preventDefault();
         inputRef.current?.focus();
         inputRef.current?.select();

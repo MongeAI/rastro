@@ -149,10 +149,20 @@ const MAX_FIT_ZOOM = 1.25;
 const FAST_EDGES = 2500;
 
 /** As classes do elemento já são exatamente estas? (evita reaplicar estilo à toa) */
-function sameClasses(el: cytoscape.SingularElementReturnValue, classes: string): boolean {
-  const wanted = classes.split(' ').filter(Boolean);
-  const current = el.classes();
-  return current.length === wanted.length && wanted.every((c) => el.hasClass(c));
+// classes que vêm da visão; as demais (seleção, caminho, mudanças, hover…) são do destaque e
+// não podem ser apagadas quando a visão é sincronizada
+const NODE_CLASSES = ['cycle', 'expandable', 'collapsed', 'not-analyzed'];
+const EDGE_CLASSES = ['fast', 'type-only', 'aggregated', 'cycle'];
+
+/** Liga e desliga só as classes estruturais que mudaram. */
+function syncClasses(
+  el: cytoscape.SingularElementReturnValue,
+  structural: string[],
+  classes: string,
+): void {
+  const wanted = new Set(classes.split(' ').filter(Boolean));
+  for (const c of structural)
+    if (el.hasClass(c) !== wanted.has(c)) el.toggleClass(c, wanted.has(c));
 }
 
 function depthOf(n: ViewNode, byId: Map<string, ViewNode>): number {
@@ -489,7 +499,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
             expanded: n.expanded,
             collapsed: n.collapsed,
           });
-        if (!sameClasses(existing, classes)) existing.classes(classes);
+        syncClasses(existing, NODE_CLASSES, classes);
         return;
       }
       structural = true;
@@ -571,7 +581,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
             existing.data({ count: e.count, resolution: e.resolution });
           if ((existing.data('members') as string[] | undefined)?.join('|') !== e.members.join('|'))
             existing.data('members', e.members);
-          if (!sameClasses(existing, classes)) existing.classes(classes);
+          syncClasses(existing, EDGE_CLASSES, classes);
           continue;
         }
         structural = true;

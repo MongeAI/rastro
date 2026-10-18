@@ -146,3 +146,17 @@ export async function pressCombo(page: Page, modifier: 'Control' | 'Alt', key: s
   await page.keyboard.press(key as Parameters<Page['keyboard']['press']>[0]);
   await page.keyboard.up(modifier);
 }
+
+/**
+ * Roda uma função com a instância do Cytoscape do mapa (o Cytoscape guarda a instância em
+ * `_cyreg` no elemento do container). A função vai como texto: só pode usar os argumentos.
+ */
+export async function cyEval<T, A extends unknown[]>(
+  page: Page,
+  fn: (cy: import('cytoscape').Core, ...args: A) => T,
+  ...args: A
+): Promise<T> {
+  return (await page.evaluate(
+    `(${fn.toString()})(document.querySelector('.graph-canvas')._cyreg.cy, ...${JSON.stringify(args)})`,
+  )) as T;
+}
