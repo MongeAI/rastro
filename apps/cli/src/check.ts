@@ -18,7 +18,7 @@ import {
   type RuleViolation,
 } from '@rastro/graph';
 import { getLang, t } from './i18n.js';
-import { mdCode, type RenderOptions } from './impact.js';
+import { fileLink, mdCode, type RenderOptions } from './markdown.js';
 import { bold, cyan, dim, green, red, safeText, tildify, yellow } from './term.js';
 
 /**
@@ -351,32 +351,17 @@ function violationText(v: ViolationItem): string {
 
 export const CHECK_MARKER = '<!-- rastro-check -->';
 
-function link(file: string, line: number | undefined, options: RenderOptions): string {
-  const label = mdCode(`${file}${line ? `:${line}` : ''}`);
-  if (!options.link) return label;
-  const encode = (segment: string) =>
-    encodeURIComponent(segment).replace(
-      /[!'()*~]/g,
-      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-    );
-  const url =
-    `${options.link.replace(/\/+$/, '')}/` +
-    file.split('/').map(encode).join('/') +
-    (line ? `#L${line}` : '');
-  return `[${label}](${url})`;
-}
-
 function violationMd(v: ViolationItem, options: RenderOptions): string {
   const m = t().rules;
   if (v.cycle) {
-    const steps = v.cycle.map((s) => link(s.file, s.line, options));
+    const steps = v.cycle.map((s) => fileLink(s.file, s.line, options));
     const size = v.cycleSize && v.cycleSize > v.cycle.length ? ` (${m.cycleOf(v.cycleSize)})` : '';
     return `${steps.join(' → ')} → ${mdCode(v.cycle[0]!.file)}${size}`;
   }
   const to = v.package ? `${mdCode(v.to)} (${m.package})` : mdCode(v.to);
   const first = v.evidence[0];
   const more = v.count > 1 ? ` ${m.times(v.count)}` : '';
-  return `${mdCode(v.from)} → ${to} (${kindText(v)}) ${first ? link(first.file, first.line, options) : ''}${more}`;
+  return `${mdCode(v.from)} → ${to} (${kindText(v)}) ${first ? fileLink(first.file, first.line, options) : ''}${more}`;
 }
 
 /**

@@ -17,6 +17,9 @@ import {
 } from '@rastro/graph';
 import { buildCheckReport, rulesMarkdown, rulesText, type CheckReport } from './check.js';
 import { getLang, t } from './i18n.js';
+import { fileLink, mdCode, type RenderOptions } from './markdown.js';
+
+export { mdCode, type RenderOptions } from './markdown.js';
 import { bold, cyan, dim, red, safeText, yellow } from './term.js';
 
 /**
@@ -241,13 +244,6 @@ export function testPathsFrom(report: ImpactReport, root: string, cwd = process.
   });
 }
 
-export interface RenderOptions {
-  /** Base dos links `arquivo:linha` no Markdown (ex.: https://github.com/org/repo/blob/<commit>). */
-  link?: string;
-  /** Máximo de itens por lista no texto e no Markdown (o JSON vem completo). */
-  limit?: number;
-}
-
 export function renderImpact(
   report: ImpactReport,
   format: ImpactFormat,
@@ -327,43 +323,6 @@ function renderText(report: ImpactReport, options: RenderOptions): string {
 /** Marcador para encontrar e atualizar o mesmo comentário a cada push. */
 export const MARKDOWN_MARKER = '<!-- rastro-impact -->';
 
-/**
- * Texto vindo do projeto analisado (nomes, caminhos) em um trecho de código: nada de links,
- * imagens, menções ou HTML injetados num comentário público. Caracteres de controle e quebras
- * de linha viram espaço; em tabelas, `|` é escapado (o GitHub exige até dentro de código).
- */
-export function mdCode(text: string, inTable = false): string {
-  // eslint-disable-next-line no-control-regex -- é exatamente o que queremos remover
-  let clean = text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
-  if (inTable) clean = clean.replace(/\|/g, '\\|');
-  const longest = Math.max(0, ...[...clean.matchAll(/`+/g)].map((match) => match[0].length));
-  const fence = '`'.repeat(longest + 1);
-  const pad = clean.startsWith('`') || clean.endsWith('`') ? ' ' : '';
-  return `${fence}${pad}${clean}${pad}${fence}`;
-}
-
-function fileLink(
-  i: Pick<ImpactItem, 'file' | 'line'>,
-  options: RenderOptions,
-  inTable: boolean,
-): string {
-  if (!i.file) return '';
-  const label = mdCode(`${i.file}${i.line ? `:${i.line}` : ''}`, inTable);
-  if (!options.link) return label;
-  // encodeURIComponent deixa ( ) ! * ' ~ como estão: um ")" sem par num nome de arquivo
-  // fecharia o link antes da hora e o resto viraria Markdown solto no comentário
-  const encode = (segment: string) =>
-    encodeURIComponent(segment).replace(
-      /[!'()*~]/g,
-      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-    );
-  const url =
-    `${options.link.replace(/\/+$/, '')}/` +
-    i.file.split('/').map(encode).join('/') +
-    (i.line ? `#L${i.line}` : '');
-  return `[${label}](${url})`;
-}
-
 function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
   const m = t().impact;
   const labels = kindLabels(getLang());
@@ -385,7 +344,9 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
       '| --- | --- | --- |',
     );
     for (const i of report.changed.slice(0, limit))
-      out.push(`| ${mdCode(i.name, true)} | ${kind(i.kind)} | ${fileLink(i, options, true)} |`);
+      out.push(
+        `| ${mdCode(i.name, true)} | ${kind(i.kind)} | ${fileLink(i.file, i.line, options, true)} |`,
+      );
     more(report.changed.length);
     out.push('');
   }
@@ -395,7 +356,7 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
     out.push(`#### ${m.broken}`, '', `_${m.brokenHint}_`, '');
     for (const b of report.broken.slice(0, limit))
       out.push(
-        `- ${mdCode(b.from.name)} ${fileLink(brokenSite(b), options, false)} — ${brokenText(b, (s) => mdCode(s))}`,
+        `- ${mdCode(b.from.name)} ${fileLink(b.file, b.line, options)} — ${brokenText(b, (s) => mdCode(s))}`,
       );
     more(report.broken.length);
     out.push('');
@@ -410,7 +371,7 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
     );
     for (const i of report.impacted.slice(0, limit))
       out.push(
-        `| ${i.depth} | ${mdCode(i.name, true)} | ${kind(i.kind)} | ${viaMd(i)} | ${fileLink(i, options, true)} |`,
+        `| ${i.depth} | ${mdCode(i.name, true)} | ${kind(i.kind)} | ${viaMd(i)} | ${fileLink(i.file, i.line, options, true)} |`,
       );
     more(report.impacted.length);
     out.push('');
@@ -419,7 +380,7 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
   if (report.routes.length) {
     out.push(`#### ${m.routes}`, '');
     for (const i of report.routes.slice(0, limit))
-      out.push(`- ${mdCode(i.name)} ${fileLink(i, options, false)}`);
+      out.push(`- ${mdCode(i.name)} ${fileLink(i.file, i.line, options)}`);
     more(report.routes.length);
     out.push('');
   }
@@ -477,11 +438,6 @@ function summaryLine(report: ImpactReport): string {
     ...(s.routes ? [m.routesCount(s.routes)] : []),
     ...(s.tests ? [m.testsCount(s.tests)] : []),
   ].join(' · ');
-}
-
-/** Onde aparece a referência quebrada: arquivo e linha (texto: `arquivo:linha`). */
-function brokenSite(b: BrokenItem): { file?: string; line?: number } {
-  return b.file ? { file: b.file, ...(b.line ? { line: b.line } : {}) } : {};
 }
 
 function brokenWhere(b: BrokenItem): string {
