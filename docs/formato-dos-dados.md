@@ -122,6 +122,17 @@ Semântica de cada tipo:
 
 `{ level: "info" | "warning" | "error", code, message, file?, line? }`. Códigos atuais: `symlink-skipped`, `file-too-large`, `max-files-reached`, `unreadable-directory`, `invalid-config`, `syntax-error`, `no-source-files`, `analysis-failed` (uma etapa falhou em um arquivo, por exemplo por aninhamento extremo; o resto da análise continua).
 
+## Exportação para outros formatos
+
+`rastro export` converte o grafo (ou a parte que aparece em um nível da interface) para outros formatos. A conversão fica em `@rastro/graph` (`toMermaid`, `toDot`, `toGraphML`), sem APIs do Node, e usa o mesmo `computeView` da interface: no nível `modules` as pastas ficam recolhidas e as relações entre elas são somadas.
+
+- `json`: o próprio grafo deste documento. Com `--folder`, só os nós da pasta (e as pastas acima dela, como moldura), as relações entre eles e os pacotes externos usados de dentro dela; as contagens de `stats` são recalculadas e um diagnóstico `folder-filter` avisa que os contadores de chamadas fora do grafo continuam valendo para o projeto inteiro.
+- `graphml`: lista plana de nós e relações, com os atributos `label`, `kind`, `parent`, `file`, `line`, `inCycle`, `fileCount` (nós) e `kind`, `resolution`, `count`, `aggregated`, `typeOnly`, `file`, `line` (relações; arquivo e linha da primeira evidência). Relações somadas têm id `agg:<tipo>:<origem>-><destino>`.
+- `mermaid` e `dot`: diagramas para leitura, com ids próprios do formato (o id original fica no `tooltip` do DOT).
+- `html`: a interface completa num arquivo só, com o grafo em `<script id="rastro-graph" type="application/json">` (com `<`, `>` e `&` escapados como `\u003c`...).
+
+`rastro compare a.json b.json --json` produz a diferença entre duas análises (`compareGraphs` em `@rastro/graph`): `nodes.added`/`nodes.removed`, `edges.added`/`edges.removed`/`edges.resolutionChanged` (sem as relações `contains`, que só repetem os nós), `cycles.added`/`cycles.removed` e `stats` (`before`, `after`, `delta` de arquivos, funções, classes, métodos, rotas, pacotes, relações não resolvidas, ciclos, nós e relações). Tudo é comparado pelo `id`.
+
 ## Exemplo
 
 [`docs/examples/ts-basic.graph.json`](examples/ts-basic.graph.json) é o grafo do fixture `fixtures/ts-basic` (com `project.root` substituído por um caminho genérico).

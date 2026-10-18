@@ -47,9 +47,9 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 7. Compartilhar e integrar
 
-- ⬜ `rastro export --format mermaid|dot|graphml|json` (filtros por nível/pasta).
-- ⬜ **Relatório HTML único e offline** (`rastro export --format html`): o mapa navegável num arquivo só, para mandar ao time ou anexar a um PR.
-- ⬜ `rastro compare a.json b.json`: o que entrou e saiu entre duas análises.
+- ✅ `rastro export --format mermaid|dot|graphml|json` (filtros por nível/pasta).
+- ✅ **Relatório HTML único e offline** (`rastro export --format html`): o mapa navegável num arquivo só, para mandar ao time ou anexar a um PR.
+- ✅ `rastro compare a.json b.json`: o que entrou e saiu entre duas análises.
 
 ### 8. Navegação de outro nível
 

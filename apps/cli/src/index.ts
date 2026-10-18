@@ -1,17 +1,25 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { analyzeProject } from '@rastro/analyzer';
 import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
-import { computeChangeImpact, GraphIndex } from '@rastro/graph';
+import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
+import { formatDiff } from './compare.js';
+import {
+  defaultReportPath,
+  parseExportRequest,
+  renderExport,
+  UsageError,
+  writeExport,
+} from './export.js';
+import { collectChanges, GitError } from './git.js';
 import { startServer, type RunningServer } from './server.js';
 import { watchProject } from './watch.js';
-import { collectChanges, GitError } from './git.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
+import { bold, cyan, dim, fail, red, tildify, yellow } from './term.js';
 
 const HELP = `
 Rastro ${RASTRO_VERSION} — siga o rastro do seu código (mapa navegável de projetos JS/TS)
@@ -22,10 +30,22 @@ Uso:
   rastro analyze <caminho>          só analisa e salva o grafo em JSON
   rastro serve <grafo.json>         abre o mapa de um JSON salvo anteriormente
   rastro validate <grafo.json>      confere se um JSON exportado é válido
+  rastro export <caminho|grafo.json> --format <formato>
+                                  exporta o mapa: mermaid, dot, graphml, json ou html
+                                  (html = relatório navegável num arquivo só, offline)
+  rastro compare <a.json> <b.json>  o que entrou, saiu e mudou entre duas análises
 
 Opções:
-  -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário)
+  -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário); no export,
+                            o arquivo gerado (padrão: saída padrão; html: <projeto>.rastro.html)
       --stdout              (analyze) escreve o JSON na saída padrão
+  -f, --format <formato>    (export) mermaid, dot, graphml, json ou html
+      --level <nível>       (export) modules, files (padrão) ou symbols
+      --folder <pasta>      (export) só esta pasta, ex.: src/services
+      --edges <tipos>       (export) relações, ex.: imports,calls (padrão: imports,calls,extends)
+      --external            (export) inclui pacotes externos (npm, Node.js)
+      --no-unresolved       (export) omite referências não resolvidas
+      --json                (compare) resultado em JSON
   -p, --port <n>            porta da interface (padrão: 4321, ou a próxima livre)
       --no-open             não abre o navegador automaticamente
   -e, --exclude <padrão>    ignora caminhos (sintaxe do .gitignore; pode repetir)
@@ -42,29 +62,8 @@ O Rastro só lê arquivos: não executa o projeto, não instala dependências e 
 envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
 `;
 
-const color = (code: number) => (s: string) =>
-  process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[${code}m${s}\x1b[0m` : s;
-const bold = color(1);
-const dim = color(2);
-const red = color(31);
-const yellow = color(33);
-const cyan = color(36);
-
-function fail(message: string): never {
-  process.stderr.write(`${red('erro:')} ${message}\n`);
-  process.exit(1);
-}
-
 function webRoot(): string {
   return fileURLToPath(new URL('./web/', import.meta.url));
-}
-
-/** Mostra a pasta pessoal como ~ (não expõe o nome do usuário em capturas e logs). */
-function tildify(p: string): string {
-  const home = os.homedir();
-  return home && (p === home || p.startsWith(`${home}${path.sep}`))
-    ? `~${p.slice(home.length)}`
-    : p;
 }
 
 function printChanges(graph: RastroGraph): void {
@@ -176,6 +175,13 @@ async function main(argv: string[]): Promise<void> {
         since: { type: 'string' },
         'trust-git-config': { type: 'boolean' },
         watch: { type: 'boolean', short: 'w' },
+        format: { type: 'string', short: 'f' },
+        level: { type: 'string' },
+        folder: { type: 'string' },
+        edges: { type: 'string' },
+        external: { type: 'boolean' },
+        'no-unresolved': { type: 'boolean' },
+        json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -187,7 +193,7 @@ async function main(argv: string[]): Promise<void> {
   if (values.version) return void process.stdout.write(`${RASTRO_VERSION}\n`);
   if (values.help || positionals.length === 0) return void process.stdout.write(HELP);
 
-  const commands = ['open', 'analyze', 'serve', 'validate'];
+  const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare'];
   const [first, ...rest] = positionals;
   // "rastro analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho
   const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
@@ -206,8 +212,15 @@ async function main(argv: string[]): Promise<void> {
   const port = values.port !== undefined ? Number(values.port) : 4321;
   if (port > 65535) fail('--port precisa ser um número entre 0 e 65535.');
   if (values.stdout && command !== 'analyze') fail('--stdout só funciona com "rastro analyze".');
-  if (values.out && command !== 'analyze' && command !== 'open')
+  if (values.out && command !== 'analyze' && command !== 'open' && command !== 'export')
     fail(`--out não se aplica a "${command}".`);
+  if (values.json && command !== 'compare') fail('--json só funciona com "rastro compare".');
+  if (command !== 'export') {
+    const exportOnly = (
+      ['format', 'level', 'folder', 'edges', 'external', 'no-unresolved'] as const
+    ).find((k) => values[k] !== undefined);
+    if (exportOnly) fail(`--${exportOnly} só funciona com "rastro export".`);
+  }
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1))
     fail('--max-files precisa ser um inteiro positivo.');
@@ -230,6 +243,83 @@ async function main(argv: string[]): Promise<void> {
     process.stdout.write(
       `válido — ${g.nodes.length} nós, ${g.edges.length} relações (schema ${g.schemaVersion})\n`,
     );
+    return;
+  }
+
+  if (command === 'compare') {
+    const other = rest[1];
+    if (!other || rest.length > 2)
+      fail('informe dois arquivos JSON. Exemplo: rastro compare antes.json depois.json');
+    let before: RastroGraph;
+    let after: RastroGraph;
+    try {
+      before = loadGraph(target);
+      after = loadGraph(other);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+    const diff = compareGraphs(before, after);
+    process.stdout.write(values.json ? `${JSON.stringify(diff, null, 2)}\n` : formatDiff(diff));
+    return;
+  }
+
+  if (command === 'export') {
+    let request: ReturnType<typeof parseExportRequest>;
+    try {
+      request = parseExportRequest({
+        format: values.format,
+        ...(values.level !== undefined ? { level: values.level } : {}),
+        ...(values.folder !== undefined ? { folder: values.folder } : {}),
+        ...(values.edges !== undefined ? { edges: values.edges } : {}),
+        external: !!values.external,
+        noUnresolved: !!values['no-unresolved'],
+      });
+    } catch (err) {
+      fail((err as Error).message);
+    }
+    const source = path.resolve(target);
+    if (!fs.existsSync(source)) fail(`caminho não encontrado: ${source}`);
+    let graph: RastroGraph;
+    if (fs.statSync(source).isDirectory()) {
+      graph = await analyzeProject(source, {
+        ...(values.exclude ? { exclude: values.exclude } : {}),
+        respectGitignore: !values['no-gitignore'],
+        ...(maxFiles ? { maxFiles } : {}),
+        onProgress: (msg) => process.stderr.write(dim(`  ${msg}\n`)),
+      });
+    } else {
+      try {
+        graph = loadGraph(source);
+      } catch (err) {
+        fail((err as Error).message);
+      }
+    }
+    let content: string;
+    try {
+      content = renderExport(graph, request.format, request.options, webRoot());
+    } catch (err) {
+      if (err instanceof UsageError) fail(err.message);
+      fail(`não foi possível exportar: ${(err as Error).message}`);
+    }
+    const outFile =
+      values.out ?? (request.format === 'html' ? defaultReportPath(graph) : undefined);
+    if (!outFile) {
+      process.stdout.write(content);
+      return;
+    }
+    let written: string;
+    try {
+      written = writeExport(outFile, content);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+    process.stderr.write(`${request.format} salvo em ${cyan(tildify(written))}\n`);
+    if (request.format === 'html')
+      process.stderr.write(
+        dim(
+          '  Abra no navegador: o mapa funciona offline, sem servidor (o código-fonte não vai junto).\n',
+        ),
+      );
     return;
   }
 

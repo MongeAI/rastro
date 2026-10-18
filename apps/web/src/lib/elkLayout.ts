@@ -17,10 +17,25 @@ export type Positions = Record<string, { x: number; y: number }>;
  */
 let elk: ELK | null = null;
 let running = false;
+let embeddedWorkerUrl: string | null = null;
+
+/**
+ * Endereço do worker. No relatório HTML offline (`rastro export --format html`, aberto via
+ * file://) o navegador não cria workers a partir de arquivos locais: o relatório embute o
+ * código do worker em `window.__RASTRO_ELK_WORKER_SOURCE__` e ele é carregado por um Blob URL
+ * (criado uma vez só). Fora do relatório, usa o arquivo normal servido pela CLI.
+ */
+function workerUrl(): string {
+  const embedded = (globalThis as { __RASTRO_ELK_WORKER_SOURCE__?: unknown })
+    .__RASTRO_ELK_WORKER_SOURCE__;
+  if (typeof embedded !== 'string' || !embedded) return elkWorkerUrl;
+  embeddedWorkerUrl ??= URL.createObjectURL(new Blob([embedded], { type: 'text/javascript' }));
+  return embeddedWorkerUrl;
+}
 
 function getElk(): ELK {
   if (!elk)
-    elk = new ElkConstructor({ workerUrl: elkWorkerUrl, workerFactory: (url) => new Worker(url!) });
+    elk = new ElkConstructor({ workerUrl: workerUrl(), workerFactory: (url) => new Worker(url!) });
   return elk;
 }
 

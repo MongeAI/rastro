@@ -88,6 +88,21 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
   }, []);
 
   useEffect(() => {
+    // Relatório HTML offline (`rastro export --format html`): o grafo vem embutido na própria
+    // página e não há servidor. Sem servidor, o código-fonte fica indisponível (fromServer=false).
+    const embedded = document.getElementById('rastro-graph');
+    if (embedded) {
+      try {
+        openGraph(JSON.parse(embedded.textContent ?? ''), false);
+      } catch (err) {
+        setLoad({
+          status: 'error',
+          message: (t) => t.load.corruptReport((err as Error).message),
+          canPickFile: true,
+        });
+      }
+      return;
+    }
     fetch('/api/graph')
       .then(async (res) => {
         if (res.status === 401) {

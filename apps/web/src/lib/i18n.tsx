@@ -30,6 +30,7 @@ const pt = {
     noGraph:
       'Nenhum grafo foi carregado. Rode "rastro <caminho-do-projeto>" no terminal, ou abra um JSON exportado pelo Rastro.',
     cannotRead: (name: string, error: string) => `Não foi possível ler ${name}: ${error}`,
+    corruptReport: (error: string) => `O grafo embutido neste relatório está corrompido: ${error}`,
     openJson: 'Abrir arquivo .json',
     dropHint: 'Você também pode arrastar o arquivo para esta janela.',
   },
@@ -337,6 +338,7 @@ const en: Messages = {
     noGraph:
       'No graph was loaded. Run "rastro <project-path>" in your terminal, or open a JSON file exported by Rastro.',
     cannotRead: (name, error) => `Could not read ${name}: ${error}`,
+    corruptReport: (error) => `The graph embedded in this report is corrupted: ${error}`,
     openJson: 'Open .json file',
     dropHint: 'You can also drop the file onto this window.',
   },

@@ -179,6 +179,8 @@ rastro analyze <path>           # only analyze and save the JSON
 rastro analyze <path> --stdout  # write the JSON to standard output
 rastro serve <graph.json>       # open the map of a previously saved JSON
 rastro validate <graph.json>    # check that a JSON file is a valid graph
+rastro export <path|graph.json> --format mermaid|dot|graphml|json|html
+rastro compare <a.json> <b.json> # what was added, removed or changed between two analyses
 ```
 
 | Option                 | Purpose                                                                  |
@@ -189,6 +191,33 @@ rastro validate <graph.json>    # check that a JSON file is a valid graph
 | `-e, --exclude <glob>` | Ignore paths using `.gitignore` syntax (repeatable)                      |
 | `--no-gitignore`       | Do not use the project's `.gitignore`                                    |
 | `--max-files <n>`      | Maximum number of analyzed files (default 10000)                         |
+
+### Share and integrate
+
+`rastro export` takes a project folder (it analyzes first, honoring `--exclude`, `--no-gitignore` and `--max-files`) or a saved `graph.json`, and writes to standard output unless you pass `-o`:
+
+```bash
+rastro export . --format mermaid > docs/architecture.mmd    # paste into a PR or README
+rastro export . --format dot --level symbols | dot -Tsvg > map.svg
+rastro export graph.json --format graphml -o map.graphml     # yEd, Gephi, Cytoscape, networkx
+rastro export . --format json --folder src/services          # the graph of one folder only
+rastro export . --format html                                # ./<project>.rastro.html
+```
+
+| Option             | Purpose                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| `-f, --format <f>` | `mermaid`, `dot`, `graphml`, `json` or `html`                                                   |
+| `--level <level>`  | `modules` (collapsed folders), `files` (default) or `symbols`: the same levels as the interface |
+| `--folder <path>`  | Only this folder and its subfolders, e.g. `src/services`                                        |
+| `--edges <kinds>`  | Relationships to draw, e.g. `imports,calls` (default: `imports,calls,extends`)                  |
+| `--external`       | Include external packages (npm, Node.js built-ins)                                              |
+| `--no-unresolved`  | Leave out unresolved references                                                                 |
+
+- **Mermaid** uses subgraphs for folders (and for files and classes at the `symbols` level), dashed red nodes and lines for unresolved references and dashed grey ones for external packages. Diagrams above 400 nodes are refused with a hint (`--level modules` or `--folder`), since Mermaid stops being readable and GitHub refuses large diagrams.
+- **DOT** (Graphviz) and **GraphML** have no size limit. GraphML keeps `kind`, `resolution`, `count`, `file` and `line` as attributes.
+- **HTML** is a **single offline file** with the full interactive map: JavaScript, styles, fonts and the graph are embedded, it opens straight from disk (no server, no internet) and a Content Security Policy blocks any network access. Source code is not included, and your home folder in the project path is shortened to `~`. Handy to send to the team or attach to a PR.
+
+`rastro compare before.json after.json` lists the entities added and removed, relationships added, removed or whose resolution changed, new or resolved import cycles and the difference in the numbers (files, functions, unresolved references, cycles…). Use `--json` for a machine-readable diff (for CI, for example).
 
 Interface shortcuts: <kbd>/</kbd> search · <kbd>F</kbd> fit the map · <kbd>Esc</kbd> clear the selection · double-click opens folders and files · the URL keeps the selection (`#n=…`).
 
