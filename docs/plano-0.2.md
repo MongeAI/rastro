@@ -80,5 +80,6 @@ Outras linguagens (Python/Go) e extensões de editor ficam para a 0.3, para a 0.
 
 - [ ] Rodar tudo numa máquina limpa: `npm ci && npm run build && npm test && npm run test:e2e`.
 - [ ] Testar o pacote empacotado: `npm pack -w apps/cli` e `npx ./mongeai-rastro-0.2.0.tgz` num projeto real.
-- [ ] Merge de `next` em `main`, tag `v0.2.0`, release no GitHub com o CHANGELOG.
-- [ ] `npm publish` (feito pelo dono do pacote, com 2FA).
+- [ ] `npm publish` (feito pelo dono do pacote, com 2FA) **antes** da tag: a GitHub Action usa `@mongeai/rastro@0.2.0` do npm.
+- [ ] Merge de `next` em `main`, tag `v0.2.0` (é ela que `uses: MongeAI/rastro@v0.2.0` usa), release no GitHub com o CHANGELOG.
+- [ ] Depois do lançamento: workflow do próprio repositório usando a action em cada PR (dogfooding).

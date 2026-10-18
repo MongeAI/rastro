@@ -117,9 +117,50 @@ describe('relatório de impacto', () => {
     expect(row).toBeDefined();
     // a célula do arquivo continua um link do próprio repositório, com o nome codificado
     expect(row).toContain(
-      'https://github.com/o/r/blob/abc/src/a%7Cb%5D(https%3A%252F%252Fevil).ts',
+      'https://github.com/o/r/blob/abc/src/a%7Cb%5D%28https%3A%252F%252Fevil%29.ts',
     );
     expect(md).not.toMatch(/\]\(https:\/\/evil/);
+  });
+
+  it('um ")" sem par no nome do arquivo não fecha o link antes da hora', async () => {
+    setLang('en');
+    const root = changedProject({
+      'src/x)~www.evil-example.com/a.ts':
+        "import { sum } from '../math';\nexport const y = sum(1, 1);\n",
+    });
+    const report = buildImpactReport(await graphWithChanges(root));
+    const md = renderImpact(report, 'markdown', { link: 'https://github.com/o/r/blob/abc' });
+    expect(md).toContain('https://github.com/o/r/blob/abc/src/x%29%7Ewww.evil-example.com/a.ts');
+    // o único ")" de fechamento de link em cada linha é o do próprio link
+    // fora dos trechos de código, nada de "evil-example" solto (que viraria um link automático)
+    for (const line of md.split('\n').filter((l) => l.includes('evil-example'))) {
+      const outsideCode = line.replace(/`[^`]*`/g, '');
+      expect(outsideCode.replace(/\(https:\/\/github\.com\/o\/r\/[^)\s]*\)/g, '')).not.toContain(
+        'evil-example',
+      );
+    }
+  });
+
+  it('arquivo renomeado não aparece ao mesmo tempo como alterado e como afetado', async () => {
+    setLang('en');
+    const root = changedProject();
+    execFileSync('git', ['mv', 'src/app.ts', 'src/app2.ts'], { cwd: root });
+    const report = buildImpactReport(await graphWithChanges(root));
+    const changed = new Set(report.changed.map((c) => c.id));
+    expect(report.impacted.filter((i) => changed.has(i.id))).toEqual([]);
+    expect(report.summary.changed).toBe(1); // como na aba Mudanças: só entidades
+  });
+
+  it('nomes enormes são cortados (o comentário tem limite de tamanho)', async () => {
+    setLang('en');
+    const long = 'x'.repeat(5000);
+    const root = changedProject({
+      'src/route.ts': `import express from 'express';\nimport { sum } from './math';\nconst app = express();\napp.get('/${long}', () => sum(1, 2));\n`,
+      'package.json': '{"dependencies":{"express":"*"}}',
+    });
+    const report = buildImpactReport(await graphWithChanges(root));
+    for (const i of [...report.changed, ...report.impacted, ...report.routes])
+      expect(i.name.length).toBeLessThanOrEqual(160);
   });
 
   it('textos em português', async () => {
@@ -156,6 +197,14 @@ describe.skipIf(!bundled)('rastro impact (CLI empacotada)', () => {
     const json = run(['impact', saved, '--format', 'json']);
     expect((JSON.parse(json.stdout) as { summary: { changed: number } }).summary.changed).toBe(1);
 
+    const testsFile = path.join(tmp('rastro-impact-out-'), 'tests.txt');
+    expect(run(['impact', '.', '--tests', '-o', testsFile], root).status).toBe(0);
+    expect(fs.readFileSync(testsFile, 'utf8')).toBe('./test/math.test.ts\n');
+
+    const textFile = path.join(tmp('rastro-impact-out-'), 'impact.txt');
+    expect(run(['impact', root, '-o', textFile]).status).toBe(0);
+    expect(fs.readFileSync(textFile, 'utf8')).not.toContain('\u001b[');
+
     const out = path.join(tmp('rastro-impact-out-'), 'impact.md');
     expect(run(['impact', saved, '-f', 'markdown', '-o', out]).status).toBe(0);
     expect(fs.readFileSync(out, 'utf8').startsWith('<!-- rastro-impact -->')).toBe(true);
@@ -172,6 +221,16 @@ describe.skipIf(!bundled)('rastro impact (CLI empacotada)', () => {
     expect(run(['impact', saved, '--since', 'main']).stderr).toContain('--since');
     expect(run(['analyze', root, '--tests']).stderr).toContain('--tests');
     expect(run(['impact', root, '--level', 'files']).stderr).toContain('--level');
+    expect(run(['impact', root, '--tests', '--format', 'json']).stderr).toContain(
+      'cannot be used together',
+    );
+    expect(run(['impact', root, '--link', 'https://x']).stderr).toContain('--link only applies');
+    // --changes/--since pedidos explicitamente: sem git, o analyze falha (não segue sem mudanças)
+    const noGit = tmp('rastro-impact-nogit-a-');
+    fs.writeFileSync(path.join(noGit, 'a.ts'), 'export const a = 1;\n');
+    const analyzed = run(['analyze', noGit, '--changes', '-o', path.join(noGit, 'g.json')]);
+    expect(analyzed.status).toBe(1);
+    expect(analyzed.stderr).toContain('could not read the git changes');
     const notRepo = tmp('rastro-impact-nogit-');
     fs.writeFileSync(path.join(notRepo, 'a.ts'), 'export const a = 1;\n');
     const res = run(['impact', notRepo]);

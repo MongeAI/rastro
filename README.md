@@ -107,13 +107,17 @@ on: pull_request
 permissions:
   contents: read
   pull-requests: write
+concurrency:
+  group: rastro-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   impact:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # the history is needed to find where the branch started
+          ref: ${{ github.event.pull_request.head.sha }} # links and line numbers point to the pull request's own commit
       - uses: MongeAI/rastro@v0.2.0
 ```
 
@@ -123,10 +127,10 @@ The same report is available anywhere with `rastro impact`:
 rastro impact . --since main                      # in the terminal
 rastro impact . --since main --format markdown    # for a comment or a wiki page
 rastro impact . --since main --format json        # for scripts and CI
-npx vitest run $(rastro impact . --since main --tests)   # run only the affected tests
+rastro impact . --since main --tests | xargs -r -d '\n' npx vitest run   # only the affected tests
 ```
 
-Running only the affected tests is great for fast feedback, but keep the full suite in CI: code reached only through unresolved references (callbacks, dynamic calls) is not followed. More options in [GitHub Action](#github-action).
+Running only the affected tests is great for fast feedback, but keep the full suite in CI: code reached only through unresolved references (callbacks, dynamic calls) is not followed. With `xargs -r`, nothing runs when no test is affected (a plain `vitest run $(…)` with an empty list would run the whole suite). More options in [GitHub Action](#github-action).
 
 ### What does this pull request affect?
 
@@ -322,15 +326,17 @@ Everything that comes from the analyzed project (names, paths) goes into Markdow
 
 `uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact.
 
-| Input     | Default                 | Purpose                                             |
-| --------- | ----------------------- | --------------------------------------------------- |
-| `path`    | `.`                     | Project folder to analyze                           |
-| `base`    | the pull request's base | Branch to compare against                           |
-| `exclude` |                         | Paths to ignore, one per line (`.gitignore` syntax) |
-| `comment` | `true`                  | Comment on the pull request                         |
-| `report`  | `true`                  | Upload the offline HTML report                      |
-| `lang`    | `en`                    | `en` or `pt`                                        |
-| `version` | `0.2.0`                 | Version of `@mongeai/rastro` to run                 |
+| Input            | Default                 | Purpose                                                             |
+| ---------------- | ----------------------- | ------------------------------------------------------------------- |
+| `path`           | `.`                     | Project folder to analyze                                           |
+| `base`           | the pull request's base | Branch to compare against                                           |
+| `exclude`        |                         | Paths to ignore, one per line (`.gitignore` syntax)                 |
+| `comment`        | `true`                  | Comment on the pull request                                         |
+| `comment-author` | `github-actions[bot]`   | Login that posts the comment (change it with a custom token)        |
+| `report`         | `true`                  | Upload the offline HTML report                                      |
+| `artifact-name`  | `rastro-report`         | Artifact name (one per call when running the action more than once) |
+| `lang`           | `en`                    | `en` or `pt`                                                        |
+| `version`        | `0.2.0`                 | Version of `@mongeai/rastro` to run                                 |
 
 Outputs: `tests` (affected test files, one per line), `changed`, `impacted`, `markdown` and `json` (paths of the reports). To run only the affected tests in a later step, pass the output through an environment variable (never straight into `run:`):
 
@@ -341,10 +347,12 @@ Outputs: `tests` (affected test files, one per line), `changed`, `impacted`, `ma
   if: steps.rastro.outputs.tests != ''
   env:
     TESTS: ${{ steps.rastro.outputs.tests }}
-  run: printf '%s\n' "$TESTS" | xargs -d '\n' npx vitest run
+  run: printf '%s\n' "$TESTS" | xargs -r -d '\n' npx vitest run
 ```
 
-Pull requests from forks get a read-only token, so the comment is skipped with a warning; the job summary still has the full report. The action never runs code from the pull request: Rastro only reads files and runs git in read-only mode.
+Pull requests from forks get a read-only token, so the comment is skipped with a warning; the job summary still has the full report.
+
+**Security.** The action never runs code from the pull request. Rastro is installed outside the checkout, from the public npm registry, without install scripts and without the repository's `.npmrc` or `NODE_OPTIONS`; it only reads files and runs git in read-only mode. It only updates comments written by `comment-author`, so nobody can take over its comment by posting the marker. Every name that comes from the code is escaped in the comment. Use the `pull_request` event (not `pull_request_target`).
 
 ### Keyboard shortcuts
 

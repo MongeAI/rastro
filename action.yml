@@ -20,9 +20,15 @@ inputs:
   comment:
     description: Post the impact as a pull request comment (updated on every push).
     default: 'true'
+  comment-author:
+    description: Login that posts the comment (to find and update it). Change it when using a custom token.
+    default: github-actions[bot]
   report:
     description: Upload the offline interactive HTML report as a workflow artifact.
     default: 'true'
+  artifact-name:
+    description: Name of the report artifact (use a different one per call when running the action more than once in a workflow).
+    default: rastro-report
   lang:
     description: Language of the comment and report (en or pt).
     default: en
@@ -53,9 +59,22 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v7
+    # usa o Node do runner quando ele já serve (≥ 22.12): instalar outro trocaria o Node dos
+    # passos seguintes do job
+    - id: node
+      shell: bash
+      run: |
+        if node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)' 2>/dev/null; then
+          echo "ok=true" >>"$GITHUB_OUTPUT"
+        else
+          echo "ok=false" >>"$GITHUB_OUTPUT"
+        fi
+
+    - if: steps.node.outputs.ok != 'true'
+      uses: actions/setup-node@v7
       with:
         node-version: 22
+        package-manager-cache: false
 
     - id: impact
       shell: bash
@@ -66,14 +85,14 @@ runs:
         RASTRO_LANG: ${{ inputs.lang }}
         RASTRO_VERSION: ${{ inputs.version }}
         RASTRO_REPORT: ${{ inputs.report }}
-        RASTRO_LINK: https://github.com/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha || github.sha }}/${{ inputs.path != '.' && inputs.path || '' }}
+        RASTRO_LINK_BASE: https://github.com/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha || github.sha }}
       run: bash "$GITHUB_ACTION_PATH/scripts/action/impact.sh"
 
     - id: upload
       if: inputs.report == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: rastro-report
+        name: ${{ inputs.artifact-name }}
         path: ${{ steps.impact.outputs.dir }}/rastro-report.html
         retention-days: 14
 
@@ -84,4 +103,5 @@ runs:
         RASTRO_MARKDOWN: ${{ steps.impact.outputs.markdown }}
         RASTRO_REPORT_URL: ${{ steps.upload.outputs.artifact-url }}
         RASTRO_LANG: ${{ inputs.lang }}
+        RASTRO_AUTHOR: ${{ inputs.comment-author }}
       run: bash "$GITHUB_ACTION_PATH/scripts/action/comment.sh"

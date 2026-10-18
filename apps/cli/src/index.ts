@@ -264,6 +264,10 @@ async function main(argv: string[]): Promise<void> {
       });
     } catch (err) {
       const reason = err instanceof GitError ? err.message : (err as Error).message;
+      // pedido explícito num comando não interativo (analyze, export): sem as mudanças, o
+      // resultado não é o que foi pedido. Ao abrir o mapa, só avisa e segue.
+      if (command === 'analyze' || command === 'export')
+        fail(t().impact.gitFailed(safeText(reason)));
       if (warn)
         process.stderr.write(
           `${yellow(t().warningPrefix)} ${t().changes.skipped(safeText(reason))}\n`,
@@ -343,6 +347,8 @@ async function main(argv: string[]): Promise<void> {
   if (command === 'impact') {
     const format = (values.format ?? 'text') as ImpactFormat;
     if (!IMPACT_FORMATS.includes(format)) fail(t().impact.badFormat(values.format!));
+    if (values.tests && values.format !== undefined) fail(u.notTogether('--tests', '--format'));
+    if (values.link !== undefined && format !== 'markdown') fail(t().impact.linkNeedsMarkdown);
     const source = path.resolve(target);
     if (!fs.existsSync(source)) fail(u.pathNotFound(source));
     const fromFolder = fs.statSync(source).isDirectory();
@@ -373,18 +379,30 @@ async function main(argv: string[]): Promise<void> {
       if (!graph.changes) fail(t().impact.needsChanges);
     }
     const report = buildImpactReport(graph);
+    let content: string;
     if (values.tests) {
+      // um caminho por linha: nomes com quebra de linha ou controles não entram (virariam
+      // argumentos falsos no executor de testes)
       const files = testPathsFrom(report, graph.project.root);
-      process.stdout.write(files.length ? `${files.join('\n')}\n` : '');
-      return;
+      // eslint-disable-next-line no-control-regex
+      const odd = /[\u0000-\u001f\u007f-\u009f]/;
+      for (const f of files.filter((f) => odd.test(f)))
+        process.stderr.write(`${yellow(t().warningPrefix)} ${t().impact.oddTest(safeText(f))}\n`);
+      const clean = files.filter((f) => !odd.test(f));
+      content = clean.length ? `${clean.join('\n')}\n` : '';
+    } else {
+      content = renderImpact(report, format, {
+        ...(values.link !== undefined ? { link: values.link } : {}),
+      });
     }
-    const content = renderImpact(report, format, {
-      ...(values.link !== undefined ? { link: values.link } : {}),
-    });
     if (values.out) {
       try {
-        const written = writeExport(values.out, content);
-        process.stderr.write(`${t().export.saved(format)} ${cyan(tildify(written))}\n`);
+        // cores do terminal não vão para arquivos
+        // eslint-disable-next-line no-control-regex
+        const written = writeExport(values.out, content.replace(/\u001b\[[0-9;]*m/g, ''));
+        process.stderr.write(
+          `${t().export.saved(values.tests ? 'tests' : format)} ${cyan(tildify(written))}\n`,
+        );
       } catch (err) {
         fail((err as Error).message);
       }

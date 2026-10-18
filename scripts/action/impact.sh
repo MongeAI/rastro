@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # GitHub Action do Rastro (action.yml): analisa o projeto, calcula o impacto das mudanças do
-# pull request e publica o resultado (resumo do job, comentário na PR e relatório HTML).
+# pull request e publica o resultado (resumo do job, saídas, relatório HTML).
 # Nada do projeto analisado é executado: o Rastro só lê arquivos e roda git em modo leitura.
 #
 # Entradas (variáveis de ambiente, nunca interpoladas no script):
 #   RASTRO_PATH, RASTRO_BASE, RASTRO_EXCLUDE (uma por linha), RASTRO_LANG, RASTRO_VERSION,
-#   RASTRO_LINK (base dos links arquivo:linha), RASTRO_REPORT (true/false)
-#   RASTRO_BIN: comando do Rastro (padrão: npx @mongeai/rastro@$RASTRO_VERSION; usado nos testes)
+#   RASTRO_LINK_BASE (https://github.com/<repo>/blob/<commit>), RASTRO_REPORT (true/false)
+#   RASTRO_BIN: comando do Rastro já instalado (usado nos testes; sem ele, instala do npm)
 set -euo pipefail
 
 path="${RASTRO_PATH:-.}"
 base="${RASTRO_BASE:-${GITHUB_BASE_REF:-}}"
-out="${RUNNER_TEMP:-$(mktemp -d)}/rastro"
+lang="${RASTRO_LANG:-en}"
+temp="${RUNNER_TEMP:-$(mktemp -d)}"
+out="$temp/rastro"
 mkdir -p "$out"
 
 if [ -z "$base" ]; then
@@ -22,15 +24,27 @@ case "$base" in
   -*) echo "::error title=Rastro::Invalid base: $base"; exit 1 ;;
 esac
 
+# Nada da pasta do pull request pode influenciar o Rastro: o npx/npm rodando ali leria o
+# .npmrc da PR (node-options, registry) e até um node_modules commitado. Instala numa pasta
+# neutra do runner, do registro público, sem scripts, e roda o bin pelo caminho absoluto.
 if [ -n "${RASTRO_BIN:-}" ]; then
   read -r -a rastro <<<"$RASTRO_BIN"
 else
-  rastro=(npx --yes "@mongeai/rastro@${RASTRO_VERSION:-latest}")
+  tool="$temp/rastro-cli"
+  mkdir -p "$tool"
+  (
+    cd "$tool"
+    env -u NODE_OPTIONS npm install --prefix "$tool" --no-save --no-package-lock --ignore-scripts \
+      --no-audit --no-fund --registry=https://registry.npmjs.org/ \
+      "@mongeai/rastro@${RASTRO_VERSION:-latest}" >/dev/null
+  )
+  rastro=(env -u NODE_OPTIONS node "$tool/node_modules/@mongeai/rastro/bin/rastro.js")
 fi
 
 # o git precisa do histórico para achar o ponto em que a branch saiu da base
 if [ "$(git -C "$path" rev-parse --is-shallow-repository)" = "true" ]; then
-  git -C "$path" fetch --quiet --no-tags --unshallow origin || true
+  git -C "$path" fetch --quiet --no-tags --unshallow origin \
+    "+refs/heads/${base}:refs/remotes/origin/${base}" || true
 fi
 ref="$base"
 if git -C "$path" remote get-url origin >/dev/null 2>&1; then
@@ -40,20 +54,28 @@ if git -C "$path" remote get-url origin >/dev/null 2>&1; then
   fi
 fi
 
-args=(--lang "${RASTRO_LANG:-en}")
+# No runner, o .git/config vem do actions/checkout (que guarda credenciais num includeIf),
+# não do pull request: confiar nele aqui é seguro e necessário com o checkout v6+.
+args=(--lang "$lang" --trust-git-config)
 while IFS= read -r pattern; do
   [ -n "$pattern" ] && args+=(--exclude "$pattern")
 done <<<"${RASTRO_EXCLUDE:-}"
 
-# uma análise só; o impacto e o relatório saem do mesmo grafo
+# uma análise só; o impacto e o relatório saem do mesmo grafo. Se o git falhar, o analyze
+# para com o erro do git (e a action falha com a mensagem certa).
 "${rastro[@]}" analyze "$path" --since "$ref" -o "$out/graph.json" "${args[@]}"
+
 link_args=()
-[ -n "${RASTRO_LINK:-}" ] && link_args=(--link "$RASTRO_LINK")
-"${rastro[@]}" impact "$out/graph.json" --format markdown "${link_args[@]}" --lang "${RASTRO_LANG:-en}" >"$out/impact.md"
-"${rastro[@]}" impact "$out/graph.json" --format json --lang "${RASTRO_LANG:-en}" >"$out/impact.json"
-"${rastro[@]}" impact "$out/graph.json" --tests >"$out/tests.txt"
+if [ -n "${RASTRO_LINK_BASE:-}" ]; then
+  # a pasta analisada entra nos links, com cada parte codificada
+  sub="$(jq -rn --arg p "$path" '$p | sub("^(\\./)+"; "") | sub("/+$"; "") | if . == "." then "" else split("/") | map(@uri) | join("/") end')"
+  link_args=(--link "${RASTRO_LINK_BASE%/}${sub:+/$sub}")
+fi
+"${rastro[@]}" impact "$out/graph.json" --format markdown "${link_args[@]}" --lang "$lang" >"$out/impact.md"
+"${rastro[@]}" impact "$out/graph.json" --format json --lang "$lang" >"$out/impact.json"
+"${rastro[@]}" impact "$out/graph.json" --tests --lang "$lang" >"$out/tests.txt"
 if [ "${RASTRO_REPORT:-true}" = "true" ]; then
-  "${rastro[@]}" export "$out/graph.json" --format html -o "$out/rastro-report.html" --lang "${RASTRO_LANG:-en}"
+  "${rastro[@]}" export "$out/graph.json" --format html -o "$out/rastro-report.html" --lang "$lang"
 fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

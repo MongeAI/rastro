@@ -58,8 +58,12 @@ export interface ImpactReport {
   outsideGraph: Array<{ file: string; status: ChangedFile['status'] }>;
 }
 
+/** Nomes vêm do código analisado: um literal enorme não pode estourar um comentário. */
+const MAX_NAME = 160;
+const clip = (s: string) => (s.length > MAX_NAME ? `${s.slice(0, MAX_NAME - 1)}…` : s);
+
 const display = (n: GraphNode) =>
-  n.qualifiedName && n.kind !== 'file' && n.kind !== 'module' ? n.qualifiedName : n.name;
+  clip(n.qualifiedName && n.kind !== 'file' && n.kind !== 'module' ? n.qualifiedName : n.name);
 
 function item(n: GraphNode): ImpactItem {
   const file = n.location?.file ?? (n.kind === 'file' ? n.qualifiedName : undefined);
@@ -78,8 +82,13 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
   if (!changes) throw new Error('graph without changes');
   const index = new GraphIndex(graph);
   const impact = computeChangeImpact(index, changes);
+  // arquivos alterados sem nenhuma entidade alterada dentro (código no topo do arquivo,
+  // arquivo novo ou renomeado); quem já aparece como afetado fica só lá
+  const impactedIds = new Set(impact.impacted.map((i) => i.node.id));
   const fileLevel = impact.changedFiles.filter(
-    (f) => !impact.changedEntities.some((e) => index.fileOf(e.id)?.id === f.id),
+    (f) =>
+      !impactedIds.has(f.id) &&
+      !impact.changedEntities.some((e) => index.fileOf(e.id)?.id === f.id),
   );
   const changed = [...impact.changedEntities, ...fileLevel]
     .map(item)
@@ -92,7 +101,8 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
     baseLabel: changes.baseLabel,
     summary: {
       files: changes.files.length,
-      changed: changed.length,
+      // como na aba Mudanças: entidades (funções, classes, métodos, rotas) alteradas
+      changed: impact.changedEntities.length,
       impacted: impact.impacted.length,
       routes: impact.routes.length,
       tests: tests.length,
@@ -220,9 +230,16 @@ function fileLink(i: ImpactItem, options: RenderOptions, inTable: boolean): stri
   if (!i.file) return '';
   const label = mdCode(`${i.file}${i.line ? `:${i.line}` : ''}`, inTable);
   if (!options.link) return label;
+  // encodeURIComponent deixa ( ) ! * ' ~ como estão: um ")" sem par num nome de arquivo
+  // fecharia o link antes da hora e o resto viraria Markdown solto no comentário
+  const encode = (segment: string) =>
+    encodeURIComponent(segment).replace(
+      /[!'()*~]/g,
+      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
   const url =
     `${options.link.replace(/\/+$/, '')}/` +
-    i.file.split('/').map(encodeURIComponent).join('/') +
+    i.file.split('/').map(encode).join('/') +
     (i.line ? `#L${i.line}` : '');
   return `[${label}](${url})`;
 }

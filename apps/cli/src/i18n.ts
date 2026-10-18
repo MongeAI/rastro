@@ -79,6 +79,7 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     portRange: '--port precisa ser um número entre 0 e 65535.',
     notApplicable: (flag: string, command: string) => `${flag} não se aplica a "${command}".`,
     onlyWith: (flag: string, command: string) => `${flag} só funciona com "rastro ${command}".`,
+    notTogether: (a: string, b: string) => `${a} e ${b} não podem ser usados juntos.`,
     maxFiles: '--max-files precisa ser um inteiro positivo.',
     watchOnly: '--watch só funciona ao abrir o mapa (rastro <caminho>).',
     needsFolder: (flag: string, command: string) =>
@@ -154,6 +155,9 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     needsChanges:
       'este grafo não tem mudanças do git. Gere com "rastro analyze <pasta> --changes" (ou --since <ref>), ou rode "rastro impact <pasta>".',
     gitFailed: (reason: string) => `não foi possível ler as mudanças do git: ${reason}`,
+    linkNeedsMarkdown: '--link só vale com --format markdown.',
+    oddTest: (file: string) =>
+      `arquivo de teste com caracteres de controle no nome ficou de fora: ${file}`,
   },
   serve: {
     webNotBuilt:
@@ -378,6 +382,7 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     portRange: '--port must be a number between 0 and 65535.',
     notApplicable: (flag, command) => `${flag} does not apply to "${command}".`,
     onlyWith: (flag, command) => `${flag} only works with "rastro ${command}".`,
+    notTogether: (a, b) => `${a} and ${b} cannot be used together.`,
     maxFiles: '--max-files must be a positive integer.',
     watchOnly: '--watch only works when opening the map (rastro <path>).',
     needsFolder: (flag, command) =>
@@ -450,6 +455,8 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     needsChanges:
       'this graph has no git changes. Create it with "rastro analyze <folder> --changes" (or --since <ref>), or run "rastro impact <folder>".',
     gitFailed: (reason) => `could not read the git changes: ${reason}`,
+    linkNeedsMarkdown: '--link only applies to --format markdown.',
+    oddTest: (file) => `test file left out because its name has control characters: ${file}`,
   },
   serve: {
     webNotBuilt:

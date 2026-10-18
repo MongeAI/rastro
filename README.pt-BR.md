@@ -105,13 +105,17 @@ on: pull_request
 permissions:
   contents: read
   pull-requests: write
+concurrency:
+  group: rastro-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   impact:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # o histórico é necessário para achar onde a branch começou
+          ref: ${{ github.event.pull_request.head.sha }} # links e linhas apontam para o próprio commit do pull request
       - uses: MongeAI/rastro@v0.2.0
         with:
           lang: pt
@@ -123,10 +127,10 @@ O mesmo relatório está disponível em qualquer lugar com `rastro impact`:
 rastro impact . --since main                      # no terminal
 rastro impact . --since main --format markdown    # para um comentário ou uma página de wiki
 rastro impact . --since main --format json        # para scripts e CI
-npx vitest run $(rastro impact . --since main --tests)   # roda só os testes afetados
+rastro impact . --since main --tests | xargs -r -d '\n' npx vitest run   # só os testes afetados
 ```
 
-Rodar só os testes afetados é ótimo para um retorno rápido, mas mantenha a suíte completa no CI: código alcançado só por referências não resolvidas (callbacks, chamadas dinâmicas) não é seguido. Mais opções em [GitHub Action](#github-action).
+Rodar só os testes afetados é ótimo para um retorno rápido, mas mantenha a suíte completa no CI: código alcançado só por referências não resolvidas (callbacks, chamadas dinâmicas) não é seguido. Com `xargs -r`, nada roda quando nenhum teste é afetado (um `vitest run $(…)` com a lista vazia rodaria a suíte inteira). Mais opções em [GitHub Action](#github-action).
 
 ### O que este pull request afeta?
 
@@ -322,15 +326,17 @@ Tudo o que vem do projeto analisado (nomes, caminhos) entra no Markdown como có
 
 `uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário só, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`.
 
-| Entrada   | Padrão                 | Para que serve                                             |
-| --------- | ---------------------- | ---------------------------------------------------------- |
-| `path`    | `.`                    | Pasta do projeto a analisar                                |
-| `base`    | a base do pull request | Branch para comparar                                       |
-| `exclude` |                        | Caminhos a ignorar, um por linha (sintaxe do `.gitignore`) |
-| `comment` | `true`                 | Comenta no pull request                                    |
-| `report`  | `true`                 | Envia o relatório HTML offline                             |
-| `lang`    | `en`                   | `en` ou `pt`                                               |
-| `version` | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                        |
+| Entrada          | Padrão                 | Para que serve                                                      |
+| ---------------- | ---------------------- | ------------------------------------------------------------------- |
+| `path`           | `.`                    | Pasta do projeto a analisar                                         |
+| `base`           | a base do pull request | Branch para comparar                                                |
+| `exclude`        |                        | Caminhos a ignorar, um por linha (sintaxe do `.gitignore`)          |
+| `comment`        | `true`                 | Comenta no pull request                                             |
+| `comment-author` | `github-actions[bot]`  | Login que publica o comentário (troque se usar outro token)         |
+| `report`         | `true`                 | Envia o relatório HTML offline                                      |
+| `artifact-name`  | `rastro-report`        | Nome do artefato (um por chamada, se usar a action mais de uma vez) |
+| `lang`           | `en`                   | `en` ou `pt`                                                        |
+| `version`        | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                                 |
 
 Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
 
@@ -341,10 +347,12 @@ Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacte
   if: steps.rastro.outputs.tests != ''
   env:
     TESTS: ${{ steps.rastro.outputs.tests }}
-  run: printf '%s\n' "$TESTS" | xargs -d '\n' npx vitest run
+  run: printf '%s\n' "$TESTS" | xargs -r -d '\n' npx vitest run
 ```
 
-Pull requests de forks recebem um token só de leitura, então o comentário é pulado com um aviso; o resumo do job continua com o relatório completo. A action nunca executa código do pull request: o Rastro só lê arquivos e roda o git em modo leitura.
+Pull requests de forks recebem um token só de leitura, então o comentário é pulado com um aviso; o resumo do job continua com o relatório completo.
+
+**Segurança.** A action nunca executa código do pull request. O Rastro é instalado fora do checkout, do registro público do npm, sem scripts de instalação e sem o `.npmrc` ou o `NODE_OPTIONS` do repositório; ele só lê arquivos e roda o git em modo leitura. Só são atualizados comentários escritos por `comment-author`, então ninguém toma o comentário publicando o marcador. Todo nome que vem do código é escapado no comentário. Use o evento `pull_request` (não `pull_request_target`).
 
 ### Atalhos de teclado
 

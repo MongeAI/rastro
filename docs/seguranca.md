@@ -76,3 +76,14 @@ Analisar um repositório desconhecido é seguro no sentido de que nada dele é e
 ## Reportando vulnerabilidades
 
 Por favor, não abra uma issue pública. Envie os detalhes de forma privada para os mantenedores da MongeAI.
+
+## GitHub Action (`uses: MongeAI/rastro`)
+
+A action roda no pull request, então o código dele é tratado como não confiável:
+
+- **Nada do pull request é executado.** O Rastro não é rodado com `npx` dentro do checkout (o npm leria o `.npmrc` do pull request, que pode trocar o registro ou injetar `node-options`, e até um `node_modules` commitado). Ele é instalado numa pasta do runner, do registro público (`--registry=https://registry.npmjs.org/`), com `--ignore-scripts`, e roda pelo caminho absoluto do bin com `NODE_OPTIONS` removido.
+- **Entradas nunca entram direto no shell.** Todas passam por variáveis de ambiente; a base é recusada se começar com `-`; o login do autor do comentário só aceita `[A-Za-z0-9-]` (e `[bot]`).
+- **Config do git.** No runner, o `.git/config` é escrito pelo `actions/checkout` (que, a partir da v6, guarda credenciais num `includeIf`), não pelo pull request; por isso a action usa `--trust-git-config`. Fora do Actions, a recusa padrão continua valendo.
+- **Comentário.** Só é atualizado o comentário com o marcador `<!-- rastro-impact -->` escrito pelo autor esperado (`comment-author`): ninguém toma o comentário publicando o marcador. Nomes vindos do código (arquivos, funções, rotas) entram como código inline e com tamanho limitado; links para `arquivo:linha` codificam também `( ) ! * ' ~`, para um nome de arquivo não fechar o link e injetar Markdown.
+- **Saídas.** A lista de testes vai para `$GITHUB_OUTPUT` com um delimitador aleatório; nomes de teste com caracteres de controle ficam de fora da lista.
+- **Forks.** Pull requests de forks recebem um token só de leitura: o comentário é pulado com um aviso e o relatório continua no resumo do job. Use o evento `pull_request`, nunca `pull_request_target`, que daria permissões de escrita a código de terceiros.

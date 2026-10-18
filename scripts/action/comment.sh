@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # Publica (ou atualiza) o comentário do Rastro no pull request. Um comentário só por PR: o
-# marcador <!-- rastro-impact --> no começo identifica o comentário anterior.
+# marcador <!-- rastro-impact --> no começo, escrito pelo autor esperado (o bot do token),
+# identifica o comentário anterior. Comentários de outras pessoas com o marcador são ignorados.
 #
 # Entradas: RASTRO_MARKDOWN (arquivo), RASTRO_REPORT_URL (link do relatório, opcional),
-#   RASTRO_LANG, GH_TOKEN, GITHUB_REPOSITORY, GITHUB_EVENT_PATH.
+#   RASTRO_LANG, RASTRO_AUTHOR (login do autor dos comentários; padrão github-actions[bot]),
+#   GH_TOKEN, GITHUB_REPOSITORY, GITHUB_EVENT_PATH.
 set -euo pipefail
 
 pr="$(jq -r '.pull_request.number // empty' "${GITHUB_EVENT_PATH:-/dev/null}" 2>/dev/null || true)"
 if [ -z "$pr" ]; then
   echo "Rastro: not a pull request event, skipping the comment."
   exit 0
+fi
+
+author="${RASTRO_AUTHOR:-github-actions[bot]}"
+if ! [[ "$author" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]; then
+  echo "::error title=Rastro::Invalid comment author: $author"
+  exit 1
 fi
 
 body="$(mktemp)"
@@ -27,7 +35,8 @@ fi
 
 marker='<!-- rastro-impact -->'
 existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${pr}/comments" \
-  --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n 1 || true)"
+  --jq ".[] | select(.user.login == \"${author}\" and (.body | startswith(\"${marker}\"))) | .id" |
+  head -n 1 || true)"
 
 # PRs de forks recebem um token só de leitura: sem permissão, avisa e segue (o resumo do job
 # continua com o relatório)
