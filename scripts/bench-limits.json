@@ -1,5 +1,5 @@
 {
-  "//": "Limites do 'node scripts/bench.mjs --check' (CI). Medido em 2026-10: 100 → 0,4 s; 1000 → 1,6 s / 424 MB; 5000 → 6 s / 707 MB. Folga de ~3x para máquinas de CI.",
+  "//": "Limites do 'node scripts/bench.mjs --check' (CI). Medido em 2026-10: 100 → 0,4 s; 1000 → 1,0 s / 303 MB; 5000 → 3,3 s / 661 MB. Folga de ~3-5x para máquinas de CI.",
   "100": { "analyzeMs": 5000, "peakMb": 600, "queriesMs": 500 },
   "1000": { "analyzeMs": 15000, "peakMb": 1200, "queriesMs": 1000 },
   "5000": { "analyzeMs": 60000, "peakMb": 2500, "queriesMs": 5000 }

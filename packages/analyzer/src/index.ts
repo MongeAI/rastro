@@ -1,4 +1,4 @@
-export { analyzeProject, type AnalyzeOptions } from './analyze.js';
+export { AnalysisSession, analyzeProject, type AnalyzeOptions } from './analyze.js';
 export {
   progressMessage,
   PROGRESS_CODES,

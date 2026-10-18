@@ -37,7 +37,8 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 ### 5. Ao vivo: modo `--watch`
 
 - ✅ `rastro --watch`: reanálise ao salvar arquivos, com o mapa atualizado na hora pelo servidor local (SSE), sem perder a posição nem a seleção.
-- ⬜ Cache por arquivo (reanálise incremental) para projetos grandes.
+- ✅ Reanálise rápida no `--watch`: a sessão do analisador (`AnalysisSession`) mantém o compilador em memória e só relê os arquivos alterados; as relações são sempre recalculadas (um teste garante que o grafo é idêntico ao de uma análise nova após editar, criar, apagar, quebrar a sintaxe e mudar o tsconfig). Junto, a extração ficou ~37% mais rápida (uma passada só por arquivo direto no compilador, sem criar objetos do ts-morph para todos os nós; grafos conferidos byte a byte iguais). 5 000 arquivos: análise 6,0 s → 3,3 s; reanálise no `--watch` 6,1 s → 2,5 s.
+  - Cache por arquivo das relações (pular a resolução de arquivos não afetados) ficou para depois: candidatos por interface, rotas e menções dependem do projeto inteiro, e um cache errado mostraria relações desatualizadas.
 
 ### 6. Mais frameworks de rotas
 
@@ -65,7 +66,7 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 ### 10. Qualidade de lançamento
 
 - ✅ Testes de interface ponta a ponta no CI (Chrome headless, `npm run test:e2e`): 10 cenários com a CLI real — servidor com token, busca, breadcrumb, paleta, teclado, caminho, EN/PT, celular, `--changes`, `--watch` e relatório offline sem requisições externas.
-- ✅ Benchmarks (`npm run bench`): projetos sintéticos de 100, 1 000 e 5 000 arquivos (análise 0,4 s / 1,5 s / 6 s; 5 000 arquivos com 707 MB), com limites no CI.
+- ✅ Benchmarks (`npm run bench`): projetos sintéticos de 100, 1 000 e 5 000 arquivos (análise 0,4 s / 1,0 s / 3,3 s; 5 000 arquivos com 661 MB), com limites no CI.
 - ✅ Interface em projetos enormes: com 5 000 arquivos, o nível "Arquivos" (5 mil nós, 20 mil linhas) ia de **mais de 3 min** para **~5 s** — grupos densos empacotados em grade no ELK, ELK mais leve em mapas grandes com limite de 20 s (cai para o orgânico), atalhos no cache de estilo do Cytoscape, linhas retas e imagem durante o arraste em mapas grandes, minimapa sem `boundingBox()` por nó. Projetos com tudo dentro de `src/` abrem já com a pasta aberta. Teste de interface com 1 500 arquivos guarda a regressão.
 - ⬜ Revisão de código independente (analisador, interface e segurança) antes do lançamento.
 - ⬜ Novas capturas, GIF e README da 0.2 em EN/PT.

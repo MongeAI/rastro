@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { analyzeProject, type ProgressEvent } from '@rastro/analyzer';
+import { AnalysisSession, analyzeProject, type ProgressEvent } from '@rastro/analyzer';
 import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
 import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
@@ -308,14 +308,22 @@ async function main(argv: string[]): Promise<void> {
   const quiet = command === 'analyze' && values.stdout;
   if (values.watch && command !== 'open') fail(u.watchOnly);
 
-  /** Analisa o projeto (e as mudanças do git, se pedidas). Reutilizado pelo modo --watch. */
+  /**
+   * Analisa o projeto (e as mudanças do git, se pedidas). No modo --watch, a sessão mantém o
+   * compilador em memória: cada reanálise só relê os arquivos alterados.
+   */
+  let showingProgress = false;
+  const session = new AnalysisSession(root, {
+    ...(values.exclude ? { exclude: values.exclude } : {}),
+    respectGitignore: !values['no-gitignore'],
+    ...(maxFiles ? { maxFiles } : {}),
+    onProgress: (message, event) => {
+      if (showingProgress) showProgress(message, event);
+    },
+  });
   const runAnalysis = async (progress: boolean) => {
-    const result = await analyzeProject(root, {
-      ...(values.exclude ? { exclude: values.exclude } : {}),
-      respectGitignore: !values['no-gitignore'],
-      ...(maxFiles ? { maxFiles } : {}),
-      onProgress: progress ? showProgress : undefined,
-    });
+    showingProgress = progress;
+    const result = await session.analyze();
     attachChanges(result, root, progress);
     return result;
   };

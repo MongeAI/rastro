@@ -65,6 +65,54 @@ export async function analyzeProject(
   rootInput: string,
   options: AnalyzeOptions = {},
 ): Promise<RastroGraph> {
+  return runAnalysis(rootInput, options, { stamps: new Map() });
+}
+
+/**
+ * Análises repetidas do mesmo projeto (modo `--watch`): o compilador fica em memória entre
+ * uma análise e outra e só os arquivos alterados (data ou tamanho diferentes) são relidos e
+ * interpretados de novo. Tudo o mais — entidades, imports, chamadas, rotas — é sempre
+ * recalculado do zero: o resultado é idêntico ao de uma análise nova.
+ */
+export class AnalysisSession {
+  private readonly cache: CompilerCache = { stamps: new Map() };
+
+  constructor(
+    private readonly rootInput: string,
+    private readonly options: AnalyzeOptions = {},
+  ) {}
+
+  analyze(): Promise<RastroGraph> {
+    return runAnalysis(this.rootInput, this.options, this.cache);
+  }
+}
+
+const DEPENDENCY_MANIFESTS = [
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
+];
+
+/** Compilador guardado entre análises de uma sessão. */
+interface CompilerCache {
+  project?: Project;
+  /** Opções do compilador usadas para criar o projeto: se mudarem, ele é recriado. */
+  fingerprint?: string;
+  /** Resolvedor da análise atual (o verificador de tipos resolve imports por ele). */
+  resolver?: ModuleResolver;
+  /** Caminho absoluto → `mtime:tamanho` de quando o arquivo foi lido. */
+  stamps: Map<string, string>;
+}
+
+async function runAnalysis(
+  rootInput: string,
+  options: AnalyzeOptions,
+  cache: CompilerCache,
+): Promise<RastroGraph> {
   const started = performance.now();
   const progress = (event: ProgressEvent) => options.onProgress?.(progressMessage(event), event);
 
@@ -76,26 +124,58 @@ export async function analyzeProject(
   const config = loadCompilerOptions(root);
   const diagnostics: Diagnostic[] = [...discovered.diagnostics, ...config.diagnostics];
   const resolver = new ModuleResolver(root, config.options, config.scopes, diagnostics);
-  const project = new Project({
-    compilerOptions: config.options,
-    skipAddingFilesFromTsConfig: true,
-    skipFileDependencyResolution: true,
-    // o verificador de tipos resolve cada import com o tsconfig do próprio arquivo (subpacotes)
-    resolutionHost: () => ({
-      resolveModuleNames: (names, containingFile, _reused, _redirected, _options, sourceFile) =>
-        names.map((name) =>
-          resolver.resolveForProgram(name, containingFile, sourceFile?.impliedNodeFormat),
-        ),
-    }),
+  cache.resolver = resolver;
+  // dependências instaladas mudam a resolução de imports de arquivos que não mudaram
+  const manifests = DEPENDENCY_MANIFESTS.map((name) => {
+    try {
+      return fs.statSync(path.join(root, name)).mtimeMs;
+    } catch {
+      return 0;
+    }
   });
+  const fingerprint = JSON.stringify([config.options, config.scopes, manifests]);
+  if (!cache.project || cache.fingerprint !== fingerprint) {
+    cache.fingerprint = fingerprint;
+    cache.stamps.clear();
+    cache.project = new Project({
+      compilerOptions: config.options,
+      skipAddingFilesFromTsConfig: true,
+      skipFileDependencyResolution: true,
+      // o verificador de tipos resolve cada import com o tsconfig do próprio arquivo (subpacotes)
+      resolutionHost: () => ({
+        resolveModuleNames: (names, containingFile, _reused, _redirected, _options, sourceFile) =>
+          names.map((name) =>
+            cache.resolver!.resolveForProgram(name, containingFile, sourceFile?.impliedNodeFormat),
+          ),
+      }),
+    });
+  }
+  const project = cache.project;
+  // arquivos que saíram da análise (removidos, excluídos) saem do compilador
+  const wanted = new Set(discovered.files.map((f) => f.absolute));
+  for (const sf of project.getSourceFiles()) {
+    const absolute = path.normalize(sf.getFilePath());
+    if (!wanted.has(absolute)) {
+      project.removeSourceFile(sf);
+      cache.stamps.delete(absolute);
+    }
+  }
   // o parse acontece aqui: um arquivo extremo (aninhamento profundo, sem permissão de leitura)
   // vira um aviso e sai da análise, em vez de derrubar tudo
   const readable: DiscoveredFile[] = [];
   for (const file of discovered.files) {
     try {
-      project.addSourceFileAtPath(file.absolute);
+      const stat = fs.statSync(file.absolute);
+      const stamp = `${stat.mtimeMs}:${stat.size}`;
+      const existing = project.getSourceFile(file.absolute);
+      if (!existing) project.addSourceFileAtPath(file.absolute);
+      else if (cache.stamps.get(file.absolute) !== stamp) existing.refreshFromFileSystemSync();
+      cache.stamps.set(file.absolute, stamp);
       readable.push(file);
     } catch (err) {
+      const stale = project.getSourceFile(file.absolute);
+      if (stale) project.removeSourceFile(stale);
+      cache.stamps.delete(file.absolute);
       diagnostics.push({
         level: 'warning',
         code: 'parse-failed',
@@ -297,27 +377,49 @@ function countMentions(ctx: Ctx): void {
 }
 
 /**
- * Libera os objetos do ts-morph de um arquivo já processado. O grafo guarda só nós do
- * compilador, então os "wrappers" podem ser recriados sob demanda; em projetos grandes isso
- * evita manter milhões de objetos vivos até o fim.
+ * Fim do uso de um arquivo numa etapa: descarta a lista de nós por tipo. Os "wrappers" do
+ * ts-morph não são liberados (`forgetDescendants` percorria a árvore inteira de novo e custava
+ * ~20% da análise); como agora só os nós devolvidos ganham wrapper, a memória quase não muda.
  */
 function release(sf: SourceFile): void {
-  descendantsCache.delete(sf);
-  sf.forgetDescendants();
+  descendantsCache.delete(sf.compilerNode);
 }
 
-const descendantsCache = new WeakMap<SourceFile, Map<SyntaxKind, Node[]>>();
+/** Nós do compilador de cada arquivo, separados por tipo (uma passada só pela árvore). */
+// a chave é o nó do compilador: um arquivo relido (modo --watch) tem outro, e nunca reaproveita
+// a lista antiga
+const descendantsCache = new WeakMap<ts.SourceFile, Map<SyntaxKind, ts.Node[]>>();
 
-/** `getDescendantsOfKind` com cache por arquivo (cada tipo é buscado uma vez só). */
+/**
+ * Descendentes de um tipo, na mesma ordem de `getDescendantsOfKind` do ts-morph.
+ *
+ * A árvore de cada arquivo é percorrida uma vez só, direto no compilador, e os "wrappers" do
+ * ts-morph são criados apenas para os nós devolvidos. Antes cada tipo pedido percorria a
+ * árvore inteira criando objetos para todos os nós: em projetos grandes, metade do tempo da
+ * análise ia nisso e na coleta de lixo.
+ */
 export function descendantsOfKind<K extends SyntaxKind>(
   sf: SourceFile,
   kind: K,
 ): KindToNodeMappings[K][] {
-  let byKind = descendantsCache.get(sf);
-  if (!byKind) descendantsCache.set(sf, (byKind = new Map()));
-  let nodes = byKind.get(kind);
-  if (!nodes) byKind.set(kind, (nodes = sf.getDescendantsOfKind(kind)));
-  return nodes as KindToNodeMappings[K][];
+  let byKind = descendantsCache.get(sf.compilerNode);
+  if (!byKind) {
+    byKind = new Map();
+    const found = byKind;
+    const visit = (node: ts.Node): void => {
+      let list = found.get(node.kind);
+      if (!list) found.set(node.kind, (list = []));
+      list.push(node);
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sf.compilerNode, visit);
+    descendantsCache.set(sf.compilerNode, byKind);
+  }
+  // `_getNodeFromCompilerNode` reaproveita o wrapper do nó se ele já existir
+  const wrap = sf as unknown as { _getNodeFromCompilerNode(node: ts.Node): Node };
+  return (byKind.get(kind) ?? []).map((n) =>
+    wrap._getNodeFromCompilerNode(n),
+  ) as KindToNodeMappings[K][];
 }
 
 // ---------------------------------------------------------------------------
