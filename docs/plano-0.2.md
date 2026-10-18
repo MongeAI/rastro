@@ -59,8 +59,8 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 9. Precisão do analisador
 
-- ⬜ `super.metodo()` e métodos herdados; `implements` e chamadas por interface com candidatos marcados como _possíveis_ (nunca como resolvidas).
-- ⬜ `paths` por subpacote em monorepos.
+- ✅ `super.metodo()` e métodos herdados; `implements` e chamadas por interface com candidatos marcados como _possíveis_ (nunca como resolvidas). `super(...)` liga ao construtor da base; a chamada por interface/método abstrato continua não resolvida, com as implementações declaradas em `meta.candidates` do nó (sem relação), mostradas na interface como "possível" (`implementations.ts`, fixture `oop`).
+- ✅ `paths` por subpacote em monorepos: cada arquivo usa o tsconfig mais próximo (com `extends`, cache por pasta), nos imports e no verificador de tipos (`resolutionHost`), então as chamadas por alias também são ligadas (fixture `monorepo-paths`).
 
 ### 10. Qualidade de lançamento
 

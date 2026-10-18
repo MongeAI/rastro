@@ -77,7 +77,10 @@ const IMPLICIT_METHODS = new Set([
 const byValue = (a: RankedNode, b: RankedNode) =>
   b.value - a.value || compareStrings(a.node.id, b.node.id);
 
-/** Calcula os insights do grafo. Usa só relações resolvidas: nada de suposições. */
+/**
+ * Calcula os insights do grafo. As medidas usam só relações resolvidas: nada de suposições.
+ * Candidatos possíveis (chamadas por interface) só servem para não acusar "sem uso" à toa.
+ */
 export function computeInsights(index: GraphIndex, limit = 10): Insights {
   const callers = new Map<string, Set<string>>();
   const callees = new Map<string, Set<string>>();
@@ -135,6 +138,8 @@ export function computeInsights(index: GraphIndex, limit = 10): Insights {
     // sem contagem de menções (grafo antigo ou nome especial): não arriscamos
     if (node.meta?.mentions !== 1) continue;
     if (callers.has(node.id)) continue;
+    // implementação possível de uma chamada por interface: pode ser usada em execução
+    if (index.possibleCallSites(node.id).length) continue;
     if (node.kind === 'method' && IMPLICIT_METHODS.has(node.name.replace(/^(get|set) /, '')))
       continue;
     // classe usada só via `new` em outro lugar teria mais menções; métodos de classes exportadas

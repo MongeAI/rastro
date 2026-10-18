@@ -223,11 +223,19 @@ const pt = {
       declared: 'declarado no package.json',
       undeclared: 'não declarado',
       outsideRoot: 'fora da raiz',
+      implements: (names: string) => `implements ${names}`,
     },
     external: 'externo',
     unresolved: 'não resolvido',
     typeTag: 'tipo',
     reexports: 'reexporta',
+    possibleTag: 'possível',
+    possibleTargets: 'Implementações possíveis',
+    possibleTargetsHint:
+      'Métodos de classes do projeto que declaram implements desta interface (ou estendem a classe abstrata). O alvo real só é conhecido em execução: nenhum deles é uma ligação comprovada.',
+    possibleCallers: 'Possivelmente chamado por',
+    possibleCallersHint:
+      'Chamadas por interface ou método abstrato que esta implementação pode atender. Não é comprovado: depende do objeto recebido em execução.',
   },
   edge: {
     relation: 'Relação',
@@ -587,11 +595,19 @@ const en: Messages = {
       declared: 'declared in package.json',
       undeclared: 'not declared',
       outsideRoot: 'outside the root',
+      implements: (names) => `implements ${names}`,
     },
     external: 'external',
     unresolved: 'unresolved',
     typeTag: 'type',
     reexports: 're-exports',
+    possibleTag: 'possible',
+    possibleTargets: 'Possible implementations',
+    possibleTargetsHint:
+      'Methods of project classes that declare implements of this interface (or extend the abstract class). The real target is only known at runtime: none of them is a proven link.',
+    possibleCallers: 'Possibly called by',
+    possibleCallersHint:
+      'Calls through an interface or abstract method that this implementation may serve. Not proven: it depends on the object received at runtime.',
   },
   edge: {
     relation: 'Relationship',

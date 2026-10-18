@@ -69,6 +69,13 @@ export function DetailsPanel(p: Props) {
     EDITORS[p.editor].url(absolutePath(root, f), line, col);
   const focused = p.focusId === node.id;
   const reason = node.meta?.reason;
+  // implementações possíveis (chamadas por interface): nunca são relações comprovadas
+  const candidates = (node.meta?.candidates ?? [])
+    .map((id) => index.node(id))
+    .filter((c): c is GraphNode => !!c);
+  const possibleCalls = index
+    .possibleCallSites(node.id)
+    .flatMap((site) => index.incoming(site.id, ['calls']));
 
   const copyLocation = async () => {
     if (!filePath) return;
@@ -118,6 +125,25 @@ export function DetailsPanel(p: Props) {
           <strong>{t.details.unresolvedTitle}</strong> {t.reasons[reason]}
           {node.meta?.reference && <code className="callout-code">{node.meta.reference}</code>}
         </div>
+      )}
+      {candidates.length > 0 && (
+        <section className="details-section">
+          <h3 className="section-title">
+            {t.details.possibleTargets} <span className="count">{candidates.length}</span>
+          </h3>
+          <p className="muted small">{t.details.possibleTargetsHint}</p>
+          <ul className="rel-list">
+            {candidates.map((c) => (
+              <li key={c.id}>
+                <button type="button" className="rel-item" onClick={() => p.onNavigate(c.id)}>
+                  <KindDot kind={c.kind} />
+                  <span className="rel-name">{c.qualifiedName ?? c.name}</span>
+                  <span className="tag res-possible">{t.details.possibleTag}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {node.meta?.inCycle && (
         <div className="callout cycle">
@@ -242,7 +268,51 @@ export function DetailsPanel(p: Props) {
           </section>
         );
       })}
-      {!outgoing.length && !incoming.length && node.kind !== 'module' && (
+      {possibleCalls.length > 0 && (
+        <section className="details-section">
+          <h3 className="section-title">
+            {t.details.possibleCallers} <span className="count">{possibleCalls.length}</span>
+          </h3>
+          <p className="muted small">{t.details.possibleCallersHint}</p>
+          <ul className="rel-list">
+            {possibleCalls.slice(0, MAX_ITEMS).map((e) => {
+              const caller = index.node(e.source);
+              if (!caller) return null;
+              const ev = e.evidence[0];
+              return (
+                <li key={e.id} className="rel">
+                  <button
+                    type="button"
+                    className="rel-item"
+                    onClick={() => p.onNavigate(caller.id)}
+                  >
+                    <KindDot kind={caller.kind} />
+                    <span className="rel-name">
+                      {caller.qualifiedName && caller.kind !== 'file'
+                        ? caller.qualifiedName
+                        : caller.name}
+                    </span>
+                    <span className="tag res-possible">{t.details.possibleTag}</span>
+                  </button>
+                  {ev && (
+                    <a
+                      className="evidence"
+                      href={editorUrl(ev.file, ev.line, ev.column)}
+                      title={t.common.openSnippet}
+                    >
+                      <span className="evidence-loc">
+                        {ev.file}:{ev.line}
+                      </span>
+                      {ev.snippet && <code className="evidence-code">{ev.snippet}</code>}
+                    </a>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+      {!outgoing.length && !incoming.length && !possibleCalls.length && node.kind !== 'module' && (
         <p className="muted small details-section">{t.details.noRelations}</p>
       )}
 
@@ -361,6 +431,7 @@ function Chips({ node, t }: { node: GraphNode; t: Messages }) {
   else if (node.kind === 'package') chips.push(m.declared ? c.declared : c.undeclared);
   if (m.outsideRoot) chips.push(c.outsideRoot);
   if (m.framework) chips.push(m.framework);
+  if (m.implements?.length) chips.push(c.implements(m.implements.join(', ')));
   if (!chips.length) return null;
   return (
     <div className="chips">

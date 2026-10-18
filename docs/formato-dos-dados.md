@@ -24,6 +24,8 @@ O Rastro exporta um único arquivo JSON com todo o grafo. Ele é:
 
 Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`. Linhas e colunas começam em **1**.
 
+`project.tsconfig` lista as configurações usadas na resolução de módulos: a da raiz (com as `references`, entre parênteses) e, em monorepos, os `tsconfig.json`/`jsconfig.json` de subpacotes que resolveram imports (ex.: `tsconfig.json, packages/web/tsconfig.json`). Cada arquivo usa o tsconfig referenciado pela raiz que o inclui ou, senão, o mais próximo subindo as pastas (com `extends`), para imports **e** chamadas.
+
 ## Nós (`nodes`)
 
 | Campo           | Descrição                                                                         |
@@ -49,7 +51,7 @@ Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`.
 
 Se dois símbolos geram o mesmo id no mesmo arquivo, o segundo recebe o sufixo `~2`, o terceiro `~3` etc.
 
-`meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework`/`fullPath`/`mountedAt`/`routeKind` (rotas, ver abaixo), `reason` e `reference` (não resolvidos).
+`meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework`/`fullPath`/`mountedAt`/`routeKind` (rotas, ver abaixo), `reason`, `reference` e `candidates` (não resolvidos, ver [candidatos possíveis](#candidatos-possíveis-chamadas-por-interface)), `implements` (classes: a cláusula `implements` como escrita no código, ex.: `["Store", "Named"]`) e `mentions` (funções, classes e métodos).
 
 ### Rotas
 
@@ -85,6 +87,35 @@ Motivos de `unresolved` (`meta.reason`):
 | `unknown-base-class` | Classe base não localizada                                                                                    |
 | `not-analyzed`       | O alvo existe, mas em um arquivo do projeto que ficou fora da análise (excluído, `.gitignore`, grande demais) |
 
+### Candidatos possíveis (chamadas por interface)
+
+Em `repo.save()` com `repo: Repository` (uma interface) ou `animal.sound()` com `sound` abstrato, o verificador de tipos aponta para uma assinatura sem corpo: o alvo real depende do objeto recebido em execução. A chamada continua **não resolvida** (`indirect-call`), mas o nó não resolvido ganha `meta.candidates`: os ids dos métodos do projeto que _podem_ atender a chamada.
+
+```jsonc
+{
+  "id": "unresolved:src/main.ts#call:repo.save",
+  "kind": "unresolved",
+  "meta": {
+    "reason": "indirect-call",
+    "reference": "repo.save",
+    "candidates": [
+      "method:src/repo.ts#MemoryRepository.save",
+      "method:src/repo.ts#SqlRepository.save",
+    ],
+  },
+}
+```
+
+Regras:
+
+- Só entram classes que **declaram** a relação: `implements` da interface (diretamente, por uma interface que a estende ou por uma classe base que a implementa) ou `extends` da classe abstrata. Classes que só têm "o mesmo formato" (tipagem estrutural) e objetos literais não entram.
+- Vale o tipo do receptor: com `store: Store` (que estende `Repository`), uma classe que só implementa `Repository` não é candidata. Interfaces, aliases de tipo (`implements Clock` com `type Clock = {...}`) e classes abstratas são aceitos; o método pode ser próprio ou herdado de uma classe base.
+- Os candidatos **nunca** viram relações: não há `calls` resolvido para eles, então caminhos, impacto e as medidas dos insights continuam só com o que é comprovado. A única exceção conservadora: um método que é candidato não é apontado como "possivelmente sem uso".
+- No máximo 50 candidatos por nó, ordenados por id. Ao filtrar por pasta (`rastro export --folder`), candidatos de fora somem junto com os nós deles.
+- Interfaces de pacotes externos (ex.: tipos de um framework em `node_modules`) continuam como chamadas externas, sem candidatos.
+
+Por que não uma relação "possível"? Uma relação com destino em um método exigiria um novo valor de `resolution` (ou uma relação `unresolved` apontando para um nó que não é `unresolved`), o que quebraria leitores do schema 0.1.0 e a regra de que toda relação desenhada é comprovada. Guardar os candidatos no nó não resolvido é aditivo e mantém a honestidade: a interface mostra a lista como "Implementações possíveis", com a etiqueta _possível_, e no método mostra "Possivelmente chamado por", sempre separado das relações comprovadas.
+
 ## Relações (`edges`)
 
 | Campo        | Descrição                                                                                                                                                                                       |
@@ -103,7 +134,7 @@ Semântica de cada tipo:
 - `contains`: hierarquia (pasta → pasta, pasta → arquivo, arquivo → função/classe/rota, classe → método).
 - `imports`: arquivo → arquivo, pacote ou nó não resolvido. Uma relação por par; vários imports do mesmo destino viram evidências.
 - `exports`: arquivo → entidade exportada (inclui reexportações, com `meta.reexport`).
-- `calls`: entidade (ou arquivo, para código no topo do módulo) → função, método ou classe (`new`). Uso de componente JSX tem `callKind: "jsx"`; o handler de uma rota tem `callKind: "route-handler"`.
+- `calls`: entidade (ou arquivo, para código no topo do módulo) → função, método ou classe (`new`). Uso de componente JSX tem `callKind: "jsx"`; o handler de uma rota tem `callKind: "route-handler"`. `super.metodo()` e métodos herdados (`this.herdado()`, `obj.herdado()`) apontam para o método da classe que o declara. `super(...)` aponta para o construtor da classe base (ou para o herdado de mais acima, quando a base não declara um); se nenhuma classe da cadeia declara construtor, aponta para a própria classe base, como `new Base()`. Uma base externa (ex.: `extends Error`) conta em `externalCallsSkipped`.
 - `extends`: classe → classe base.
 - `depends_on`: pasta → pasta, derivada dos imports resolvidos entre arquivos de pastas diferentes.
 

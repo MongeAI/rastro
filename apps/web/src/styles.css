@@ -779,6 +779,11 @@ kbd {
 .tag.res-external {
   border-style: dashed;
 }
+.tag.res-possible {
+  border-style: dotted;
+  border-color: var(--warn);
+  color: var(--warn);
+}
 .details-section {
   padding: 14px 18px 4px;
 }

@@ -26,10 +26,16 @@ export class GraphIndex {
   private readonly out = new Map<string, GraphEdge[]>();
   private readonly in = new Map<string, GraphEdge[]>();
   private readonly childrenOf = new Map<string, GraphNode[]>();
+  /** Candidato possível → nós não resolvidos (chamadas por interface) que o citam. */
+  private readonly candidateIn = new Map<string, GraphNode[]>();
 
   constructor(readonly graph: RastroGraph) {
     for (const node of graph.nodes) {
       this.nodes.set(node.id, node);
+      for (const candidate of node.meta?.candidates ?? []) {
+        if (!this.candidateIn.has(candidate)) this.candidateIn.set(candidate, []);
+        this.candidateIn.get(candidate)!.push(node);
+      }
       if (node.parent) {
         if (!this.childrenOf.has(node.parent)) this.childrenOf.set(node.parent, []);
         this.childrenOf.get(node.parent)!.push(node);
@@ -56,6 +62,14 @@ export class GraphIndex {
   incoming(id: string, kinds?: readonly EdgeKind[]): GraphEdge[] {
     const list = this.in.get(id) ?? [];
     return kinds ? list.filter((e) => kinds.includes(e.kind)) : list;
+  }
+
+  /**
+   * Chamadas não resolvidas (por interface ou método abstrato) que têm `id` como implementação
+   * _possível_. Não são relações: servem para mostrar "talvez chamado por", nunca como prova.
+   */
+  possibleCallSites(id: string): GraphNode[] {
+    return this.candidateIn.get(id) ?? [];
   }
 
   children(id: string): GraphNode[] {
