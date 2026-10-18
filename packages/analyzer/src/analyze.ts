@@ -17,7 +17,7 @@ import {
 import { GraphBuilder } from '@rastro/graph';
 import { discoverFiles, toPosix, type DiscoverOptions, type DiscoveredFile } from './discover.js';
 import { loadCompilerOptions, ModuleResolver, packageNameOf } from './resolve.js';
-import { detectExpressRoutes } from './routes.js';
+import { RouteDetector } from './routes/index.js';
 
 export interface AnalyzeOptions extends DiscoverOptions {
   /** Nome exibido do projeto (padrão: nome do package.json ou da pasta). */
@@ -118,14 +118,16 @@ export async function analyzeProject(
     .map((f) => [f, project.getSourceFile(f.absolute)] as const)
     .filter((pair): pair is readonly [DiscoveredFile, SourceFile] => !!pair[1]);
 
-  // Passo 1: arquivos, módulos, entidades e rotas
+  // Passo 1: arquivos, módulos, entidades e rotas (Express, Fastify, Hono, NestJS, Next.js)
   progress('Extraindo arquivos, funções, classes e métodos...');
   let syntaxErrors = 0;
+  const routes = new RouteDetector(ctx);
   for (const [file, sf] of sourceFiles) {
     // mesmas quebras de linha que o TypeScript usa para numerar linhas
     ctx.lines.set(file.relative, sf.getFullText().split(/\r\n|[\r\n\u2028\u2029]/));
     addFileNode(ctx, file, sf);
     safely(ctx, file, 'entidades', () => extractEntities(ctx, file, sf));
+    routes.prepare(file, sf);
     for (const diag of program.getSyntacticDiagnostics(sf.compilerNode)) {
       if (syntaxErrors++ >= MAX_SYNTAX_DIAGNOSTICS) break;
       const line =
@@ -142,8 +144,17 @@ export async function analyzeProject(
     }
   }
   for (const [file, sf] of sourceFiles) {
-    safely(ctx, file, 'rotas', () => detectExpressRoutes(ctx, file, sf));
+    routes.detect(file, sf);
     release(sf);
+  }
+  try {
+    routes.finish();
+  } catch (err) {
+    ctx.diagnostics.push({
+      level: 'warning',
+      code: 'analysis-failed',
+      message: `Não foi possível compor os caminhos completos das rotas: ${describeError(err)}.`,
+    });
   }
 
   // Passo 2: relações (imports, exports, chamadas, herança)
@@ -156,6 +167,7 @@ export async function analyzeProject(
     safely(ctx, file, 'herança', () => extractHeritage(ctx, file, sf));
     release(sf);
   }
+  routes.afterCalls();
 
   countMentions(ctx);
 
@@ -214,7 +226,7 @@ export type AnalyzerContext = Ctx;
  * Executa uma etapa da análise de um arquivo sem derrubar a análise inteira:
  * arquivos patológicos (ex.: expressões aninhadas milhares de vezes) viram um aviso.
  */
-function safely(ctx: Ctx, file: DiscoveredFile, step: string, run: () => void): void {
+export function safely(ctx: Ctx, file: DiscoveredFile, step: string, run: () => void): void {
   try {
     run();
   } catch (err) {
@@ -743,7 +755,7 @@ export function addUnresolvedNode(
   kind: 'import' | 'call' | 'extends',
   reference: string,
   reason: UnresolvedReason,
-  at: Node,
+  at: Node | ts.Node,
 ): string {
   const id = nodeId.unresolved(file, kind, reference);
   if (!ctx.builder.hasNode(id)) {
@@ -1114,7 +1126,7 @@ export function resolveSymbolTargets(
 const isFunctionExpression = (n: ts.Node): boolean =>
   ts.isArrowFunction(n) || ts.isFunctionExpression(n);
 
-function unwrapExpression(n: ts.Expression): ts.Expression {
+export function unwrapExpression(n: ts.Expression): ts.Expression {
   let current = n;
   while (
     ts.isParenthesizedExpression(current) ||

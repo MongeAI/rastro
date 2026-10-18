@@ -95,10 +95,21 @@ export interface NodeMeta {
   builtin?: boolean;
   /** Para pacotes: declarado no package.json do projeto. */
   declared?: boolean;
-  /** Para rotas: método HTTP e caminho. */
+  /** Para rotas: método HTTP e caminho como escrito no código (sem prefixos de montagem). */
   httpMethod?: string;
   routePath?: string;
+  /** Para rotas: `express`, `fastify`, `hono`, `nestjs` ou `next`. */
   framework?: string;
+  /**
+   * Para rotas: caminho completo, com os prefixos de montagem (`app.use('/api', router)`,
+   * `register(plugin, { prefix })`, `app.route('/api', sub)`, prefixo global do NestJS).
+   * Só existe quando o caminho é comprovado e único.
+   */
+  fullPath?: string;
+  /** Para rotas: prefixos completos onde o roteador foi montado (quando há montagem). */
+  mountedAt?: string[];
+  /** Para rotas do Next.js: `page` (página) ou `api` (rota de API). */
+  routeKind?: 'page' | 'api';
   /** Para nós não resolvidos: por que não foi possível resolver. */
   reason?: UnresolvedReason;
   /**

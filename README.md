@@ -114,20 +114,21 @@ The source of the definition appears in the panel with the relevant lines highli
 
 ### 5. HTTP routes, light theme and more
 
-**Express** routes become nodes linked to their handlers. There is also a **light theme**, **neighborhood focus** (distance 1 to 3), **impact analysis**, filters, a legend and export to **JSON** and **PNG**.
+HTTP routes from **Express**, **Fastify**, **Hono**, **NestJS** and **Next.js** become nodes linked to their handlers, with the full path when mount prefixes can be proven. There is also a **light theme**, **neighborhood focus** (distance 1 to 3), **impact analysis**, filters, a legend and export to **JSON** and **PNG**.
 
 <p align="center"><img src="docs/assets/express.png" alt="Express API in the light theme: route GET /users linked to the listUsers handler" width="900" /></p>
 
 ## What it understands
 
-| Area              | Support in v0.1                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Languages**     | `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.mts` `.cts`                                                                                                   |
-| **Modules**       | ESM, CommonJS (`require`, `module.exports`, `exports.x`), dynamic `import()`, re-exports (`export * from`)                                              |
-| **Resolution**    | The TypeScript compiler via [ts-morph](https://ts-morph.com): `tsconfig`/`jsconfig` (`paths`, `baseUrl`, `references`), `.js`→`.ts`, `index`, monorepos |
-| **Entities**      | Functions, classes, methods (constructor, getters/setters, function properties), React components (`memo`, `forwardRef`), Express routes                |
-| **Relationships** | `imports` · `exports` · `contains` · `calls` (including `new` and `<Component />`) · `extends` · `depends_on` (between folders)                         |
-| **Analyses**      | Import cycles, impact analysis, neighborhood, search                                                                                                    |
+| Area              | Support in v0.1                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Languages**     | `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.mts` `.cts`                                                                                                                                                               |
+| **Modules**       | ESM, CommonJS (`require`, `module.exports`, `exports.x`), dynamic `import()`, re-exports (`export * from`)                                                                                                          |
+| **Resolution**    | The TypeScript compiler via [ts-morph](https://ts-morph.com): `tsconfig`/`jsconfig` (`paths`, `baseUrl`, `references`), `.js`→`.ts`, `index`, monorepos                                                             |
+| **Entities**      | Functions, classes, methods (constructor, getters/setters, function properties), React components (`memo`, `forwardRef`)                                                                                            |
+| **Relationships** | `imports` · `exports` · `contains` · `calls` (including `new` and `<Component />`) · `extends` · `depends_on` (between folders)                                                                                     |
+| **HTTP routes**   | Express (with `app.use('/api', router)` prefixes), Fastify (`register` with `prefix`), Hono (`app.route`, `basePath`), NestJS (`@Controller` + `@Get`…), Next.js App Router and Pages Router (pages and API routes) |
+| **Analyses**      | Import cycles, impact analysis, neighborhood, search                                                                                                                                                                |
 
 ## Honest by design
 
@@ -208,12 +209,12 @@ Rastro is at **v0.1**. Today:
 - Dynamic calls (callbacks, `obj[name]()`, dependency injection, events) show up as unresolved or only in the counters.
 - In untyped JavaScript, `obj.method()` is only linked when TypeScript can infer the type of `obj`.
 - Functions declared inside other functions do not become nodes of their own.
-- Routes: only **Express**, with a literal path and the `app`/`router` created in the analyzed code.
+- Routes: **Express**, **Fastify**, **Hono**, **NestJS** and **Next.js**, only when the framework is proven (imported from the framework package, or `next` declared in `package.json` for file-based routes) and the path is a literal. Prefixes that are not literals, routers mounted in more than one place, Next.js `basePath` and NestJS versioning leave the full path unknown instead of guessed. Not covered yet: routers or apps passed as function parameters (except Fastify plugins), `fastify-plugin`/autoload, NestJS `RouterModule`, Next.js `pageExtensions` and middleware.
 - Monorepos use the root `tsconfig` (and its `references`); `paths` defined only in sub-packages may not be resolved.
 - Tested on projects from dozens to a few hundred files; in a synthetic test, about 1,000 files were analyzed in ~3 s. Showing every symbol of a very large project (thousands of nodes) can take a few seconds.
 - The interface and CLI messages are in Portuguese for now.
 
-Next steps on the [roadmap](ROADMAP.md): more route frameworks, incremental analysis, diffing two versions and the impact of a _pull request_.
+Next steps on the [roadmap](ROADMAP.md): incremental analysis, diffing two versions and the impact of a _pull request_.
 
 ## Repository layout
 

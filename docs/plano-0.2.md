@@ -41,9 +41,9 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 6. Mais frameworks de rotas
 
-- ⬜ Next.js (App Router e Pages Router, inclusive rotas de API).
-- ⬜ Fastify, Hono e NestJS (`@Controller` / `@Get`…).
-- ⬜ Rotas do Express montadas com prefixo (`app.use('/api', router)`), com o caminho completo.
+- ✅ Next.js (App Router e Pages Router, inclusive rotas de API).
+- ✅ Fastify, Hono e NestJS (`@Controller` / `@Get`…).
+- ✅ Rotas do Express montadas com prefixo (`app.use('/api', router)`), com o caminho completo.
 
 ### 7. Compartilhar e integrar
 
