@@ -938,6 +938,25 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
     expect(edge(g, 'imports', 'file:src/c.ts', 'file:src/d.ts')?.meta?.typeOnly).toBeUndefined();
   });
 
+  it('JS: alias de require em let/var pode ser reatribuído (indireto, com candidatos)', async () => {
+    const g = await analyzeProject(
+      makeProject({
+        'src/a.js':
+          'function one() { return 1; }\nfunction two() { return 2; }\nmodule.exports = { one, two };\n',
+        'src/c.js':
+          "let impl = require('./a').one;\nimpl = require('./a').two;\nfunction run() { impl(); }\nconst fixo = require('./a').one;\nvar tambem = require('./a').two;\nfunction go() { fixo(); tambem(); }\nmodule.exports = { run, go };\n",
+      }),
+    );
+    expectValid(g);
+    expect(edge(g, 'calls', 'fn:src/c.js#run', 'fn:src/a.js#one')).toBeUndefined();
+    const call = g.edges.find((e) => e.kind === 'calls' && e.source === 'fn:src/c.js#run');
+    expect(call?.resolution).toBe('unresolved');
+    expect(node(g, call!.target)?.meta?.candidates).toEqual(['fn:src/a.js#one', 'fn:src/a.js#two']);
+    // `const`, ou `var` nunca reatribuído, continua comprovado
+    expect(edge(g, 'calls', 'fn:src/c.js#go', 'fn:src/a.js#one')?.resolution).toBe('resolved');
+    expect(edge(g, 'calls', 'fn:src/c.js#go', 'fn:src/a.js#two')?.resolution).toBe('resolved');
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');

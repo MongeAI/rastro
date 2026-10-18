@@ -1700,6 +1700,18 @@ export function resolveSymbolTargets(
     }
   }
   const decls = resolved.declarations ?? [];
+  // JS: `let impl = require('./a').one` é um alias para o compilador, mas um `let`/`var`
+  // reatribuído (`impl = require('./a').two`) pode valer qualquer um dos valores: nenhum é
+  // comprovado (todos viram candidatos)
+  const writes =
+    aliasDecl && ts.isVariableDeclaration(aliasDecl) && !isConstDeclaration(aliasDecl)
+      ? variableWrites(ctx, aliasDecl, symbol)
+      : undefined;
+  if (writes) {
+    const initial = resolved === symbol ? [] : resolveSymbolTargets(ctx, resolved, depth + 1);
+    const later = writes.flatMap((value) => valueTargets(ctx, value, depth + 1));
+    return [{ kind: 'indirect', candidates: possibleTargets([...initial, ...later]) }];
+  }
   if (!decls.length) {
     // import de um pacote sem tipos instalados (ex.: `node:fs` sem @types/node): é externo, não ausente
     const specifier = aliasDecl && moduleSpecifierOfAlias(aliasDecl);
@@ -2033,6 +2045,43 @@ function isSameVariable(ctx: Ctx, id: ts.Identifier, decl: ts.VariableDeclaratio
 }
 
 /** Alvos de um valor atribuído (`bar` em `api.run = bar`); outras expressões não têm alvo. */
+/** Atribuições a uma variável (`let`/`var`) → valores atribuídos; cache por declaração. */
+const variableWritesCache = new WeakMap<ts.VariableDeclaration, ts.Expression[] | undefined>();
+
+/**
+ * Valores atribuídos depois da declaração (`x = ...`) a uma variável `let`/`var`, no arquivo
+ * dela (o escopo de um módulo não sai do arquivo); `undefined` se ela nunca é reatribuída.
+ */
+function variableWrites(
+  ctx: Ctx,
+  decl: ts.VariableDeclaration,
+  symbol: ts.Symbol,
+): ts.Expression[] | undefined {
+  if (variableWritesCache.has(decl)) return variableWritesCache.get(decl);
+  let found: ts.Expression[] | undefined;
+  const name = ts.isIdentifier(decl.name) ? decl.name.text : undefined;
+  const sf = decl.getSourceFile();
+  const escaped = name?.replace(/[$]/g, '\\$');
+  // filtro rápido pelo texto antes de percorrer a árvore
+  if (escaped && new RegExp(`(^|[^\\w$.])${escaped}\\s*[-+*/%&|^]?=(?!=)`).test(sf.text)) {
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+        ts.isIdentifier(node.left) &&
+        node.left.text === name &&
+        ctx.checker.getSymbolAtLocation(node.left) === symbol
+      )
+        (found ??= []).push(node.right);
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  variableWritesCache.set(decl, found);
+  return found;
+}
+
 function valueTargets(ctx: Ctx, value: ts.Expression, depth: number): SymbolTarget[] {
   const e = unwrapExpression(value);
   const nameNode = ts.isPropertyAccessExpression(e) ? e.name : ts.isIdentifier(e) ? e : undefined;
