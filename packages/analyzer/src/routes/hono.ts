@@ -14,6 +14,7 @@ import {
   receiverName,
   type OwnerKey,
   type RouteState,
+  UNPROVEN_PARENT,
 } from './common.js';
 
 /** O Hono expõe a mesma classe pelos presets `hono/tiny` e `hono/quick`. */
@@ -143,7 +144,9 @@ function detectMount(state: RouteState, receiver: ts.Expression, call: ts.CallEx
   const child = honoApp(state, childArg);
   if (!child) return;
   const parent = honoApp(state, receiver);
-  if (!parent || parent.owner === child.owner) return;
+  // montado num app que não dá para comprovar: o prefixo de lá é desconhecido
+  if (!parent) return state.mount(child.owner, UNPROVEN_PARENT, undefined);
+  if (parent.owner === child.owner) return;
   const prefix = stringLiteral(pathArg);
   state.mount(
     child.owner,

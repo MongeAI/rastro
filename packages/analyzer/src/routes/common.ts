@@ -25,6 +25,13 @@ export type Framework = 'express' | 'fastify' | 'hono' | 'nestjs' | 'next';
  */
 export type OwnerKey = ts.Node | string;
 
+/**
+ * Dono sintético de uma montagem num receptor que não dá para comprovar (`main.use('/a', r)`
+ * com `main` de uma fábrica, `app.route()` num app de outro pacote). Nunca é registrado: os
+ * prefixos dele são desconhecidos, então quem foi montado ali não tem caminho completo.
+ */
+export const UNPROVEN_PARENT: OwnerKey = 'montagem num receptor não comprovado';
+
 /** Prefixos conhecidos (normalizados: `''` é a raiz, `'/api'`) e se há algum desconhecido. */
 export interface PrefixSet {
   known: string[];

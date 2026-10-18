@@ -11,6 +11,7 @@ import {
   stringLiterals,
   type OwnerKey,
   type RouteState,
+  UNPROVEN_PARENT,
 } from './common.js';
 
 const EXPRESS = new Set(['express']);
@@ -168,8 +169,12 @@ function detectMount(state: RouteState, call: ts.CallExpression): void {
     .filter((o): o is OwnerKey => o !== undefined);
   if (!children.length) return;
   const parent = expressOwner(state, callee.expression);
-  if (parent === undefined) return;
   for (const child of children) {
+    // montado num receptor que não dá para comprovar: o prefixo de lá é desconhecido
+    if (parent === undefined) {
+      state.mount(child, UNPROVEN_PARENT, undefined);
+      continue;
+    }
     if (child === parent) continue;
     for (const prefix of prefixes) state.mount(child, parent, prefix);
   }

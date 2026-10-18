@@ -15,6 +15,7 @@ import {
   receiverName,
   type OwnerKey,
   type RouteState,
+  UNPROVEN_PARENT,
 } from './common.js';
 
 const FASTIFY = new Set(['fastify']);
@@ -108,11 +109,17 @@ export function fastifyOwner(
     if (state.owners.has(fn)) return fn;
     const registrations = state.fastifyPlugins.get(fn) ?? [];
     const inner = new Set(visiting).add(fn);
-    const parents = registrations
-      .map((r) => ({ parent: fastifyOwner(state, r.receiver, inner), prefix: r.prefix }))
-      .filter((r): r is { parent: OwnerKey; prefix: string | undefined } => r.parent !== undefined);
+    const all = registrations.map((r) => ({
+      parent: fastifyOwner(state, r.receiver, inner),
+      prefix: r.prefix,
+    }));
+    const parents = all.filter(
+      (r): r is { parent: OwnerKey; prefix: string | undefined } => r.parent !== undefined,
+    );
     if (!parents.length) return undefined;
     for (const { parent, prefix } of parents) state.mount(fn, parent, prefix);
+    // registrado também num receptor que não dá para comprovar: o prefixo de lá é desconhecido
+    if (parents.length < all.length) state.mount(fn, UNPROVEN_PARENT, undefined);
     return fn;
   };
   return resolveOwner(state.ctx, expr, classify, plugin);

@@ -834,6 +834,59 @@ describe('regra da casa: nenhuma rota inventada', () => {
     expect(g.diagnostics.filter((d) => d.code === 'analysis-failed')).toEqual([]);
   });
 
+  it('montagem num receptor não comprovado deixa o caminho completo desconhecido', async () => {
+    const full = async (files: Record<string, string>) =>
+      Object.fromEntries(
+        routes(await analyzeProject(makeProject(files)))
+          .map((n) => [n.name, n.meta?.fullPath ?? null] as const)
+          .sort(),
+      );
+    // Hono: sub-app montado num app de outro pacote (OpenAPIHono)
+    expect(
+      await full({
+        'package.json': '{"name":"hono1","dependencies":{"hono":"*","@hono/zod-openapi":"*"}}\n',
+        'src/index.ts':
+          "import { OpenAPIHono } from '@hono/zod-openapi';\nimport { users } from './users';\nconst app = new OpenAPIHono();\napp.route('/users', users);\nexport default app;\n",
+        'src/users.ts':
+          "import { Hono } from 'hono';\nexport const users = new Hono();\nusers.get('/list', (c: any) => c.json([]));\n",
+        'tsconfig.json':
+          '{"compilerOptions":{"strict":true,"module":"esnext","moduleResolution":"bundler"}}\n',
+      }),
+    ).toEqual({ 'GET /list': null });
+    // Express: app montado num app criado por uma fábrica do projeto; roteador montado também
+    // num receptor não comprovado
+    expect(
+      await full({
+        'package.json': '{"name":"ex1","dependencies":{"express":"*"}}\n',
+        'src/admin.js':
+          "const express = require('express');\nconst admin = express();\nadmin.get('/stats', (req, res) => res.send('x'));\nmodule.exports = admin;\n",
+        'src/factory.js':
+          "exports.makeMain = function makeMain() { return require('express')(); };\n",
+        'src/server.js':
+          "const express = require('express');\nconst admin = require('./admin');\nconst { makeMain } = require('./factory');\nconst main = makeMain();\nmain.use('/admin', admin);\nconst r = express.Router();\nr.get('/x', (req, res) => res.send('x'));\nconst app = express();\napp.use('/api', r);\nfunction mountAll(target, router) { target.use('/v2', router); }\nmountAll(app, r);\napp.listen(3000);\nmain.listen(4000);\n",
+      }),
+    ).toEqual({ 'GET /stats': null, 'GET /api/x': '/api/x' });
+    expect(
+      await full({
+        'package.json': '{"name":"ex1","dependencies":{"express":"*"}}\n',
+        'src/legacy.js': 'exports.createLegacyApp = () => require("express")();\n',
+        'src/server.js':
+          "const express = require('express');\nconst { createLegacyApp } = require('./legacy');\nconst r = express.Router();\nr.get('/x', (req, res) => res.send('x'));\nconst app = express();\napp.use('/api', r);\nconst legacy = createLegacyApp();\nlegacy.use('/v1', r);\n",
+      }),
+    ).toEqual({ 'GET /x': null });
+    // Fastify: plugin registrado de novo por um receptor não comprovado (`other.register`)
+    expect(
+      await full({
+        'package.json': '{"name":"fy1","dependencies":{"fastify":"*","fastify-plugin":"*"}}\n',
+        'src/server.js':
+          "const fastify = require('fastify');\nconst fp = require('fastify-plugin');\nconst app = fastify();\nasync function users(inst) { inst.get('/list', async () => []); }\napp.register(users, { prefix: '/users' });\nfunction setup(other) { other.register(users, { prefix: '/v2/users' }); }\nsetup(app);\nasync function shared(inst) { inst.get('/health', async () => 'ok'); }\napp.register(fp(shared), { prefix: '/x' });\nconst wrapped = fp(async function wrappedPlugin(inst) { inst.get('/w', async () => 'ok'); });\napp.register(wrapped, { prefix: '/y' });\napp.register(async (inst) => {\n  inst.register(async (inner) => { inner.get('/deep', async () => 1); }, { prefix: '/b' });\n}, { prefix: '/a' });\n",
+      }),
+    ).toEqual({
+      'GET /a/b/deep': '/a/b/deep',
+      'GET /list': null,
+    });
+  });
+
   it('a saída é determinística', async () => {
     const a = await analyzeProject(fixture('express-mounted'));
     const b = await analyzeProject(fixture('express-mounted'));
