@@ -957,6 +957,39 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
     expect(edge(g, 'calls', 'fn:src/c.js#go', 'fn:src/a.js#two')?.resolution).toBe('resolved');
   });
 
+  it('chamadas em decorators e nomes calculados são de quem contém o membro, não do membro', async () => {
+    const g = await analyzeProject(
+      makeProject({
+        'src/deco.ts': [
+          'function dec() { return (_t: unknown) => {}; }',
+          'function dec2() { return (_a: unknown, _b: unknown) => {}; }',
+          'function key() { return "k"; }',
+          '@dec()',
+          'export class D {',
+          '  @dec2() m() { return this.n(); }',
+          '  n() {}',
+          '  [key()]() {}',
+          '  p(@dec() _x: unknown) {}',
+          '}',
+        ].join('\n'),
+      }),
+    );
+    expectValid(g);
+    expect(edge(g, 'calls', 'method:src/deco.ts#D.m', 'fn:src/deco.ts#dec2')).toBeUndefined();
+    expect(edge(g, 'calls', 'class:src/deco.ts#D', 'fn:src/deco.ts#dec2')?.resolution).toBe(
+      'resolved',
+    );
+    expect(edge(g, 'calls', 'class:src/deco.ts#D', 'fn:src/deco.ts#key')?.resolution).toBe(
+      'resolved',
+    );
+    // decorator da própria classe continua da classe; de parâmetro, da classe (não do método)
+    expect(edge(g, 'calls', 'class:src/deco.ts#D', 'fn:src/deco.ts#dec')?.resolution).toBe(
+      'resolved',
+    );
+    expect(edge(g, 'calls', 'method:src/deco.ts#D.p', 'fn:src/deco.ts#dec')).toBeUndefined();
+    expect(edge(g, 'calls', 'method:src/deco.ts#D.m', 'method:src/deco.ts#D.n')).toBeDefined();
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');

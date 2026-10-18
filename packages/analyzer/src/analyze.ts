@@ -2307,9 +2307,19 @@ function hasUnknownBase(checker: ts.TypeChecker, symbol: ts.Symbol, seen: Set<ts
 /** Entidade mais próxima que envolve um nó (ou o próprio arquivo, para código no topo). */
 function enclosingEntity(ctx: Ctx, node: ts.Node, fileId: string): string {
   let current: ts.Node | undefined = node.parent;
+  // decorator de membro (`@dec2() m()`, `m(@Body() x)`) e nome calculado (`[key()]() {}`)
+  // rodam fora do corpo do membro (na definição da classe): a chamada é da classe, não do
+  // membro. O decorator da própria classe (`@Injectable()`) continua da classe
+  let skip: ts.Node | undefined;
   while (current) {
-    const id = ctx.entities.get(current);
-    if (id) return id;
+    if (ts.isDecorator(current) || ts.isComputedPropertyName(current)) {
+      const decorated = current.parent;
+      const member = ts.isParameter(decorated) ? decorated.parent : decorated;
+      if (!ts.isClassLike(member)) skip = member;
+    } else if (current !== skip) {
+      const id = ctx.entities.get(current);
+      if (id) return id;
+    }
     current = current.parent;
   }
   return fileId;
