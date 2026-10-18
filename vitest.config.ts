@@ -18,5 +18,7 @@ export default defineConfig({
       'apps/web/test/**/*.test.ts',
     ],
     testTimeout: 30_000,
+    // uma pasta temporária por execução, apagada no fim (veja scripts/test-tmp.ts)
+    globalSetup: ['./scripts/test-tmp.ts'],
   },
 });
