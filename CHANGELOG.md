@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to Rastro. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org/).
+
+## [0.2.0]
+
+The map now answers **what matters**: what a change affects, how one part reaches another, where to look first, in English or Portuguese.
+
+### Added
+
+- **Git changes and impact.** `--changes` (since the last commit, including untracked files) and `--since <ref>` (since the branch forked from `<ref>`) mark the changed functions, methods and files by their changed lines. The new **Changes** tab lists what changed, who depends on it by distance, the HTTP routes involved and the test files to run, and the map highlights the blast radius. Also available in `rastro export`, so an offline HTML report can carry a pull request's impact.
+- **Paths: “how does A reach B?”** Shortest chains of proven calls, imports and inheritance (up to 3 alternatives), each step with its evidence, shown in a map view with only the path.
+- **Insights tab.** Most called functions, orchestrators, central files, largest files, most coupled folders and possibly unused code (internal vs. exported), computed only from proven relationships.
+- **Live mode** (`--watch`). Re-analysis on save with the compiler kept in memory; the open map updates without losing the selection. Watches only the analyzed folders and falls back to polling (with a warning) when the system refuses more watchers.
+- **More routes.** Next.js (App and Pages Router, API routes, static `pageExtensions`), Fastify (`register` with `prefix`), Hono (`app.route`, `basePath`) and NestJS (`@Controller`, method decorators, global prefix), plus Express mount prefixes. The full path is only given when it can be proven.
+- **Export and compare.** `rastro export --format mermaid|dot|graphml|json|html` with level, folder and relationship filters; the HTML format is a single offline file with the whole interactive map. `rastro compare a.json b.json` diffs two analyses (`--json` for CI).
+- **Navigation.** Command palette (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>), arrow-key movement between nodes, <kbd>Alt</kbd>+<kbd>↑</kbd> to the parent, a minimap, a breadcrumb and a shortcuts list (<kbd>?</kbd>).
+- **Analyzer precision.** `super(...)` calls, inherited methods, union receivers, per-package `tsconfig` `paths` in monorepos, and _possible_ implementations for calls through interfaces or abstract methods (always unresolved, never drawn as proven).
+- **Languages.** Interface and CLI in English and Portuguese (`--lang`, `RASTRO_LANG`, system locale); analyzer diagnostics are translated too (`Diagnostic.params` + `diagnosticText`).
+- **Quality.** Interface tests in headless Chrome and benchmarks (100, 1,000 and 5,000 files) in CI.
+
+### Changed
+
+- About 37% faster analysis (one tree pass per file straight on the compiler). On a 5,000-file project: 6.0 s → 3.3 s; re-analysis in `--watch` 2.5 s.
+- Large maps stay responsive: the files level of a 5,000-file project opens in about 5 s instead of minutes (dense groups packed in a grid, lighter layout options with a time limit, cheaper style updates, straight lines and an image while panning).
+- A relationship from a visible entity to one inside a closed file now goes to that file instead of disappearing.
+- The folders level opens a project that lives in a single folder (like `src/`) by itself.
+- Options that do not apply to a command are rejected instead of silently ignored.
+
+### Security
+
+- `--changes`/`--since` run only read-only git commands with external diff, text conversion, hooks, pager and fsmonitor disabled, fixed diff prefixes, and refuse repositories whose local, worktree or command-line config defines commands (`--trust-git-config` to override).
+- Untracked files are only read when they are regular JS/TS files under the size limit (no symlinks, FIFOs or devices).
+- Names printed in the terminal have control characters removed; Mermaid labels encode characters that could inject directives.
+
+### Data format
+
+`schemaVersion` stays `0.1.0`: 0.2 only adds optional fields (`changes`, `meta.candidates`, `meta.mentions`, route `fullPath`/`mountedAt`/`routeKind`, `Diagnostic.params`). Graphs from 0.1 still open.
+
+## [0.1.1]
+
+- English README on GitHub and npm.
+
+## [0.1.0]
+
+- First public release: static analysis of JS/TS projects into an evidence-backed graph and an interactive local map.
+
+[0.2.0]: https://github.com/MongeAI/rastro/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/MongeAI/rastro/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/MongeAI/rastro/releases/tag/v0.1.0

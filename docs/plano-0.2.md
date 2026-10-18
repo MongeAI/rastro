@@ -69,9 +69,16 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 - ✅ Testes de interface ponta a ponta no CI (Chrome headless, `npm run test:e2e`): 10 cenários com a CLI real — servidor com token, busca, breadcrumb, paleta, teclado, caminho, EN/PT, celular, `--changes`, `--watch` e relatório offline sem requisições externas.
 - ✅ Benchmarks (`npm run bench`): projetos sintéticos de 100, 1 000 e 5 000 arquivos (análise 0,4 s / 1,0 s / 3,3 s; 5 000 arquivos com 661 MB), com limites no CI.
 - ✅ Interface em projetos enormes: com 5 000 arquivos, o nível "Arquivos" (5 mil nós, 20 mil linhas) ia de **mais de 3 min** para **~5 s** — grupos densos empacotados em grade no ELK, ELK mais leve em mapas grandes com limite de 20 s (cai para o orgânico), atalhos no cache de estilo do Cytoscape, linhas retas e imagem durante o arraste em mapas grandes, minimapa sem `boundingBox()` por nó. Projetos com tudo dentro de `src/` abrem já com a pasta aberta. Teste de interface com 1 500 arquivos guarda a regressão.
-- ⬜ Revisão de código independente (analisador, interface e segurança) antes do lançamento.
-- ⬜ Novas capturas, GIF e README da 0.2 em EN/PT.
+- ✅ Revisão de código independente (analisador, interface e segurança): 5 problemas altos (inclusive um desvio da verificação de configuração do git via `config.worktree`), 12 médios e vários baixos — todos corrigidos com testes que reproduzem cada caso.
+- ✅ Novas capturas e GIF em EN e PT (`docs/assets/en`, `docs/assets/pt`), README e README.pt-BR reescritos, CHANGELOG e ROADMAP atualizados, versão 0.2.0.
 
 ## Fora desta versão
 
 Outras linguagens (Python/Go) e extensões de editor ficam para a 0.3, para a 0.2 sair impecável.
+
+## Antes de lançar (checklist)
+
+- [ ] Rodar tudo numa máquina limpa: `npm ci && npm run build && npm test && npm run test:e2e`.
+- [ ] Testar o pacote empacotado: `npm pack -w apps/cli` e `npx ./mongeai-rastro-0.2.0.tgz` num projeto real.
+- [ ] Merge de `next` em `main`, tag `v0.2.0`, release no GitHub com o CHANGELOG.
+- [ ] `npm publish` (feito pelo dono do pacote, com 2FA).

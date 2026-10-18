@@ -79,10 +79,12 @@ export function CommandPalette({ index, actions, recent, onPickNode, onClose }: 
       return [...recentNodes, ...actionItems];
     }
     const nodes: Item[] = index.search(text, 40).map((r) => ({ type: 'node', node: r.node }));
-    // entidades primeiro, a não ser que uma ação combine muito bem com o texto
-    const strong = actionItems.filter(
-      (i) => i.type === 'action' && fuzzyScore(i.action.label, text) >= 80,
-    );
+    // entidades primeiro, a não ser que uma ação combine muito bem com o texto (com 1-2 letras
+    // quase tudo "combina": nesse caso as entidades vêm antes)
+    const strong =
+      text.trim().length < 3
+        ? []
+        : actionItems.filter((i) => i.type === 'action' && fuzzyScore(i.action.label, text) >= 80);
     const weak = actionItems.filter((i) => !strong.includes(i));
     return [...strong, ...nodes, ...weak];
   }, [actions, text, onlyActions, recent, index]);
