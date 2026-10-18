@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { Node, Project, SyntaxKind, ts, type KindToNodeMappings, type SourceFile } from 'ts-morph';
 import {
+  compareStrings,
   nodeId,
   SCHEMA_VERSION,
   RASTRO_VERSION,
@@ -23,7 +24,7 @@ import {
   packageNameOf,
   type InputStamps,
 } from './resolve.js';
-import { ImplementationIndex } from './implementations.js';
+import { ImplementationIndex, isSignatureWithoutBody, MAX_CANDIDATES } from './implementations.js';
 import { RouteDetector } from './routes/index.js';
 import { progressMessage, type ProgressEvent } from './progress.js';
 
@@ -45,6 +46,7 @@ interface Ctx {
   root: string;
   builder: GraphBuilder;
   resolver: ModuleResolver;
+  program: ts.Program;
   checker: ts.TypeChecker;
   /** Caminho absoluto → arquivo descoberto. */
   filesByAbs: Map<string, DiscoveredFile>;
@@ -165,110 +167,32 @@ async function runAnalysis(
   }));
   const fingerprint = JSON.stringify([config.options, scopes, manifests]);
   const inputsChanged = [...cache.inputs].some(([file, stamp]) => fileStamp(file) !== stamp);
-  if (!cache.project || cache.fingerprint !== fingerprint || inputsChanged) {
-    cache.fingerprint = fingerprint;
-    cache.stamps.clear();
-    cache.inputs.clear();
-    cache.external.clear();
-    cache.project = new Project({
-      compilerOptions: config.options,
-      skipAddingFilesFromTsConfig: true,
-      skipFileDependencyResolution: true,
-      // o verificador de tipos resolve cada import com o tsconfig do próprio arquivo (subpacotes)
-      resolutionHost: () => ({
-        resolveModuleNames: (names, containingFile, _reused, _redirected, _options, sourceFile) =>
-          names.map((name) =>
-            cache.resolver!.resolveForProgram(name, containingFile, sourceFile?.impliedNodeFormat),
-          ),
-      }),
-    });
+  let loaded = loadProgram(
+    cache,
+    config.options,
+    discovered.files,
+    root,
+    !cache.project || cache.fingerprint !== fingerprint || inputsChanged,
+    () => progress({ code: 'loading-compiler' }),
+  );
+  // o compilador reaproveita a resolução de imports dos arquivos que não mudaram; um arquivo
+  // fora da análise que passa a existir (`x.ts` ignorado ao lado de `x/index.ts`) muda o
+  // destino de `./x` sem mudar nenhum arquivo analisado. Conferimos cada resolução guardada com
+  // uma resolução nova e, se alguma mudou, o compilador é recriado (o resultado tem de ser o de
+  // uma análise nova)
+  if (loaded.reused && hasStaleResolutions(loaded.program, resolver, root)) {
+    loaded = loadProgram(cache, config.options, discovered.files, root, true, () => {});
   }
-  const project = cache.project;
-  // arquivos que saíram da análise (removidos, excluídos) saem do compilador
-  const wanted = new Set(discovered.files.map((f) => f.absolute));
-  const inProject = new Set<string>();
-  for (const sf of project.getSourceFiles()) {
-    const absolute = path.normalize(sf.getFilePath());
-    if (!wanted.has(absolute)) {
-      project.removeSourceFile(sf);
-      cache.stamps.delete(absolute);
-    } else {
-      inProject.add(absolute);
-    }
-  }
-  // `.d.ts` escritos à mão e outros arquivos que o compilador leu sozinho: relidos se mudaram
-  for (const [absolute, stamp] of cache.external) {
-    if (wanted.has(absolute)) {
-      cache.external.delete(absolute); // agora é um arquivo descoberto (tratado abaixo)
-      continue;
-    }
-    const current = fileStamp(absolute);
-    if (current === stamp) continue;
-    try {
-      project.getSourceFile(absolute)?.refreshFromFileSystemSync();
-    } catch {
-      const stale = project.getSourceFile(absolute);
-      if (stale) project.removeSourceFile(stale);
-    }
-    cache.external.delete(absolute);
-  }
-  // o parse acontece aqui: um arquivo extremo (aninhamento profundo, sem permissão de leitura)
-  // vira um aviso e sai da análise, em vez de derrubar tudo
-  const readable: DiscoveredFile[] = [];
-  for (const file of discovered.files) {
-    try {
-      // o compilador trata a barra invertida como separador de pastas: o arquivo seria outro (ou nenhum)
-      if (file.relative.includes('\\')) throw new BackslashNameError();
-      const stat = fs.statSync(file.absolute);
-      const stamp = `${stat.mtimeMs}:${stat.size}`;
-      const existing = project.getSourceFile(file.absolute);
-      if (!existing) project.addSourceFileAtPath(file.absolute);
-      else {
-        if (cache.stamps.get(file.absolute) !== stamp) existing.refreshFromFileSystemSync();
-        // lido antes só como dependência de outro arquivo: passa a fazer parte do projeto
-        if (!inProject.has(file.absolute)) project.addSourceFileAtPath(file.absolute);
-      }
-      cache.stamps.set(file.absolute, stamp);
-      readable.push(file);
-    } catch (err) {
-      const stale = project.getSourceFile(file.absolute);
-      if (stale) project.removeSourceFile(stale);
-      cache.stamps.delete(file.absolute);
-      const failure = describeFailure(err, root);
-      diagnostics.push({
-        level: 'warning',
-        code: 'parse-failed',
-        message: `Arquivo ignorado: não foi possível ler ou interpretar (${failure.text}).`,
-        file: file.relative,
-        params: failure.params,
-      });
-    }
-  }
-  discovered.files = readable;
-
-  progress({ code: 'loading-compiler' });
-  let program: ts.Program;
-  try {
-    program = project.getProgram().compilerObject;
-  } catch (err) {
-    throw new Error(
-      `O compilador TypeScript não conseguiu montar o projeto (${(err as Error).message}). ` +
-        'Tente excluir pastas geradas com --exclude.',
-      { cause: err },
-    );
-  }
-  // o que o compilador leu além dos arquivos descobertos, para relermos se mudar
-  for (const sf of program.getSourceFiles()) {
-    const absolute = toPosix(path.resolve(sf.fileName));
-    if (wanted.has(absolute) || cache.external.has(absolute)) continue;
-    const stamp = fileStamp(absolute);
-    // bibliotecas padrão do TypeScript ficam em memória (não existem no disco)
-    if (stamp !== '-') cache.external.set(absolute, stamp);
-  }
+  cache.fingerprint = fingerprint;
+  const { program } = loaded;
+  const project = cache.project!;
+  diagnostics.push(...loaded.diagnostics);
+  discovered.files = loaded.readable;
   const ctx: Ctx = {
     root,
     builder: new GraphBuilder(),
     resolver,
+    program,
     checker: program.getTypeChecker(),
     filesByAbs: new Map(discovered.files.map((f) => [f.absolute, f])),
     entities: new Map(),
@@ -391,6 +315,170 @@ async function runAnalysis(
   }
   progress({ code: 'done', durationMs: graph.stats.durationMs });
   return graph;
+}
+
+interface LoadedProgram {
+  program: ts.Program;
+  /** O compilador da sessão foi reaproveitado (e não recriado nesta análise). */
+  reused: boolean;
+  /** Arquivos descobertos que puderam ser lidos e interpretados. */
+  readable: DiscoveredFile[];
+  diagnostics: Diagnostic[];
+}
+
+/**
+ * Prepara o compilador da sessão para os arquivos descobertos: cria (ou recria, com `fresh`)
+ * o projeto, tira os arquivos que saíram, relê os que mudaram e monta o programa.
+ */
+function loadProgram(
+  cache: CompilerCache,
+  compilerOptions: ts.CompilerOptions,
+  files: DiscoveredFile[],
+  root: string,
+  fresh: boolean,
+  beforeProgram: () => void,
+): LoadedProgram {
+  const diagnostics: Diagnostic[] = [];
+  if (fresh) {
+    cache.stamps.clear();
+    cache.inputs.clear();
+    cache.external.clear();
+    cache.project = new Project({
+      compilerOptions,
+      skipAddingFilesFromTsConfig: true,
+      skipFileDependencyResolution: true,
+      // o verificador de tipos resolve cada import com o tsconfig do próprio arquivo (subpacotes)
+      resolutionHost: () => ({
+        resolveModuleNames: (names, containingFile, _reused, _redirected, _options, sourceFile) =>
+          names.map((name) =>
+            cache.resolver!.resolveForProgram(name, containingFile, sourceFile?.impliedNodeFormat),
+          ),
+      }),
+    });
+  }
+  const project = cache.project!;
+  // arquivos que saíram da análise (removidos, excluídos) saem do compilador
+  const wanted = new Set(files.map((f) => f.absolute));
+  const inProject = new Set<string>();
+  for (const sf of project.getSourceFiles()) {
+    const absolute = path.normalize(sf.getFilePath());
+    if (!wanted.has(absolute)) {
+      project.removeSourceFile(sf);
+      cache.stamps.delete(absolute);
+    } else {
+      inProject.add(absolute);
+    }
+  }
+  // `.d.ts` escritos à mão e outros arquivos que o compilador leu sozinho: relidos se mudaram
+  for (const [absolute, stamp] of cache.external) {
+    if (wanted.has(absolute)) {
+      cache.external.delete(absolute); // agora é um arquivo descoberto (tratado abaixo)
+      continue;
+    }
+    const current = fileStamp(absolute);
+    if (current === stamp) continue;
+    try {
+      project.getSourceFile(absolute)?.refreshFromFileSystemSync();
+    } catch {
+      const stale = project.getSourceFile(absolute);
+      if (stale) project.removeSourceFile(stale);
+    }
+    cache.external.delete(absolute);
+  }
+  // o parse acontece aqui: um arquivo extremo (aninhamento profundo, sem permissão de leitura)
+  // vira um aviso e sai da análise, em vez de derrubar tudo
+  const readable: DiscoveredFile[] = [];
+  for (const file of files) {
+    try {
+      // o compilador trata a barra invertida como separador de pastas: o arquivo seria outro (ou nenhum)
+      if (file.relative.includes('\\')) throw new BackslashNameError();
+      const stat = fs.statSync(file.absolute);
+      const stamp = `${stat.mtimeMs}:${stat.size}`;
+      const existing = project.getSourceFile(file.absolute);
+      if (!existing) project.addSourceFileAtPath(file.absolute);
+      else {
+        if (cache.stamps.get(file.absolute) !== stamp) existing.refreshFromFileSystemSync();
+        // lido antes só como dependência de outro arquivo: passa a fazer parte do projeto
+        if (!inProject.has(file.absolute)) project.addSourceFileAtPath(file.absolute);
+      }
+      cache.stamps.set(file.absolute, stamp);
+      readable.push(file);
+    } catch (err) {
+      const stale = project.getSourceFile(file.absolute);
+      if (stale) project.removeSourceFile(stale);
+      cache.stamps.delete(file.absolute);
+      const failure = describeFailure(err, root);
+      diagnostics.push({
+        level: 'warning',
+        code: 'parse-failed',
+        message: `Arquivo ignorado: não foi possível ler ou interpretar (${failure.text}).`,
+        file: file.relative,
+        params: failure.params,
+      });
+    }
+  }
+
+  beforeProgram();
+  let program: ts.Program;
+  try {
+    program = project.getProgram().compilerObject;
+  } catch (err) {
+    throw new Error(
+      `O compilador TypeScript não conseguiu montar o projeto (${(err as Error).message}). ` +
+        'Tente excluir pastas geradas com --exclude.',
+      { cause: err },
+    );
+  }
+  // o que o compilador leu além dos arquivos descobertos, para relermos se mudar
+  for (const sf of program.getSourceFiles()) {
+    const absolute = toPosix(path.resolve(sf.fileName));
+    if (wanted.has(absolute) || cache.external.has(absolute)) continue;
+    const stamp = fileStamp(absolute);
+    // bibliotecas padrão do TypeScript ficam em memória (não existem no disco)
+    if (stamp !== '-') cache.external.set(absolute, stamp);
+  }
+  return { program, reused: !fresh, readable, diagnostics };
+}
+
+/** Parte interna (estável) do programa do TypeScript: as resoluções de import guardadas. */
+interface ProgramResolutions {
+  forEachResolvedModule?: (
+    callback: (
+      resolution: ts.ResolvedModuleWithFailedLookupLocations,
+      name: string,
+      mode: ts.ResolutionMode,
+    ) => void,
+    file?: ts.SourceFile,
+  ) => void;
+}
+
+/**
+ * Alguma resolução de import guardada no programa difere de uma resolução nova (feita agora
+ * pelo `ModuleResolver`, com cache vazio)? Só os arquivos do projeto são conferidos: mudanças em
+ * node_modules já recriam o compilador pelos manifestos (package.json, lockfiles).
+ */
+function hasStaleResolutions(program: ts.Program, resolver: ModuleResolver, root: string): boolean {
+  const forEach = (program as unknown as ProgramResolutions).forEachResolvedModule;
+  // sem acesso às resoluções guardadas, não há como provar que continuam valendo
+  if (typeof forEach !== 'function') return true;
+  for (const sf of program.getSourceFiles()) {
+    const file = toPosix(path.resolve(sf.fileName));
+    if (!file.startsWith(`${root}/`) || file.slice(root.length).includes('/node_modules/'))
+      continue;
+    let stale = false;
+    forEach.call(
+      program,
+      (resolution, name) => {
+        if (stale) return;
+        // mesmo modo que o compilador passa ao `resolveModuleNames` do projeto
+        const now = resolver.resolveForProgram(name, sf.fileName, sf.impliedNodeFormat);
+        if (now?.resolvedFileName !== resolution.resolvedModule?.resolvedFileName) stale = true;
+      },
+      sf,
+    );
+    if (stale) return true;
+  }
+  return false;
 }
 
 export type AnalyzerContext = Ctx;
@@ -566,9 +654,15 @@ function projectName(root: string): string {
 /**
  * Onde um trecho começa no texto. Uma chamada de método (`a.b(...)`) começa no nome do método:
  * numa cadeia em várias linhas (`Test.createTestingModule({...})` ⏎ `.compile()`), o início da
- * expressão inteira fica linhas acima, numa linha que não contém a chamada.
+ * expressão inteira fica linhas acima, numa linha que não contém a chamada. `new Svc()` começa
+ * no nome da classe, como uma chamada: com `new` ⏎ `Svc()`, a palavra `new` fica sozinha numa
+ * linha acima.
  */
 function startOf(node: ts.Node): ts.Node {
+  if (ts.isNewExpression(node)) {
+    const callee = node.expression;
+    return ts.isPropertyAccessExpression(callee) ? callee.name : callee;
+  }
   return ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
     ? node.expression.name
     : node;
@@ -1133,9 +1227,18 @@ function extractImports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
     const bare = !imp.specifier.startsWith('.') && !path.isAbsolute(imp.specifier);
     // ('asset' vindo de especificador sem ponto é um alias de `paths`: `@/styles/x.css`)
     if (target.kind === 'file' && bare && !ctx.filesByAbs.has(target.absolute)) {
-      // pacote do workspace sem código-fonte correspondente: tratamos como pacote
-      const name = packageNameOf(imp.specifier);
-      target = { kind: 'package', name, builtin: false, declared: true };
+      const absolute = target.absolute;
+      if (
+        !SOURCE_EXTS.some((ext) => absolute.endsWith(ext)) &&
+        ctx.resolver.isPathAlias(imp.specifier, file.absolute)
+      ) {
+        // JSON do projeto por um alias de `paths` (`@/conf.json`): é o arquivo, não um pacote
+        target = { kind: 'asset', absolute };
+      } else {
+        // pacote do workspace sem código-fonte correspondente: tratamos como pacote
+        const name = packageNameOf(imp.specifier);
+        target = { kind: 'package', name, builtin: false, declared: true };
+      }
     }
     if (target.kind === 'file' || target.kind === 'asset') {
       const rel = toPosix(path.relative(ctx.root, target.absolute));
@@ -1261,8 +1364,7 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
 
   for (const symbol of exports) {
     const name = displayName(symbol);
-    const targets = resolveSymbolTargets(ctx, symbol);
-    for (const target of targets) {
+    for (const { target, decl } of exportedTargets(ctx, symbol)) {
       if (target.kind !== 'entity') continue;
       const entity = ctx.builder.getNode(target.id);
       if (!entity) continue;
@@ -1275,7 +1377,6 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           ...(isDefault ? { defaultExport: true } : {}),
         };
       }
-      const decl = symbol.declarations?.[0];
       const evidence =
         (!sameFile && exportStatementEvidence(ctx, file, sf, name)) ||
         (decl && toPosix(decl.getSourceFile().fileName) === file.absolute
@@ -1292,6 +1393,23 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       });
     }
   }
+}
+
+/**
+ * Entidades exportadas por um símbolo, cada uma com a declaração que a exporta (a evidência).
+ * Com `module.exports = ...` atribuído em mais de um lugar, cada atribuição exporta o próprio
+ * alvo (o arquivo pode exportar qualquer um deles) e é a evidência dele.
+ */
+function exportedTargets(
+  ctx: Ctx,
+  symbol: ts.Symbol,
+): Array<{ target: SymbolTarget; decl: ts.Declaration | undefined }> {
+  const decls = symbol.declarations ?? [];
+  if (!(symbol.flags & ts.SymbolFlags.Alias) && decls.filter(isExportsAssignment).length > 1)
+    return decls.flatMap((decl) =>
+      declarationTargets(ctx, decl, 0).map((target) => ({ target, decl })),
+    );
+  return resolveSymbolTargets(ctx, symbol).map((target) => ({ target, decl: decls[0] }));
 }
 
 /**
@@ -1355,7 +1473,8 @@ export type SymbolTarget =
   | { kind: 'local' }
   /** declarada em arquivo do projeto que não foi analisado */
   | { kind: 'not-analyzed' }
-  | { kind: 'indirect' }
+  /** o alvo só existe em execução; `candidates`: entidades que ele _pode_ ser (nunca comprovadas) */
+  | { kind: 'indirect'; candidates?: string[] }
   | { kind: 'missing' };
 
 /** Resolve um símbolo até entidades do projeto, seguindo aliases de import/require. */
@@ -1388,73 +1507,93 @@ export function resolveSymbolTargets(
     return [{ kind: 'missing' }];
   }
 
-  const targets: SymbolTarget[] = [];
-  for (const decl of decls) {
-    const entity = entityForDeclaration(ctx, decl);
-    if (entity) {
-      targets.push({ kind: 'entity', id: entity });
-      continue;
-    }
-    const declFile = toPosix(decl.getSourceFile().fileName);
-    if (!ctx.filesByAbs.has(declFile)) {
-      const mapped = entityFromDeclarationFile(ctx, decl, declFile);
-      if (mapped) targets.push({ kind: 'entity', id: mapped, mapped: true });
-      // declarado em um arquivo do projeto que ficou fora da análise (excluído, grande demais...)
-      else if (isInsideProject(ctx, declFile)) targets.push({ kind: 'not-analyzed' });
-      else targets.push({ kind: 'external' });
-      continue;
-    }
-    if (ts.isShorthandPropertyAssignment(decl)) {
-      targets.push(
-        ...resolveSymbolTargets(
-          ctx,
-          ctx.checker.getShorthandAssignmentValueSymbol(decl),
-          depth + 1,
-        ),
-      );
-      continue;
-    }
-    if (
-      ts.isPropertyAssignment(decl) &&
-      ts.isIdentifier(decl.initializer) &&
-      isConstObjectLiteralProperty(decl)
-    ) {
-      targets.push(
-        ...resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1),
-      );
-      continue;
-    }
-    if (
-      ts.isVariableDeclaration(decl) &&
-      decl.initializer &&
-      ts.isIdentifier(decl.initializer) &&
-      isConstDeclaration(decl)
-    ) {
-      // const alias = outraFuncao;
-      targets.push(
-        ...resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1),
-      );
-      continue;
-    }
-    const reexported = commonJsReexport(ctx, decl, depth);
-    if (reexported) {
-      // `module.exports = require('./lib/app')`: o valor exportado é o do módulo exigido
-      targets.push(...reexported);
-      continue;
-    }
-    if (isLocalFunction(decl)) {
-      targets.push({ kind: 'local' });
-      continue;
-    }
-    if (producedByExternalCall(ctx, decl, depth)) {
-      // ex.: `const [x, setX] = useState()` — a função vem de uma biblioteca
-      targets.push({ kind: 'external' });
-      continue;
-    }
-    // parâmetros, propriedades, assinaturas de interface: o alvo real só existe em execução
-    targets.push({ kind: 'indirect' });
+  // `module.exports = ...` (ou `exports.x = ...`) atribuído em mais de um lugar (`if (prod)
+  // module.exports = require('./a'); else module.exports = require('./b')`): em execução o
+  // valor é um só deles, e qual depende do fluxo. Os alvos de cada atribuição são possíveis,
+  // nenhum é comprovado
+  if (decls.filter(isExportsAssignment).length > 1) {
+    const possible = decls.flatMap((decl) => declarationTargets(ctx, decl, depth));
+    return [{ kind: 'indirect', candidates: possibleTargets(possible) }];
   }
-  return targets;
+  return decls.flatMap((decl) => declarationTargets(ctx, decl, depth));
+}
+
+/**
+ * Ids que um conjunto de alvos _pode_ atingir: as entidades e os candidatos de alvos indiretos
+ * (ordenados, sem repetição, no máximo `MAX_CANDIDATES`).
+ */
+export function possibleTargets(targets: SymbolTarget[], extra: string[] = []): string[] {
+  const ids = new Set(extra);
+  for (const t of targets) {
+    if (t.kind === 'entity') ids.add(t.id);
+    else if (t.kind === 'indirect') for (const id of t.candidates ?? []) ids.add(id);
+  }
+  return [...ids].sort(compareStrings).slice(0, MAX_CANDIDATES);
+}
+
+/** `module.exports = x`, `exports.x = y` ou `module.exports.x = y` (a declaração do binder). */
+function isExportsAssignment(decl: ts.Node): boolean {
+  const assignment =
+    ts.isPropertyAccessExpression(decl) &&
+    ts.isBinaryExpression(decl.parent) &&
+    decl.parent.left === decl
+      ? decl.parent
+      : decl;
+  if (
+    !ts.isBinaryExpression(assignment) ||
+    assignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken
+  )
+    return false;
+  const left = assignment.left;
+  if (isModuleExports(left)) return true;
+  return (
+    ts.isPropertyAccessExpression(left) &&
+    (isModuleExports(left.expression) ||
+      (ts.isIdentifier(left.expression) && left.expression.text === 'exports'))
+  );
+}
+
+/** Alvos de uma declaração do símbolo (ver `resolveSymbolTargets`). */
+function declarationTargets(ctx: Ctx, decl: ts.Declaration, depth: number): SymbolTarget[] {
+  const entity = entityForDeclaration(ctx, decl);
+  if (entity) return [{ kind: 'entity', id: entity }];
+  const declFile = toPosix(decl.getSourceFile().fileName);
+  if (!ctx.filesByAbs.has(declFile)) {
+    const mapped = entityFromDeclarationFile(ctx, decl, declFile);
+    if (mapped) return [{ kind: 'entity', id: mapped, mapped: true }];
+    // declarado em um arquivo do projeto que ficou fora da análise (excluído, grande demais...)
+    if (isInsideProject(ctx, declFile)) return [{ kind: 'not-analyzed' }];
+    return [{ kind: 'external' }];
+  }
+  if (ts.isShorthandPropertyAssignment(decl))
+    return resolveSymbolTargets(
+      ctx,
+      ctx.checker.getShorthandAssignmentValueSymbol(decl),
+      depth + 1,
+    );
+  if (
+    ts.isPropertyAssignment(decl) &&
+    ts.isIdentifier(decl.initializer) &&
+    isConstObjectLiteralProperty(decl)
+  )
+    return resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1);
+  if (
+    ts.isVariableDeclaration(decl) &&
+    decl.initializer &&
+    ts.isIdentifier(decl.initializer) &&
+    isConstDeclaration(decl)
+  ) {
+    // const alias = outraFuncao;
+    return resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1);
+  }
+  // `module.exports = require('./lib/app')`: o valor exportado é o do módulo exigido
+  const reexported = commonJsReexport(ctx, decl, depth);
+  if (reexported) return reexported;
+  if (isLocalFunction(decl)) return [{ kind: 'local' }];
+  // ex.: `const [x, setX] = useState()` — a função vem de uma biblioteca
+  if (producedByExternalCall(ctx, decl, depth)) return [{ kind: 'external' }];
+  // parâmetros, propriedades, assinaturas de interface: o alvo real só existe em execução
+  return [{ kind: 'indirect' }];
 }
 
 const isFunctionExpression = (n: ts.Node): boolean =>
@@ -1775,6 +1914,9 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
     const indirect = targets.some((t) => t.kind === 'indirect')
       ? implementationsOf(ctx).indirectTargets(nameNode.compilerNode, symbol)
       : undefined;
+    // implementações possíveis: as da interface e as de alvos indiretos (ex.: `module.exports`
+    // atribuído em mais de um lugar)
+    const possible = () => possibleTargets(targets, indirect?.candidates ?? []);
     const indirectEdge = (candidates: string[], reason: UnresolvedReason) => {
       const target = addUnresolvedNode(
         ctx,
@@ -1795,6 +1937,16 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
         meta,
       });
     };
+    // receptor de tipo união (`r: Foo | Bar`, `r: UserRepo | Foo`) com o método declarado em mais
+    // de um lugar do projeto: em execução só um deles atende a chamada, e qual depende do objeto
+    if (
+      Node.isPropertyAccessExpression(callee) &&
+      projectDeclarationCount(ctx, symbol, entities) > 1 &&
+      hasCompositeReceiver(ctx, callee.compilerNode)
+    ) {
+      indirectEdge(possible(), 'indirect-call');
+      continue;
+    }
     if (entities.length || targets.some((t) => t.kind === 'external')) {
       for (const target of entities) {
         ctx.builder.addEdge({
@@ -1808,8 +1960,8 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
         });
       }
       if (!entities.length) ctx.counters.externalCallsSkipped++;
-      // receptor de tipo união (`r: UserRepo | SqlRepo`): a parte da interface (ou do método
-      // abstrato) continua não resolvida, com as implementações possíveis
+      // receptor de tipo união com uma parte externa (`r: Repo | ExternalRepo`): a parte da
+      // interface continua não resolvida, com as implementações possíveis
       if (indirect) indirectEdge(indirect.candidates, 'indirect-call');
       continue;
     }
@@ -1823,7 +1975,43 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       ctx.counters.unknownReceiverCalls++;
       continue;
     }
-    indirectEdge(reason === 'indirect-call' ? (indirect?.candidates ?? []) : [], reason);
+    indirectEdge(reason === 'indirect-call' ? possible() : [], reason);
+  }
+}
+
+/**
+ * Quantas declarações do projeto o membro chamado tem: as entidades e as assinaturas sem corpo
+ * (interface, método abstrato) em arquivos do projeto. Num receptor `Foo | Bar`, o membro é a
+ * união das declarações de cada parte.
+ */
+function projectDeclarationCount(
+  ctx: Ctx,
+  symbol: ts.Symbol,
+  entities: Array<{ id: string }>,
+): number {
+  let resolved = symbol;
+  if (resolved.flags & ts.SymbolFlags.Alias) {
+    try {
+      resolved = ctx.checker.getAliasedSymbol(resolved);
+    } catch {
+      return 0;
+    }
+  }
+  const signatures = (resolved.declarations ?? []).filter(
+    (d) => isSignatureWithoutBody(d) && isInsideProject(ctx, toPosix(d.getSourceFile().fileName)),
+  );
+  return new Set(entities.map((e) => e.id)).size + signatures.length;
+}
+
+/** O receptor de `obj.m()` tem tipo união ou interseção (também pela restrição de um genérico)? */
+function hasCompositeReceiver(ctx: Ctx, access: ts.PropertyAccessExpression): boolean {
+  try {
+    let type = ctx.checker.getTypeAtLocation(access.expression);
+    if (type.flags & ts.TypeFlags.TypeParameter)
+      type = ctx.checker.getBaseConstraintOfType(type) ?? type;
+    return type.isUnion() || type.isIntersection();
+  } catch {
+    return false;
   }
 }
 

@@ -241,22 +241,70 @@ describe('implements e chamadas por interface (fixtures/oop)', () => {
     for (const site of sites) expect(site.name).toBe('repo.save');
   });
 
-  it('receptor de tipo união: a parte concreta é resolvida e a da interface fica possível', async () => {
+  it('receptor de tipo união com interface e classe: nenhuma parte é comprovada, todas são possíveis', async () => {
     const root = makeProject({
       'a.ts': [...repos, 'export function un(r: UserRepo | SqlOrderRepo) { r.save(); }'].join('\n'),
     });
     const g2 = await analyzeProject(root);
     expectValid(g2);
-    expect(edge(g2, 'calls', 'fn:a.ts#un', 'method:a.ts#SqlOrderRepo.save')?.resolution).toBe(
-      'resolved',
-    );
+    // em execução só um dos métodos atende a chamada: nenhuma relação resolvida
+    expect(edge(g2, 'calls', 'fn:a.ts#un', 'method:a.ts#SqlOrderRepo.save')).toBeUndefined();
     const indirect = edge(g2, 'calls', 'fn:a.ts#un', 'unresolved:a.ts#call:r.save');
     expect(indirect?.resolution).toBe('unresolved');
     expect(node(g2, 'unresolved:a.ts#call:r.save')?.meta).toEqual({
       reason: 'indirect-call',
       reference: 'r.save',
-      candidates: ['method:a.ts#SqlUserRepo.save'],
+      candidates: ['method:a.ts#SqlOrderRepo.save', 'method:a.ts#SqlUserRepo.save'],
     });
+  });
+
+  it('receptor de tipo união de duas classes do projeto: as duas são possíveis, nenhuma resolvida', async () => {
+    const root = makeProject({
+      'a.ts': [
+        'export class Foo { save() {} }',
+        'export class Bar { save() {} }',
+        'export class SubFoo extends Foo {}',
+        'export function both(r: Foo | Bar) { r.save(); }',
+        'export function generic<T extends Foo | Bar>(r: T) { r.save(); }',
+        // uma declaração só do projeto: continua resolvida
+        'export function optional(r?: Foo) { r?.save(); }',
+        'export function same(r: Foo | SubFoo) { r.save(); }',
+        'export function nullable(r: Foo | null) { r!.save(); }',
+      ].join('\n'),
+    });
+    const g2 = await analyzeProject(root);
+    expectValid(g2);
+    const calls = (from: string) =>
+      g2.edges
+        .filter((e) => e.kind === 'calls' && e.source === from)
+        .map((e) => [e.target, e.resolution]);
+    expect(calls('fn:a.ts#both')).toEqual([['unresolved:a.ts#call:r.save', 'unresolved']]);
+    expect(node(g2, 'unresolved:a.ts#call:r.save')?.meta).toEqual({
+      reason: 'indirect-call',
+      reference: 'r.save',
+      candidates: ['method:a.ts#Bar.save', 'method:a.ts#Foo.save'],
+    });
+    expect(calls('fn:a.ts#generic')).toEqual([['unresolved:a.ts#call:r.save', 'unresolved']]);
+    expect(calls('fn:a.ts#optional')).toEqual([['method:a.ts#Foo.save', 'resolved']]);
+    expect(calls('fn:a.ts#same')).toEqual([['method:a.ts#Foo.save', 'resolved']]);
+    expect(calls('fn:a.ts#nullable')).toEqual([['method:a.ts#Foo.save', 'resolved']]);
+    // a interface mostra os dois como possíveis chamados
+    expect(possibleCallers(g2, 'method:a.ts#Bar.save')).toEqual([
+      'fn:a.ts#both',
+      'fn:a.ts#generic',
+    ]);
+  });
+
+  it('interface e classe com o mesmo nome (declarações mescladas) não são uma união', async () => {
+    const root = makeProject({
+      'a.ts': [
+        'export interface Store { save(): void }',
+        'export class Store { save() {} }',
+        'export function use(s: Store) { s.save(); }',
+      ].join('\n'),
+    });
+    const g2 = await analyzeProject(root);
+    expect(edge(g2, 'calls', 'fn:a.ts#use', 'method:a.ts#Store.save')?.resolution).toBe('resolved');
   });
 });
 
@@ -430,5 +478,68 @@ describe("reexportação CommonJS: module.exports = require('./lib/x')", () => {
     expectValid(g);
     expect(g.edges.filter((e) => e.kind === 'calls' && e.resolution === 'resolved')).toEqual([]);
     expect(g.nodes.some((n) => n.kind === 'unresolved' && n.name === 'pad')).toBe(false);
+  });
+  it('module.exports condicional: nenhum dos lados é comprovado, os dois são possíveis', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"cond"}',
+      'impl1.js': 'module.exports = function one() { return 1; };',
+      'impl2.js': 'module.exports = function two() { return 2; };',
+      'c.js': [
+        'if (process.env.X) {',
+        "  module.exports = require('./impl1');",
+        '} else {',
+        "  module.exports = require('./impl2');",
+        '}',
+      ].join('\n'),
+      'single.js': "module.exports = require('./impl1');",
+      'main.js': "const c = require('./c');\nc();\nrequire('./single')();\n",
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    const calls = g.edges.filter((e) => e.kind === 'calls' && e.source === 'file:main.js');
+    expect(calls.map((e) => [e.target, e.resolution])).toEqual([
+      ['unresolved:main.js#call:c', 'unresolved'],
+    ]);
+    expect(node(g, 'unresolved:main.js#call:c')?.meta).toEqual({
+      reason: 'indirect-call',
+      reference: 'c',
+      candidates: ['fn:impl1.js#one', 'fn:impl2.js#two'],
+    });
+    // cada `exports` cita a atribuição que produziu aquele alvo
+    expect(edge(g, 'exports', 'file:c.js', 'fn:impl1.js#one')?.evidence[0]).toMatchObject({
+      line: 2,
+      snippet: "module.exports = require('./impl1');",
+    });
+    expect(edge(g, 'exports', 'file:c.js', 'fn:impl2.js#two')?.evidence[0]).toMatchObject({
+      line: 4,
+      snippet: "module.exports = require('./impl2');",
+    });
+    // reexportação única continua comprovada
+    expect(edge(g, 'exports', 'file:single.js', 'fn:impl1.js#one')?.resolution).toBe('resolved');
+  });
+
+  it('exports.x atribuído duas vezes: chamada não resolvida com os dois candidatos', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"twice"}',
+      'a.js': 'module.exports = function fast() {};',
+      'b.js': 'module.exports = function slow() {};',
+      'lib.js': [
+        "if (process.env.FAST) exports.run = require('./a');",
+        "else exports.run = require('./b');",
+        "exports.only = require('./a');",
+      ].join('\n'),
+      'main.js': "const lib = require('./lib');\nlib.run();\nlib.only();\n",
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    const calls = g.edges.filter((e) => e.kind === 'calls' && e.source === 'file:main.js');
+    expect(calls.map((e) => [e.target, e.resolution]).sort()).toEqual([
+      ['fn:a.js#fast', 'resolved'],
+      ['unresolved:main.js#call:lib.run', 'unresolved'],
+    ]);
+    expect(node(g, 'unresolved:main.js#call:lib.run')?.meta?.candidates).toEqual([
+      'fn:a.js#fast',
+      'fn:b.js#slow',
+    ]);
   });
 });

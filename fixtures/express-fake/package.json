@@ -1,0 +1,7 @@
+{
+  "name": "express",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "description": "Projeto que só se chama express: o ponto de entrada não é o Express, então require('..') não comprova o framework e nenhuma rota é inventada."
+}

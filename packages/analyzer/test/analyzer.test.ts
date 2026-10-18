@@ -718,6 +718,71 @@ describe('regressões da segunda revisão', () => {
   });
 });
 
+describe('regressões da terceira revisão', () => {
+  it('paths: só o padrão de prefixo mais longo vale, como no compilador', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"paths2"}',
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: { '@/*': ['./src/*'], '@/styles/*': ['./nonexist/*'] },
+        },
+      }),
+      'src/styles/globals.css': 'body {}',
+      'src/main.ts': "import '@/styles/globals.css';\n",
+    });
+    const g = await analyzeProject(root);
+    // `@/styles/*` vence e o destino dele não existe: o compilador não tenta `@/*`
+    expect(edge(g, 'imports', 'file:src/main.ts', 'file:src/styles/globals.css')).toBeUndefined();
+    expect(
+      edge(g, 'imports', 'file:src/main.ts', 'unresolved:src/main.ts#import:@/styles/globals.css')
+        ?.resolution,
+    ).toBe('unresolved');
+  });
+
+  it('JSON do projeto por um alias de paths é o arquivo, não um pacote npm', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"paths-json"}',
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: { baseUrl: '.', resolveJsonModule: true, paths: { '@/*': ['./src/*'] } },
+      }),
+      'src/conf.json': '{"a":1}',
+      'src/main.ts': "import conf from '@/conf.json';\nconsole.log(conf);\n",
+    });
+    const g = await analyzeProject(root);
+    expect(validateGraph(g)).toEqual({ valid: true, errors: [] });
+    expect(g.nodes.some((n) => n.kind === 'package')).toBe(false);
+    expect(edge(g, 'imports', 'file:src/main.ts', 'file:src/conf.json')?.resolution).toBe(
+      'resolved',
+    );
+    expect(node(g, 'file:src/conf.json')?.meta).toEqual({ analyzed: false });
+  });
+
+  it('new quebrado em duas linhas: a evidência aponta para a linha da classe', async () => {
+    const root = makeProject({
+      'a.ts': [
+        'export class Svc {}',
+        'export class Box { constructor(x: number) {} }',
+        'export const s = new',
+        '  Svc();',
+        'export const b = new Box(1);',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const newOf = (cls: string) =>
+      g.edges.find(
+        (e) => e.kind === 'calls' && e.meta?.callKind === 'new' && e.target.includes(cls),
+      )?.evidence[0];
+    expect(newOf('Svc')).toMatchObject({ line: 4, column: 3, snippet: 'Svc();' });
+    // numa linha só, a coluna é a do nome da classe (como numa chamada)
+    expect(newOf('Box')).toMatchObject({
+      line: 5,
+      column: 22,
+      snippet: 'export const b = new Box(1);',
+    });
+  });
+});
+
 describe('insights (0.2)', () => {
   it('aponta código possivelmente sem uso sem acusar callbacks nem métodos implícitos', async () => {
     const root = makeProject({

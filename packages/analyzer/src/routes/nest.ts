@@ -192,14 +192,6 @@ function detectGlobalPrefix(state: RouteState, file: DiscoveredFile, sf: SourceF
     const callee = call.getExpression();
     if (!Node.isPropertyAccessExpression(callee) || callee.getName() !== 'setGlobalPrefix')
       continue;
-    // método declarado no próprio projeto (ex.: `{ setGlobalPrefix() {} }`): não é o do Nest
-    const declarations =
-      state.ctx.checker.getSymbolAtLocation(callee.getNameNode().compilerNode)?.declarations ?? [];
-    if (
-      declarations.length &&
-      declarations.every((d) => state.ctx.filesByAbs.has(toPosix(d.getSourceFile().fileName)))
-    )
-      continue;
     const isNestApp = resolveValue(state.ctx, callee.getExpression().compilerNode).some((decl) => {
       if (!ts.isVariableDeclaration(decl) || !decl.initializer) return false;
       const init = unwrapExpression(decl.initializer);
@@ -211,6 +203,17 @@ function detectGlobalPrefix(state: RouteState, file: DiscoveredFile, sf: SourceF
         frameworkExport(state.ctx, factory.expression, NEST_CORE) === 'NestFactory'
       );
     });
+    // método declarado no próprio projeto (ex.: `{ setGlobalPrefix() {} }`): não é o do Nest.
+    // Num app comprovadamente criado por `NestFactory.create`, vale mesmo que o `@nestjs/core`
+    // seja resolvido para dentro da raiz (cópia do Nest no projeto, alias de `paths`)
+    const declarations =
+      state.ctx.checker.getSymbolAtLocation(callee.getNameNode().compilerNode)?.declarations ?? [];
+    if (
+      !isNestApp &&
+      declarations.length &&
+      declarations.every((d) => state.ctx.filesByAbs.has(toPosix(d.getSourceFile().fileName)))
+    )
+      continue;
     const [prefixArg, options] = call.compilerNode.arguments;
     const literal = stringLiteral(prefixArg);
     // `exclude` tira algumas rotas do prefixo: sem saber quais, o prefixo fica desconhecido

@@ -184,4 +184,39 @@ describe('AnalysisSession (reanálise do modo --watch)', () => {
     fs.rmSync(path.join(root, 'src/types.d.ts'));
     await same();
   });
+
+  it('arquivo não descoberto que passa a ganhar a resolução de um import (x.ts antes de x/index.ts)', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-session-')));
+    write(root, 'package.json', '{"name":"sombra"}');
+    write(root, '.gitignore', 'x.ts\n');
+    write(root, 'x/index.ts', 'export function fromIndex() {}\n');
+    write(root, 'main.ts', "import { fromIndex } from './x';\nfromIndex();\n");
+    const session = new AnalysisSession(root);
+    const first = await session.analyze();
+    expect(
+      first.edges.some(
+        (e) =>
+          e.kind === 'calls' &&
+          e.target === 'fn:x/index.ts#fromIndex' &&
+          e.resolution === 'resolved',
+      ),
+    ).toBe(true);
+
+    // x.ts (ignorado pelo .gitignore, então fora da análise) passa a ser o destino de './x':
+    // main.ts não mudou, mas a resolução guardada pelo compilador ficou velha
+    write(root, 'x.ts', 'export function fromIndex() {}\n');
+    const incremental = await session.analyze();
+    expect(stable(incremental)).toEqual(stable(await analyzeProject(root)));
+    expect(
+      incremental.edges.some((e) => e.kind === 'calls' && e.target === 'fn:x/index.ts#fromIndex'),
+    ).toBe(false);
+
+    // e de volta: x.ts apagado, './x' volta a ser x/index.ts
+    fs.rmSync(path.join(root, 'x.ts'));
+    const back = await session.analyze();
+    expect(stable(back)).toEqual(stable(await analyzeProject(root)));
+    expect(
+      back.edges.some((e) => e.kind === 'calls' && e.target === 'fn:x/index.ts#fromIndex'),
+    ).toBe(true);
+  });
 });

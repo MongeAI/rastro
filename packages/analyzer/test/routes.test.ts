@@ -265,6 +265,64 @@ describe('NestJS (nest-api)', () => {
   });
 });
 
+describe('NestJS com @nestjs/core resolvido para dentro da raiz', () => {
+  it('setGlobalPrefix de um app criado por NestFactory.create entra no caminho completo', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"@nestjs/common":"11","@nestjs/core":"11"}}',
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          experimentalDecorators: true,
+          paths: {
+            '@nestjs/core': ['./vendor/core/index.ts'],
+            '@nestjs/common': ['./vendor/common/index.ts'],
+          },
+        },
+      }),
+      'vendor/core/index.ts': [
+        'export class NestApplication {',
+        '  setGlobalPrefix(prefix: string) { return this; }',
+        '  listen(p: number) {}',
+        '}',
+        'export const NestFactory = {',
+        '  async create(m: unknown): Promise<NestApplication> { return new NestApplication(); },',
+        '};',
+      ].join('\n'),
+      'vendor/common/index.ts': [
+        'export function Controller(p?: string): ClassDecorator { return () => {}; }',
+        'export function Get(p?: string): MethodDecorator { return () => {}; }',
+      ].join('\n'),
+      'src/main.ts': [
+        "import { NestFactory } from '@nestjs/core';",
+        'async function bootstrap() {',
+        '  const app = await NestFactory.create({});',
+        "  app.setGlobalPrefix('api');",
+        '  await app.listen(3000);',
+        '}',
+        'bootstrap();',
+      ].join('\n'),
+      'src/users.controller.ts': [
+        "import { Controller, Get } from '@nestjs/common';",
+        "@Controller('users')",
+        'export class UsersController {',
+        '  @Get()',
+        '  list() { return []; }',
+        '}',
+      ].join('\n'),
+      // método homônimo de um objeto qualquer do projeto continua não sendo o do Nest
+      'src/other.ts': [
+        'const config = { setGlobalPrefix(p: string) {} };',
+        "config.setGlobalPrefix('nope');",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(validateGraph(g)).toEqual({ valid: true, errors: [] });
+    expect(node(g, 'route:src/users.controller.ts#UsersController GET /users')?.meta).toMatchObject(
+      { framework: 'nestjs', fullPath: '/api/users', mountedAt: ['/api'] },
+    );
+  });
+});
+
 describe('Next.js (next-app)', () => {
   let g: RastroGraph;
   beforeAll(async () => {
@@ -817,6 +875,58 @@ describe('repositório do próprio framework (express-self, fastify-self)', () =
         'fn:examples/multi/api.js#listUsers',
       ),
     ).toEqual(ROUTE_HANDLER);
+  });
+
+  it('projeto que só se chama "express" (express-fake): require(\'..\') não é o Express', async () => {
+    expectNoNodeModules('express-fake');
+    const fake = await analyzeProject(fixture('express-fake'));
+    expect(validateGraph(fake)).toEqual({ valid: true, errors: [] });
+    expect(routeIds(fake)).toEqual([]);
+    // a chamada da fábrica local continua resolvida normalmente
+    expect(edge(fake, 'calls', 'file:sub/app.js', 'fn:index.js#make')?.resolution).toBe('resolved');
+  });
+
+  it('nome de framework no package.json sem a fábrica dele não inventa rotas', async () => {
+    const helper = 'module.exports = function make() { return { get() {}, post() {} }; };';
+    const use = (spec: string) =>
+      [
+        `const make = require('${spec}');`,
+        'const s = make();',
+        "s.get('/x', function h() {});",
+      ].join('\n');
+    // Fastify: o ponto de entrada não define `function fastify()`
+    const fastifyLike = await analyzeProject(
+      makeProject({
+        'package.json': '{"name":"fastify","main":"fastify.js"}',
+        'fastify.js': helper,
+        'examples/app.js': use('../fastify'),
+      }),
+    );
+    expect(routeIds(fastifyLike)).toEqual([]);
+    // Express: a fábrica certa, mas exportada só de um lado de um if (sem prova)
+    const conditional = await analyzeProject(
+      makeProject({
+        'package.json': '{"name":"express"}',
+        'index.js': [
+          "if (process.env.REAL) module.exports = require('./lib/express');",
+          "else module.exports = require('./lib/other');",
+        ].join('\n'),
+        'lib/express.js': 'module.exports = function createApplication() { return { get() {} }; };',
+        'lib/other.js': helper,
+        'examples/app.js': use('../'),
+      }),
+    );
+    expect(routeIds(conditional)).toEqual([]);
+    // Hono: nenhuma fábrica conhecida comprova o ponto de entrada (só o pacote instalado vale)
+    const honoLike = await analyzeProject(
+      makeProject({
+        'package.json': '{"name":"hono"}',
+        'index.js': 'class Hono { get() {} }\nmodule.exports = { Hono };',
+        'examples/app.js':
+          "const { Hono } = require('..');\nconst app = new Hono();\napp.get('/x', function h() {});",
+      }),
+    );
+    expect(routeIds(honoLike)).toEqual([]);
   });
 
   it('outro arquivo do pacote (lib/express.js) não comprova o framework', () => {

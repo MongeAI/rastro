@@ -493,45 +493,27 @@ export class ModuleResolver {
     specifier: string,
     options: ts.CompilerOptions,
   ): Extract<ResolvedTarget, { kind: 'asset' }> | 'asset-missing' | undefined {
-    const paths = options.paths;
     const base = (options as { pathsBasePath?: string }).pathsBasePath ?? options.baseUrl;
-    if (!paths || !base) return undefined;
-    // como o compilador: o padrão de prefixo mais longo vence
-    const matches: Array<{ prefixLength: number; captured: string; targets: string[] }> = [];
-    for (const [pattern, targets] of Object.entries(paths)) {
-      const star = pattern.indexOf('*');
-      if (star === -1) {
-        if (pattern === specifier) matches.push({ prefixLength: Infinity, captured: '', targets });
-        continue;
-      }
-      const prefix = pattern.slice(0, star);
-      const suffix = pattern.slice(star + 1);
-      if (!prefix && !suffix) continue;
+    const best = base ? bestPathPattern(specifier, options.paths) : undefined;
+    if (!base || !best) return undefined;
+    for (const target of best.targets) {
+      const candidate = toPosix(path.resolve(base, target.replace('*', best.captured)));
       if (
-        specifier.length >= prefix.length + suffix.length &&
-        specifier.startsWith(prefix) &&
-        specifier.endsWith(suffix)
+        candidate.startsWith(`${this.root}/`) &&
+        !NODE_MODULES_SEGMENT.test(candidate.slice(this.root.length)) &&
+        isRegularFile(candidate)
       )
-        matches.push({
-          prefixLength: prefix.length,
-          captured: specifier.slice(prefix.length, specifier.length - suffix.length),
-          targets,
-        });
-    }
-    if (!matches.length) return undefined;
-    matches.sort((a, b) => b.prefixLength - a.prefixLength);
-    for (const { captured, targets } of matches) {
-      for (const target of targets) {
-        const candidate = toPosix(path.resolve(base, target.replace('*', captured)));
-        if (
-          candidate.startsWith(`${this.root}/`) &&
-          !NODE_MODULES_SEGMENT.test(candidate.slice(this.root.length)) &&
-          isRegularFile(candidate)
-        )
-          return { kind: 'asset', absolute: candidate };
-      }
+        return { kind: 'asset', absolute: candidate };
     }
     return 'asset-missing';
+  }
+
+  /**
+   * O especificador casa com um padrão de `paths` (fora o `*` sozinho) do tsconfig que vale
+   * para o arquivo? Então é um alias do projeto, não o nome de um pacote.
+   */
+  isPathAlias(specifier: string, fromAbsolute: string): boolean {
+    return bestPathPattern(specifier, this.configFor(fromAbsolute).options.paths) !== undefined;
   }
 
   /**
@@ -590,6 +572,42 @@ export class ModuleResolver {
       if (posix === this.root || path.dirname(dir) === dir) return undefined;
     }
   }
+}
+
+/**
+ * Padrão de `paths` que vale para o especificador. Como no compilador, vence o de prefixo mais
+ * longo (no empate, o primeiro) e só ele conta: se nenhum destino dele existe, os padrões mais
+ * curtos não são tentados (`@/styles/*` sem arquivo não cai em `@/*`). O padrão `*` sozinho (que
+ * casa com qualquer pacote) não conta.
+ */
+function bestPathPattern(
+  specifier: string,
+  paths: ts.MapLike<string[]> | undefined,
+): { captured: string; targets: string[] } | undefined {
+  let best: { prefixLength: number; captured: string; targets: string[] } | undefined;
+  for (const [pattern, targets] of Object.entries(paths ?? {})) {
+    const star = pattern.indexOf('*');
+    let match: typeof best;
+    if (star === -1) {
+      if (pattern === specifier) match = { prefixLength: Infinity, captured: '', targets };
+    } else {
+      const prefix = pattern.slice(0, star);
+      const suffix = pattern.slice(star + 1);
+      if (
+        (prefix || suffix) &&
+        specifier.length >= prefix.length + suffix.length &&
+        specifier.startsWith(prefix) &&
+        specifier.endsWith(suffix)
+      )
+        match = {
+          prefixLength: prefix.length,
+          captured: specifier.slice(prefix.length, specifier.length - suffix.length),
+          targets,
+        };
+    }
+    if (match && (!best || match.prefixLength > best.prefixLength)) best = match;
+  }
+  return best;
 }
 
 /** Arquivo comum (não segue links simbólicos). */

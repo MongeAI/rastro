@@ -94,7 +94,7 @@ Motivos de `unresolved` (`meta.reason`):
 
 ### Candidatos possíveis (chamadas por interface)
 
-Em `repo.save()` com `repo: Repository` (uma interface) ou `animal.sound()` com `sound` abstrato, o verificador de tipos aponta para uma assinatura sem corpo: o alvo real depende do objeto recebido em execução. A chamada continua **não resolvida** (`indirect-call`), mas o nó não resolvido ganha `meta.candidates`: os ids dos métodos do projeto que _podem_ atender a chamada.
+Em `repo.save()` com `repo: Repository` (uma interface) ou `animal.sound()` com `sound` abstrato, o verificador de tipos aponta para uma assinatura sem corpo: o alvo real depende do objeto recebido em execução. A chamada continua **não resolvida** (`indirect-call`), mas o nó não resolvido ganha `meta.candidates`: os ids dos métodos (ou funções) do projeto que _podem_ atender a chamada. O mesmo vale para outros casos em que o alvo só se decide em execução (ver as regras abaixo).
 
 ```jsonc
 {
@@ -114,7 +114,8 @@ Em `repo.save()` com `repo: Repository` (uma interface) ou `animal.sound()` com 
 Regras:
 
 - Os candidatos são **de cada chamada**: `repo.save()` com `repo: UserRepo` e `repo.save()` com `repo: OrderRepo` no mesmo arquivo viram dois nós (`...#call:repo.save` e `...#call:repo.save~2`), cada um com as implementações da própria interface. Assim, quem chama uma interface nunca aparece como possível chamador das implementações da outra.
-- Receptor de tipo união (`r: UserRepo | SqlOrderRepo`): a parte concreta é resolvida (`calls` para `SqlOrderRepo.save`) e a parte da interface ganha também uma relação não resolvida, com os candidatos dela.
+- Receptor de tipo união (ou interseção) cujo método tem mais de uma declaração no projeto (`r: Foo | Bar`, `r: UserRepo | SqlOrderRepo`): em execução só uma delas atende a chamada, e qual depende do objeto recebido. Nenhuma parte é resolvida: a chamada fica **não resolvida** (`indirect-call`) e os candidatos são os métodos das classes da união (`Foo.save`, `Bar.save`) mais as implementações das interfaces dela. Uma união com uma só declaração no projeto (`r?: Foo`, `r: Foo | null`, `r: Foo | SubFoo` sem `save` próprio em `SubFoo`) continua resolvida.
+- `module.exports` (ou `exports.x`) atribuído em mais de um lugar (`if (prod) module.exports = require('./a'); else module.exports = require('./b')`): quem chama o valor exportado fica **não resolvido** (`indirect-call`), com os alvos de cada atribuição como candidatos. As relações `exports` do arquivo continuam, uma por atribuição, cada uma com a evidência da própria linha.
 - Só entram classes que **declaram** a relação: `implements` da interface (diretamente, por uma interface que a estende ou por uma classe base que a implementa) ou `extends` da classe abstrata. Classes que só têm "o mesmo formato" (tipagem estrutural) e objetos literais não entram.
 - Vale o tipo do receptor: com `store: Store` (que estende `Repository`), uma classe que só implementa `Repository` não é candidata. Interfaces, aliases de tipo (`implements Clock` com `type Clock = {...}`) e classes abstratas são aceitos; o método pode ser próprio ou herdado de uma classe base.
 - Os candidatos **nunca** viram relações: não há `calls` resolvido para eles, então caminhos, impacto e as medidas dos insights continuam só com o que é comprovado. A única exceção conservadora: um método que é candidato não é apontado como "possivelmente sem uso".
