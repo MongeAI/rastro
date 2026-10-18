@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/MongeAI/rastro/actions/workflows/ci.yml"><img src="https://github.com/MongeAI/rastro/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://www.npmjs.com/package/rastro"><img src="https://img.shields.io/npm/v/rastro?color=black&label=npm" alt="Versão no npm" /></a>
+  <a href="https://www.npmjs.com/package/@mongeai/rastro"><img src="https://img.shields.io/npm/v/%40mongeai%2Frastro?color=black&label=npm" alt="Versão no npm" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-black" alt="Licença MIT" /></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2022.12-black" alt="Node 22.12 ou mais novo" />
   <img src="https://img.shields.io/badge/status-v0.1%20(inicial)-black" alt="Status: v0.1, fase inicial" />
@@ -24,7 +24,7 @@
   <img src="docs/assets/demo.gif" alt="Demonstração: do mapa de pastas até uma função e suas chamadas" width="900" />
 </p>
 
-<sub>🇬🇧 <b>English:</b> Rastro is a local-first, open source tool by MongeAI that statically analyzes JS/TS repositories and opens an interactive, evidence-backed code map in your browser. Every relation links to the file and line that proves it; unresolved references are shown as such, never guessed. Docs are in Portuguese for now. Quick start: <code>npx rastro ./your-project</code>.</sub>
+<sub>🇬🇧 <b>English:</b> Rastro is a local-first, open source tool by MongeAI that statically analyzes JS/TS repositories and opens an interactive, evidence-backed code map in your browser. Every relation links to the file and line that proves it; unresolved references are shown as such, never guessed. Docs are in Portuguese for now. Quick start: <code>npx @mongeai/rastro ./your-project</code>.</sub>
 
 ---
 
@@ -48,10 +48,10 @@ O Rastro responde tudo isso num mapa navegável, e com uma regra de ouro:
 Pré-requisito: **Node.js 22.12+**. Na pasta de qualquer projeto JS/TS:
 
 ```bash
-npx rastro .
+npx @mongeai/rastro .
 ```
 
-Ou instale o comando de vez com `npm install -g rastro` e use `rastro ./caminho/do/projeto`.
+Ou instale o comando de vez com `npm install -g @mongeai/rastro` e use `rastro ./caminho/do/projeto`.
 
 O terminal mostra um resumo e o navegador abre sozinho:
 

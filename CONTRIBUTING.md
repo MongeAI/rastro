@@ -46,11 +46,14 @@ Inclua, se possível, um trecho mínimo de código que reproduz o problema, o qu
 
 ## Publicando uma versão (mantenedores)
 
-O pacote publicado é só `apps/cli` (nome `rastro`), com os pacotes internos embutidos em `dist/rastro.mjs`.
+O pacote publicado é só `apps/cli` (nome `@mongeai/rastro`, comando `rastro`), com os pacotes internos embutidos em `dist/rastro.mjs`.
 
 ```bash
 npm run build                    # inclui o bundle da CLI e a interface
 npm test
 npm version <patch|minor|major> -w apps/cli
 npm publish -w apps/cli          # o prepack copia README e LICENSE com links absolutos
+                                 # com 2FA: --otp=<código> ou --auth-type=web
 ```
+
+> O nome sem escopo `rastro` é bloqueado pelo npm por ser parecido com `astro`; por isso o pacote fica no escopo da organização `mongeai`.
