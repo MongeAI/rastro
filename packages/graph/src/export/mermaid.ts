@@ -64,13 +64,15 @@ const LINK_STYLES: Array<[string, (e: ViewEdge) => boolean, string]> = [
 
 /**
  * Texto de um rótulo entre aspas no Mermaid. Caracteres especiais viram entidades
- * (`#quot;`, `#35;`...), que o Mermaid decodifica; quebras de linha viram espaço.
+ * (`#quot;`, `#35;`...), que o Mermaid decodifica; quebras de linha viram espaço. `%`, `{`, `}`
+ * e `'` também: um nome como `%%{init: ...}%%` viraria uma diretiva (ou um `%%{` sem fim
+ * engoliria o resto do diagrama).
  */
 export function mermaidLabel(text: string): string {
   return (
     text
       .replace(/[\r\n\t]+/g, ' ')
-      .replace(/[#"<>&`]/g, (c) => `#${c.codePointAt(0)};`)
+      .replace(/[#"<>&`%{}']/g, (c) => `#${c.codePointAt(0)};`)
       // eslint-disable-next-line no-control-regex -- remove caracteres de controle de propósito
       .replace(/[\u0000-\u001f\u007f]/g, '')
   );
@@ -115,7 +117,9 @@ export function toMermaid(graph: RastroGraph, options: MermaidOptions = {}): str
     ids.set(node.id, id);
   }
 
-  const lines: string[] = [`%% ${exportTitle(view)}`, `flowchart ${options.direction ?? 'LR'}`];
+  // o título vai num comentário `%%`: sem `%`, `{`, `}` nem quebras de linha (diretivas)
+  const title = exportTitle(view).replace(/[%{}\r\n\u2028\u2029]+/g, ' ');
+  const lines: string[] = [`%% ${title}`, `flowchart ${options.direction ?? 'LR'}`];
   const { roots, children } = viewTree(view.nodes);
   const classes = new Map<string, string[]>();
   const addClass = (name: string, id: string) => {

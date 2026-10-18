@@ -49,7 +49,7 @@ Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`.
 | `package`    | `pkg:<nome>`                                                | `pkg:react`, `pkg:node:fs`                               |
 | `unresolved` | `unresolved:<arquivo>#<import\|call\|extends>:<referência>` | `unresolved:src/index.ts#import:./missing`               |
 
-Se dois símbolos geram o mesmo id no mesmo arquivo, o segundo recebe o sufixo `~2`, o terceiro `~3` etc.
+Se dois símbolos geram o mesmo id no mesmo arquivo, o segundo recebe o sufixo `~2`, o terceiro `~3` etc. O mesmo vale para chamadas não resolvidas com o mesmo texto e [candidatos](#candidatos-possíveis-chamadas-por-interface) diferentes (`unresolved:src/a.ts#call:repo.save~2`).
 
 `meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework`/`fullPath`/`mountedAt`/`routeKind` (rotas, ver abaixo), `reason`, `reference` e `candidates` (não resolvidos, ver [candidatos possíveis](#candidatos-possíveis-chamadas-por-interface)), `implements` (classes: a cláusula `implements` como escrita no código, ex.: `["Store", "Named"]`) e `mentions` (funções, classes e métodos).
 
@@ -69,9 +69,14 @@ Metadados das rotas:
 
 - `httpMethod`: `GET`, `POST`... (`ALL` para `app.all`, `@All()` e rotas de API do Pages Router).
 - `routePath`: o caminho local. No Next.js, `[id]` vira `:id`, `[...slug]` vira `*slug`, `[[...slug]]` vira `*slug?` e grupos `(x)` somem.
-- `fullPath`: o caminho completo, com os prefixos de montagem (`app.use('/api', router)`, `register(plugin, { prefix })`, `app.route('/x', sub)`, `basePath`, `setGlobalPrefix` do NestJS). Só existe quando há **um único** prefixo comprovado; nesse caso o `name` do nó também mostra o caminho completo (`GET /api/users/:id`).
+- `fullPath`: o caminho completo, com os prefixos de montagem (`app.use('/api', router)`, `register(plugin, { prefix })`, `app.route('/x', sub)`, `basePath`, `setGlobalPrefix` do NestJS). Só existe quando há **um único** prefixo comprovado; nesse caso o `name` do nó também mostra o caminho completo (`GET /api/users/:id`). Casos em que ele fica de fora (a rota existe, com o `routePath` como escrito):
+  - NestJS: o projeto usa `RouterModule.register`, `enableVersioning` ou `@Version` (o caminho depende de configuração fora do controller); o controller tem `version`; ou existe um `setGlobalPrefix` que não dá para comprovar como do app do controller (outro pacote do monorepo, como uma biblioteca em `libs/`, ou um app criado por outra função).
+  - Next.js: o `next.config` menciona `basePath`.
+  - Hono: `basePath` não é montagem: o app derivado divide as rotas com o de origem e o prefixo entra depois de onde ele é montado (`root.route('/v1', new Hono().basePath('/api'))` → `/v1/api/...`).
 - `mountedAt`: os prefixos completos onde o roteador foi montado. Com mais de um, o `fullPath` fica de fora e o `name` mostra o caminho local.
 - `routeKind` (Next.js): `page` (página, `GET`) ou `api` (rota de API).
+
+No Next.js, `app/` e `pages/` valem na raiz do projeto; `src/app` e `src/pages` só quando nenhuma das duas existe na raiz (como no próprio Next). `pageExtensions` do `next.config` é respeitado quando é uma lista de textos literais (`['page.tsx', 'api.ts']` faz de `index.page.tsx` a página `/` e ignora `Button.tsx`); escrito de outro jeito (variável, condição, espalhamento), nenhuma rota do Next.js é afirmada e um diagnóstico `next-routes-skipped` explica o motivo. O `next.config` é só lido como texto, nunca executado.
 
 A rota é ligada ao handler por uma relação `calls` com `callKind: "route-handler"` e `discovery: "framework-rule"`: a função referenciada, o método do controller (NestJS) ou a função exportada (Next.js). Chamadas feitas dentro de um handler inline são atribuídas à própria rota.
 
@@ -108,6 +113,8 @@ Em `repo.save()` com `repo: Repository` (uma interface) ou `animal.sound()` com 
 
 Regras:
 
+- Os candidatos são **de cada chamada**: `repo.save()` com `repo: UserRepo` e `repo.save()` com `repo: OrderRepo` no mesmo arquivo viram dois nós (`...#call:repo.save` e `...#call:repo.save~2`), cada um com as implementações da própria interface. Assim, quem chama uma interface nunca aparece como possível chamador das implementações da outra.
+- Receptor de tipo união (`r: UserRepo | SqlOrderRepo`): a parte concreta é resolvida (`calls` para `SqlOrderRepo.save`) e a parte da interface ganha também uma relação não resolvida, com os candidatos dela.
 - Só entram classes que **declaram** a relação: `implements` da interface (diretamente, por uma interface que a estende ou por uma classe base que a implementa) ou `extends` da classe abstrata. Classes que só têm "o mesmo formato" (tipagem estrutural) e objetos literais não entram.
 - Vale o tipo do receptor: com `store: Store` (que estende `Repository`), uma classe que só implementa `Repository` não é candidata. Interfaces, aliases de tipo (`implements Clock` com `type Clock = {...}`) e classes abstratas são aceitos; o método pode ser próprio ou herdado de uma classe base.
 - Os candidatos **nunca** viram relações: não há `calls` resolvido para eles, então caminhos, impacto e as medidas dos insights continuam só com o que é comprovado. A única exceção conservadora: um método que é candidato não é apontado como "possivelmente sem uso".
@@ -151,7 +158,23 @@ Semântica de cada tipo:
 
 ## Diagnósticos (`diagnostics`)
 
-`{ level: "info" | "warning" | "error", code, message, file?, line? }`. Códigos atuais: `symlink-skipped`, `file-too-large`, `max-files-reached`, `unreadable-directory`, `invalid-config`, `syntax-error`, `no-source-files`, `analysis-failed` (uma etapa falhou em um arquivo, por exemplo por aninhamento extremo; o resto da análise continua).
+`{ level: "info" | "warning" | "error", code, message, file?, line?, params? }`. `message` é o texto em português (mantido por compatibilidade); `params` traz as partes variáveis, para montar o texto em outro idioma com `diagnosticText(d, 'en' | 'pt')` de `@rastro/core` (códigos desconhecidos ou sem os `params` necessários usam `message`).
+
+| Código                 | Quando                                                                                  | `params`                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `symlink-skipped`      | link simbólico ignorado                                                                 | —                                                                     |
+| `file-too-large`       | arquivo maior que o limite                                                              | `limitKb`                                                             |
+| `max-files-reached`    | limite de arquivos atingido                                                             | `limit`                                                               |
+| `unreadable-directory` | pasta sem permissão de leitura                                                          | `error` (código do sistema, ex.: `EACCES`)                            |
+| `invalid-config`       | tsconfig/jsconfig inválido                                                              | `config`, `error`                                                     |
+| `syntax-error`         | erro de sintaxe (até 50 por análise)                                                    | `error` (texto do TypeScript)                                         |
+| `parse-failed`         | arquivo que não pôde ser lido ou interpretado (inclusive nomes com `\`)                 | `reason` (`too-deep`, `no-permission`, `backslash-name`) ou `error`   |
+| `analysis-failed`      | uma etapa falhou em um arquivo (ex.: aninhamento extremo); o resto da análise continua  | `step` (`entities`, `calls`, `routes-nestjs`...), `reason` ou `error` |
+| `no-source-files`      | nenhum arquivo JS/TS encontrado                                                         | —                                                                     |
+| `next-routes-skipped`  | `next.config` define `pageExtensions` de um jeito que só seria conhecido executando-o   | `config`, `option`                                                    |
+| `folder-filter`        | grafo exportado com `--folder` (os contadores de chamadas continuam do projeto inteiro) | `folder`                                                              |
+
+Caminhos dentro de `error` são relativos à raiz analisada (a pasta do usuário não aparece).
 
 ## Exportação para outros formatos
 

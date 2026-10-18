@@ -195,6 +195,69 @@ describe('implements e chamadas por interface (fixtures/oop)', () => {
       'method:a.ts#Limpeza.executarAgora',
     );
   });
+
+  const repos = [
+    'export interface UserRepo { save(): void }',
+    'export interface OrderRepo { save(): void }',
+    'export class SqlUserRepo implements UserRepo { save() {} }',
+    'export class SqlOrderRepo implements OrderRepo { save() {} }',
+  ];
+  /** Quem chama (pelas relações) os nós não resolvidos que têm o método como candidato. */
+  const possibleCallers = (g2: RastroGraph, method: string) => {
+    const index = new GraphIndex(g2);
+    return index
+      .possibleCallSites(method)
+      .flatMap((site) => g2.edges.filter((e) => e.kind === 'calls' && e.target === site.id))
+      .map((e) => e.source)
+      .sort();
+  };
+
+  it('cada chamada guarda os próprios candidatos (mesmo texto, interfaces diferentes)', async () => {
+    const root = makeProject({
+      'a.ts': [
+        ...repos,
+        'export function u(repo: UserRepo) { repo.save(); }',
+        'export function o(repo: OrderRepo) { repo.save(); }',
+        'export function u2(repo: UserRepo) { repo.save(); }',
+        'export function shape(repo: { save(): void }) { repo.save(); }',
+      ].join('\n'),
+    });
+    const g2 = await analyzeProject(root);
+    expectValid(g2);
+    expect(possibleCallers(g2, 'method:a.ts#SqlUserRepo.save')).toEqual([
+      'fn:a.ts#u',
+      'fn:a.ts#u2',
+    ]);
+    expect(possibleCallers(g2, 'method:a.ts#SqlOrderRepo.save')).toEqual(['fn:a.ts#o']);
+    const sites = g2.nodes.filter(
+      (n) => n.kind === 'unresolved' && n.meta?.reference === 'repo.save',
+    );
+    // o mesmo texto vira um nó por conjunto de candidatos (e um sem candidatos)
+    expect(sites.map((n) => [n.id, n.meta?.candidates])).toEqual([
+      ['unresolved:a.ts#call:repo.save', ['method:a.ts#SqlUserRepo.save']],
+      ['unresolved:a.ts#call:repo.save~2', ['method:a.ts#SqlOrderRepo.save']],
+      ['unresolved:a.ts#call:repo.save~3', undefined],
+    ]);
+    for (const site of sites) expect(site.name).toBe('repo.save');
+  });
+
+  it('receptor de tipo união: a parte concreta é resolvida e a da interface fica possível', async () => {
+    const root = makeProject({
+      'a.ts': [...repos, 'export function un(r: UserRepo | SqlOrderRepo) { r.save(); }'].join('\n'),
+    });
+    const g2 = await analyzeProject(root);
+    expectValid(g2);
+    expect(edge(g2, 'calls', 'fn:a.ts#un', 'method:a.ts#SqlOrderRepo.save')?.resolution).toBe(
+      'resolved',
+    );
+    const indirect = edge(g2, 'calls', 'fn:a.ts#un', 'unresolved:a.ts#call:r.save');
+    expect(indirect?.resolution).toBe('unresolved');
+    expect(node(g2, 'unresolved:a.ts#call:r.save')?.meta).toEqual({
+      reason: 'indirect-call',
+      reference: 'r.save',
+      candidates: ['method:a.ts#SqlUserRepo.save'],
+    });
+  });
 });
 
 describe('paths por subpacote em monorepos (fixtures/monorepo-paths)', () => {

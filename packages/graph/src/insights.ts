@@ -74,6 +74,50 @@ const IMPLICIT_METHODS = new Set([
   'use',
 ]);
 
+/**
+ * Exports que o Next.js chama sozinho em arquivos de rotas (`app/`, `pages/`): metadados, dados
+ * da página, handlers de rota (`GET`, `POST`...). O export padrão desses arquivos (página,
+ * layout, `_app`, `_document`, rota de API) também é chamado pelo framework.
+ */
+const FRAMEWORK_EXPORTS = new Set([
+  'generateMetadata',
+  'generateStaticParams',
+  'generateViewport',
+  'generateImageMetadata',
+  'generateSitemaps',
+  'getServerSideProps',
+  'getStaticProps',
+  'getStaticPaths',
+  'getInitialProps',
+  'reportWebVitals',
+  'GET',
+  'HEAD',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+]);
+/** Arquivo dentro de uma pasta de rotas baseadas em arquivos (`app/`, `pages/`, `src/app/`...). */
+const ROUTING_FILE = /(^|\/)(app|pages)\//;
+/** `middleware.ts` e `instrumentation.ts` (raiz ou `src/`), chamados pelo Next.js. */
+const FRAMEWORK_FILE = /(^|\/)(middleware|instrumentation)\.[cm]?[jt]sx?$/;
+const FRAMEWORK_FILE_EXPORTS = new Set(['middleware', 'register', 'onRequestError']);
+
+/**
+ * Export chamado implicitamente por um framework de rotas baseadas em arquivos: nunca aparece
+ * como chamada no código. Regra genérica e conservadora (só deixa de acusar "sem uso").
+ */
+function isFrameworkEntryPoint(node: GraphNode): boolean {
+  if (node.kind === 'method' || !node.meta?.exported) return false;
+  const file = node.location?.file;
+  if (!file) return false;
+  if (ROUTING_FILE.test(file)) return !!node.meta.defaultExport || FRAMEWORK_EXPORTS.has(node.name);
+  if (FRAMEWORK_FILE.test(file))
+    return !!node.meta.defaultExport || FRAMEWORK_FILE_EXPORTS.has(node.name);
+  return false;
+}
+
 const byValue = (a: RankedNode, b: RankedNode) =>
   b.value - a.value || compareStrings(a.node.id, b.node.id);
 
@@ -142,6 +186,8 @@ export function computeInsights(index: GraphIndex, limit = 10): Insights {
     if (index.possibleCallSites(node.id).length) continue;
     if (node.kind === 'method' && IMPLICIT_METHODS.has(node.name.replace(/^(get|set) /, '')))
       continue;
+    // páginas, layouts, handlers de rota e afins do Next.js: chamados pelo framework
+    if (isFrameworkEntryPoint(node)) continue;
     // classe usada só via `new` em outro lugar teria mais menções; métodos de classes exportadas
     // contam como exportados (podem ser usados por quem consome a classe)
     const owner = node.kind === 'method' && node.parent ? index.node(node.parent) : undefined;

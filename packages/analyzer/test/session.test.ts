@@ -97,4 +97,91 @@ describe('AnalysisSession (reanálise do modo --watch)', () => {
       true,
     );
   });
+
+  it('tsconfig de subpacote (lido sob demanda) alterado recria o compilador', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-session-')));
+    const config = (target: string) =>
+      JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@x/*': [`${target}/*`] } } });
+    write(root, 'package.json', '{"name":"sub"}');
+    write(root, 'packages/app/tsconfig.json', config('a'));
+    write(root, 'packages/app/a/f.ts', 'export function fa() {}\n');
+    write(root, 'packages/app/b/f.ts', 'export function fb() {}\n');
+    write(
+      root,
+      'packages/app/main.ts',
+      "import { fa as f } from '@x/f';\nexport function main() {\n  f();\n}\n",
+    );
+    const session = new AnalysisSession(root);
+    const first = await session.analyze();
+    expect(
+      first.edges.some(
+        (e) =>
+          e.kind === 'calls' &&
+          e.source === 'fn:packages/app/main.ts#main' &&
+          e.target === 'fn:packages/app/a/f.ts#fa',
+      ),
+    ).toBe(true);
+
+    // só o tsconfig do subpacote muda: `@x/f` passa a ser b/f.ts, que não exporta `fa`
+    write(root, 'packages/app/tsconfig.json', config('b'));
+    const incremental = await session.analyze();
+    expect(stable(incremental)).toEqual(stable(await analyzeProject(root)));
+    expect(
+      incremental.edges.some((e) => e.kind === 'calls' && e.target === 'fn:packages/app/a/f.ts#fa'),
+    ).toBe(false);
+
+    // tsconfig novo numa pasta que antes não tinha nenhum
+    write(root, 'packages/app/a/tsconfig.json', config('x'));
+    const created = await session.analyze();
+    expect(stable(created)).toEqual(stable(await analyzeProject(root)));
+  });
+
+  it('.d.ts escrito à mão (não descoberto) alterado é relido', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-session-')));
+    write(root, 'package.json', '{"name":"dts"}');
+    write(root, 'src/types.d.ts', 'export declare function a(): void;\n');
+    write(root, 'src/types.js', 'export function a() {}\nexport function b() {}\n');
+    write(
+      root,
+      'src/main.ts',
+      "import * as t from './types';\nexport function m() {\n  t.a();\n}\n",
+    );
+    const session = new AnalysisSession(root);
+    const same = async () => {
+      const incremental = await session.analyze();
+      expect(stable(incremental)).toEqual(stable(await analyzeProject(root)));
+      return incremental;
+    };
+    await same();
+
+    // o .d.ts passa a declarar `b`, e main.ts passa a chamá-la
+    write(
+      root,
+      'src/types.d.ts',
+      'export declare function a(): void;\nexport declare function b(): void;\n',
+    );
+    write(
+      root,
+      'src/main.ts',
+      "import * as t from './types';\nexport function m() {\n  t.b();\n}\n",
+    );
+    const changed = await same();
+    expect(
+      changed.edges.some(
+        (e) =>
+          e.kind === 'calls' && e.source === 'fn:src/main.ts#m' && e.target === 'fn:src/types.js#b',
+      ),
+    ).toBe(true);
+
+    // só o .d.ts muda (main.ts igual): `b` some da declaração
+    write(root, 'src/types.d.ts', 'export declare function a(): void;\n');
+    const removed = await same();
+    expect(removed.edges.some((e) => e.kind === 'calls' && e.target === 'fn:src/types.js#b')).toBe(
+      false,
+    );
+
+    // .d.ts apagado: o import passa a resolver para o .js
+    fs.rmSync(path.join(root, 'src/types.d.ts'));
+    await same();
+  });
 });

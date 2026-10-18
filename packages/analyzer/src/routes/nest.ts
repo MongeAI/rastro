@@ -1,6 +1,6 @@
 import { Node, SyntaxKind, ts, type Decorator, type SourceFile } from 'ts-morph';
 import { compareStrings } from '@rastro/core';
-import type { DiscoveredFile } from '../discover.js';
+import { toPosix, type DiscoveredFile } from '../discover.js';
 import { descendantsOfKind, evidenceAt, unwrapExpression } from '../analyze.js';
 import {
   addRoute,
@@ -11,6 +11,7 @@ import {
   resolveValue,
   stringLiteral,
   stringLiterals,
+  type PrefixSet,
   type RouteState,
 } from './common.js';
 
@@ -81,6 +82,39 @@ function nestScope(state: RouteState, file: DiscoveredFile): string {
   );
 }
 
+/** Filtro rápido (texto) antes de procurar as chamadas de `changesPaths`. */
+const PATH_CHANGERS =
+  /\bRouterModule\s*\.\s*(register|forRoutes)\b|\benableVersioning\b|@Version\s*\(/;
+
+/**
+ * Configurações que mudam o caminho das rotas longe do controller: `RouterModule.register`
+ * (prefixo por módulo), `app.enableVersioning(...)` e `@Version(...)` (prefixo de versão).
+ * Basta a chamada existir, venha de onde vier (sem exigir a prova do pacote), para não afirmar
+ * um caminho completo que pode estar errado. Textos e comentários não contam.
+ */
+function changesPaths(sf: SourceFile): boolean {
+  if (!PATH_CHANGERS.test(sf.getFullText())) return false;
+  return descendantsOfKind(sf, SyntaxKind.CallExpression).some((call) => {
+    const callee = unwrapExpression(call.compilerNode.expression);
+    if (ts.isPropertyAccessExpression(callee)) {
+      const name = callee.name.text;
+      if (name === 'enableVersioning') return true;
+      const owner = unwrapExpression(callee.expression);
+      const ownerName = ts.isIdentifier(owner)
+        ? owner.text
+        : ts.isPropertyAccessExpression(owner)
+          ? owner.name.text
+          : undefined;
+      return ownerName === 'RouterModule' && (name === 'register' || name === 'forRoutes');
+    }
+    return (
+      ts.isIdentifier(callee) &&
+      callee.text === 'Version' &&
+      ts.isDecorator(call.compilerNode.parent)
+    );
+  });
+}
+
 /**
  * Regra de framework: controllers do NestJS.
  * Uma classe com `@Controller('users')` e métodos com `@Get(':id')`, `@Post()`... (decorators
@@ -88,9 +122,12 @@ function nestScope(state: RouteState, file: DiscoveredFile): string {
  * `app.setGlobalPrefix('api')` (com `app` vindo de `NestFactory.create`) entra no caminho completo.
  */
 export function detectNestRoutes(state: RouteState, file: DiscoveredFile, sf: SourceFile): void {
-  if (!sf.getFullText().includes('@nestjs/')) return;
+  const text = sf.getFullText();
+  if (!state.nestPathsUncertain && changesPaths(sf)) state.nestPathsUncertain = true;
+  // `setGlobalPrefix` pode estar num arquivo que não importa o Nest (app criado por um helper)
+  if (text.includes('setGlobalPrefix')) detectGlobalPrefix(state, file, sf);
+  if (!text.includes('@nestjs/')) return;
   const scope = `nest:${nestScope(state, file)}`;
-  detectGlobalPrefix(state, file, sf);
 
   for (const cls of descendantsOfKind(sf, SyntaxKind.ClassDeclaration)) {
     let controller: { paths: string[]; versioned: boolean } | undefined;
@@ -145,12 +182,23 @@ export function detectNestRoutes(state: RouteState, file: DiscoveredFile, sf: So
   }
 }
 
-/** `app.setGlobalPrefix('api')` em um app criado por `NestFactory.create(...)`. */
+/**
+ * `app.setGlobalPrefix('api')` em um app criado por `NestFactory.create(...)`. Uma chamada que
+ * não dá para comprovar (app vindo de outra função, prefixo não literal, `exclude`) deixa o
+ * prefixo daquele app desconhecido.
+ */
 function detectGlobalPrefix(state: RouteState, file: DiscoveredFile, sf: SourceFile): void {
-  if (!sf.getFullText().includes('setGlobalPrefix')) return;
   for (const call of descendantsOfKind(sf, SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     if (!Node.isPropertyAccessExpression(callee) || callee.getName() !== 'setGlobalPrefix')
+      continue;
+    // método declarado no próprio projeto (ex.: `{ setGlobalPrefix() {} }`): não é o do Nest
+    const declarations =
+      state.ctx.checker.getSymbolAtLocation(callee.getNameNode().compilerNode)?.declarations ?? [];
+    if (
+      declarations.length &&
+      declarations.every((d) => state.ctx.filesByAbs.has(toPosix(d.getSourceFile().fileName)))
+    )
       continue;
     const isNestApp = resolveValue(state.ctx, callee.getExpression().compilerNode).some((decl) => {
       if (!ts.isVariableDeclaration(decl) || !decl.initializer) return false;
@@ -163,11 +211,11 @@ function detectGlobalPrefix(state: RouteState, file: DiscoveredFile, sf: SourceF
         frameworkExport(state.ctx, factory.expression, NEST_CORE) === 'NestFactory'
       );
     });
-    if (!isNestApp) continue;
     const [prefixArg, options] = call.compilerNode.arguments;
     const literal = stringLiteral(prefixArg);
     // `exclude` tira algumas rotas do prefixo: sem saber quais, o prefixo fica desconhecido
-    const prefix = literal === undefined || options ? undefined : normalizePrefix(literal);
+    const prefix =
+      !isNestApp || literal === undefined || options ? undefined : normalizePrefix(literal);
     const scope = nestScope(state, file);
     const list = state.nestPrefixes.get(scope) ?? [];
     list.push(prefix);
@@ -175,13 +223,24 @@ function detectGlobalPrefix(state: RouteState, file: DiscoveredFile, sf: SourceF
   }
 }
 
-/** Define o prefixo de cada app NestJS: o global (se houver) ou a raiz. */
+/**
+ * Define o prefixo de cada app NestJS: o global (se houver) ou a raiz. O caminho completo só é
+ * afirmado quando o prefixo do app do controller é comprovado: com `RouterModule`/versionamento
+ * no projeto, ou com um `setGlobalPrefix` em outro app (ex.: controller numa biblioteca do
+ * monorepo, que pode ser usada pelo app com prefixo), ele fica de fora.
+ */
 export function finishNest(state: RouteState): void {
+  const unknown: PrefixSet = { known: [], unknown: true };
   for (const [key, owner] of state.owners) {
     if (typeof key !== 'string' || !key.startsWith('nest:')) continue;
-    const prefixes = state.nestPrefixes.get(key.slice('nest:'.length));
+    if (state.nestPathsUncertain) {
+      owner.base = unknown;
+      continue;
+    }
+    const scope = key.slice('nest:'.length);
+    const prefixes = state.nestPrefixes.get(scope);
     if (!prefixes?.length) {
-      owner.base = { known: [''], unknown: false };
+      owner.base = state.nestPrefixes.size ? unknown : { known: [''], unknown: false };
       continue;
     }
     const known = [...new Set(prefixes.filter((p): p is string => p !== undefined))].sort(

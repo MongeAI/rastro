@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ts, type SourceFile } from 'ts-morph';
-import type { DiscoveredFile } from '../discover.js';
+import { toPosix, type DiscoveredFile } from '../discover.js';
 import { unwrapExpression } from '../analyze.js';
 import { addRoute, linkHandlerSymbol, type RouteState } from './common.js';
 
 const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'];
-const PAGE_EXT = /^(tsx|jsx|ts|js)$/;
-const ROUTE_EXT = /^(ts|js)$/;
+/** `pageExtensions` padrão do Next.js. */
+const PAGE_EXTENSIONS = ['tsx', 'ts', 'jsx', 'js'];
+const ROUTE_EXTENSIONS = ['ts', 'js'];
 const PAGES_SPECIAL = new Set(['_app', '_document', '_error']);
 const NEXT_CONFIGS = [
   'next.config.js',
@@ -24,6 +25,10 @@ interface NextProject {
   pagesDir?: string;
   /** `next.config` menciona `basePath`: o caminho completo não pode ser comprovado. */
   basePath: boolean;
+  /** `pageExtensions` lido do `next.config` (lista literal); sem ele, o padrão do Next.js. */
+  pageExtensions?: string[];
+  /** `next.config` define algo que só seria conhecido executando-o: nenhuma rota é afirmada. */
+  skipped: boolean;
 }
 
 const projects = new WeakMap<RouteState, Map<string, NextProject>>();
@@ -36,37 +41,100 @@ const isDirectory = (p: string) => {
   }
 };
 
-/** Como o próprio Next.js: `app`/`pages` na raiz do projeto, senão em `src/`. */
+/**
+ * `pageExtensions: ['page.tsx', 'api.ts']` lido sem executar o arquivo: só vale uma única
+ * menção, que seja uma lista de textos literais. `undefined` sem menção; `null` quando o valor
+ * só seria conhecido executando a configuração (variável, condição, espalhamento...).
+ */
+function staticPageExtensions(file: string, text: string): string[] | null | undefined {
+  const mentions = text.match(/\bpageExtensions\b/g)?.length ?? 0;
+  if (!mentions) return undefined;
+  if (mentions > 1) return null;
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
+  let found: string[] | null = null;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+      node.name.text === 'pageExtensions'
+    ) {
+      const value = unwrapExpression(node.initializer);
+      if (ts.isArrayLiteralExpression(value) && value.elements.length) {
+        const items = value.elements.map((e) => (ts.isStringLiteralLike(e) ? e.text : undefined));
+        if (items.every((t): t is string => !!t && /^[\w.-]+$/.test(t))) found = items;
+      }
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+/**
+ * Como o próprio Next.js: `app`/`pages` na raiz do projeto; `src/app` e `src/pages` só valem
+ * quando nenhuma das duas existe na raiz (o Next ignora `src/` nesse caso).
+ */
 function nextProject(state: RouteState, dir: string): NextProject {
   let cache = projects.get(state);
   if (!cache) projects.set(state, (cache = new Map()));
   const cached = cache.get(dir);
   if (cached) return cached;
-  const find = (name: string) =>
-    isDirectory(path.join(dir, name))
-      ? name
-      : isDirectory(path.join(dir, 'src', name))
-        ? `src/${name}`
-        : undefined;
+  const atRoot = isDirectory(path.join(dir, 'app')) || isDirectory(path.join(dir, 'pages'));
+  const find = (name: string) => {
+    const rel = atRoot ? name : `src/${name}`;
+    return isDirectory(path.join(dir, rel)) ? rel : undefined;
+  };
   let basePath = false;
+  let skipped = false;
+  const extensions = new Set<string>();
   for (const config of NEXT_CONFIGS) {
+    const file = path.join(dir, config);
+    let text: string;
     try {
-      const file = path.join(dir, config);
-      if (fs.lstatSync(file).isFile() && /\bbasePath\b/.test(fs.readFileSync(file, 'utf8')))
-        basePath = true;
+      if (!fs.lstatSync(file).isFile()) continue;
+      text = fs.readFileSync(file, 'utf8');
     } catch {
-      // sem esse arquivo de configuração
+      continue; // sem esse arquivo de configuração
+    }
+    if (/\bbasePath\b/.test(text)) basePath = true;
+    const pageExtensions = staticPageExtensions(file, text);
+    if (pageExtensions === null) {
+      skipped = true;
+      const rel = toPosix(path.relative(state.ctx.root, file));
+      state.ctx.diagnostics.push({
+        level: 'warning',
+        code: 'next-routes-skipped',
+        message: `Rotas do Next.js não detectadas: ${rel} define pageExtensions de um jeito que só seria conhecido executando o arquivo.`,
+        file: rel,
+        params: { config: rel, option: 'pageExtensions' },
+      });
+    } else if (pageExtensions) {
+      extensions.add(JSON.stringify(pageExtensions));
     }
   }
+  if (extensions.size > 1) skipped = true; // configurações diferentes: não dá para saber qual vale
   const appDir = find('app');
   const pagesDir = find('pages');
   const project: NextProject = {
     ...(appDir ? { appDir } : {}),
     ...(pagesDir ? { pagesDir } : {}),
     basePath,
+    ...(extensions.size === 1
+      ? { pageExtensions: JSON.parse([...extensions][0]!) as string[] }
+      : {}),
+    skipped,
   };
   cache.set(dir, project);
   return project;
+}
+
+/** Nome do arquivo sem a extensão de página (a mais longa que casar), ou `undefined`. */
+function withoutPageExtension(name: string, extensions: string[]): string | undefined {
+  const ext = extensions
+    .filter((e) => name.length > e.length + 1 && name.endsWith(`.${e}`))
+    .sort((a, b) => b.length - a.length)[0];
+  return ext === undefined ? undefined : name.slice(0, -(ext.length + 1));
 }
 
 /** Segmento de pasta → segmento de rota: `[id]` → `:id`, `[...slug]` → `*slug`, `[[...slug]]` → `*slug?`. */
@@ -158,9 +226,12 @@ export function detectNextRoutes(state: RouteState, file: DiscoveredFile, sf: So
   const dir = state.ctx.resolver.packageDirDeclaring('next', file.absolute);
   if (!dir) return;
   const project = nextProject(state, dir);
+  if (project.skipped) return;
   const rel = path.posix.relative(dir, file.absolute);
-  const ext = path.posix.extname(rel).slice(1);
-  const base = path.posix.basename(rel, `.${ext}`);
+  const name = path.posix.basename(rel);
+  const pageExtensions = project.pageExtensions ?? PAGE_EXTENSIONS;
+  // sem `pageExtensions` próprio, handlers de rota (`route.ts`) são só .ts/.js
+  const routeExtensions = project.pageExtensions ?? ROUTE_EXTENSIONS;
 
   let routes: Array<{ httpMethod: string; exportName: string; routeKind: 'page' | 'api' }>;
   let routePath: string | undefined;
@@ -170,15 +241,17 @@ export function detectNextRoutes(state: RouteState, file: DiscoveredFile, sf: So
       .split('/')
       .slice(0, -1);
     routePath = appRoutePath(folders);
-    if (base === 'page' && PAGE_EXT.test(ext)) {
+    if (withoutPageExtension(name, pageExtensions) === 'page') {
       routes = [{ httpMethod: 'GET', exportName: 'default', routeKind: 'page' }];
-    } else if (base === 'route' && ROUTE_EXT.test(ext)) {
+    } else if (withoutPageExtension(name, routeExtensions) === 'route') {
       routes = HTTP_METHODS.map((m) => ({ httpMethod: m, exportName: m, routeKind: 'api' }));
     } else {
       return;
     }
   } else if (project.pagesDir && rel.startsWith(`${project.pagesDir}/`)) {
-    if (!PAGE_EXT.test(ext)) return;
+    // com `pageExtensions: ['page.tsx']`, `Button.tsx` em pages/ não é página
+    const base = withoutPageExtension(name, pageExtensions);
+    if (base === undefined) return;
     const folders = rel
       .slice(project.pagesDir.length + 1)
       .split('/')

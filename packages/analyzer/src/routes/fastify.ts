@@ -149,9 +149,13 @@ export function detectFastifyRoutes(state: RouteState, file: DiscoveredFile, sf:
       const [first, ...rest] = args;
       routePath = first && stringLiteral(first.compilerNode);
       methods = [name.toUpperCase()];
+      // `get(caminho, handler)`, `get(caminho, { handler })` ou `get(caminho, opções, handler)`:
+      // com três argumentos o handler é o último; as opções nunca são o handler
+      const last = rest[rest.length - 1];
+      const options = rest.length > 1 ? rest[0] : last;
       handlers = [
-        ...rest.filter(isHandlerLike),
-        ...rest.map(handlerOption).filter((h): h is Node => !!h),
+        ...(last && isHandlerLike(last) ? [last] : []),
+        ...(options ? [handlerOption(options)].filter((h): h is Node => !!h) : []),
       ];
       qualified = `${receiverName(receiver)}.${name}('${routePath}')`;
     } else if (name === 'route') {

@@ -161,6 +161,7 @@ export function filterGraphByFolder(graph: RastroGraph, folder: string | undefin
         level: 'info',
         code: 'folder-filter',
         message: `Grafo restrito à pasta "${prefix}". Os contadores de chamadas fora do grafo (externalCallsSkipped, unknownReceiverCalls...) continuam valendo para o projeto inteiro.`,
+        params: { folder: prefix },
       },
     ],
   };
