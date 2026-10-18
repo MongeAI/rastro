@@ -174,6 +174,8 @@ rastro analyze <caminho>          # só analisa e salva o JSON
 rastro analyze <caminho> --stdout # escreve o JSON na saída padrão
 rastro serve <grafo.json>         # abre o mapa de um JSON salvo antes
 rastro validate <grafo.json>      # confere se um JSON é um grafo válido
+rastro export <caminho|grafo.json> --format mermaid|dot|graphml|json|html
+rastro compare <a.json> <b.json>  # o que entrou, saiu ou mudou entre duas análises
 ```
 
 | Opção                    | Para quê                                                             |
@@ -184,6 +186,33 @@ rastro validate <grafo.json>      # confere se um JSON é um grafo válido
 | `-e, --exclude <padrão>` | Ignora caminhos, com a sintaxe do `.gitignore` (pode repetir)        |
 | `--no-gitignore`         | Não usa o `.gitignore` do projeto                                    |
 | `--max-files <n>`        | Limite de arquivos analisados (padrão 10000)                         |
+
+### Compartilhar e integrar
+
+`rastro export` recebe a pasta do projeto (analisa antes, respeitando `--exclude`, `--no-gitignore` e `--max-files`) ou um `grafo.json` salvo, e escreve na saída padrão se você não passar `-o`:
+
+```bash
+rastro export . --format mermaid > docs/arquitetura.mmd     # cole num PR ou README
+rastro export . --format dot --level symbols | dot -Tsvg > mapa.svg
+rastro export grafo.json --format graphml -o mapa.graphml    # yEd, Gephi, Cytoscape, networkx
+rastro export . --format json --folder src/services          # o grafo de uma pasta só
+rastro export . --format html                                # ./<projeto>.rastro.html
+```
+
+| Opção              | Para quê                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `-f, --format <f>` | `mermaid`, `dot`, `graphml`, `json` ou `html`                                               |
+| `--level <nível>`  | `modules` (pastas recolhidas), `files` (padrão) ou `symbols`: os mesmos níveis da interface |
+| `--folder <pasta>` | Só esta pasta e suas subpastas, ex. `src/services`                                          |
+| `--edges <tipos>`  | Relações desenhadas, ex. `imports,calls` (padrão: `imports,calls,extends`)                  |
+| `--external`       | Inclui pacotes externos (npm, módulos do Node.js)                                           |
+| `--no-unresolved`  | Deixa de fora as referências não resolvidas                                                 |
+
+- **Mermaid** usa subgrafos para as pastas (e para arquivos e classes no nível `symbols`), nós e linhas vermelhos tracejados para referências não resolvidas e cinza tracejados para pacotes externos. Acima de 400 nós o diagrama é recusado com uma dica (`--level modules` ou `--folder`), porque o Mermaid deixa de ser legível e o GitHub recusa diagramas grandes.
+- **DOT** (Graphviz) e **GraphML** não têm limite de tamanho. O GraphML guarda `kind`, `resolution`, `count`, `file` e `line` como atributos.
+- **HTML** é um **arquivo único e offline** com o mapa navegável completo: JavaScript, estilos, fontes e o grafo vão embutidos, ele abre direto do disco (sem servidor e sem internet) e uma Content Security Policy bloqueia qualquer acesso à rede. O código-fonte não vai junto, e a sua pasta pessoal no caminho do projeto vira `~`. Bom para mandar ao time ou anexar a um PR.
+
+`rastro compare antes.json depois.json` lista as entidades que entraram e saíram, as relações novas, removidas ou que mudaram de resolução, ciclos de importação novos ou desfeitos e a diferença nos números (arquivos, funções, referências não resolvidas, ciclos…). Use `--json` para um resultado legível por máquina (no CI, por exemplo).
 
 Atalhos na interface: <kbd>/</kbd> busca · <kbd>F</kbd> enquadra · <kbd>Esc</kbd> limpa a seleção · dois cliques abrem pastas e arquivos · a URL guarda a seleção (`#n=…`).
 

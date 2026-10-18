@@ -20,13 +20,13 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 
 ## Pacotes
 
-| Pacote                | Responsabilidade                                                                                                                                                       | Depende de                       |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `@rastro/core`        | Tipos (`GraphNode`, `GraphEdge`, `Evidence`...), ids, rótulos em português, JSON Schema, `validateGraph`                                                               | nada                             |
-| `@rastro/graph`       | `GraphBuilder` (deduplicação, evidências, `depends_on`, ciclos via Tarjan iterativo), `GraphIndex` (vizinhança, impacto, busca), `computeView` (o que aparece na tela) | core                             |
-| `@rastro/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regra de rotas do Express                                                   | core, graph, ts-morph, ignore    |
-| `rastro` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local                                                                                                       | core, graph, analyzer            |
-| `@rastro/web`         | Interface; usa `@rastro/graph` diretamente no navegador                                                                                                                | core, graph, React, Cytoscape.js |
+| Pacote                | Responsabilidade                                                                                                                                                                                                                           | Depende de                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| `@rastro/core`        | Tipos (`GraphNode`, `GraphEdge`, `Evidence`...), ids, rótulos em português, JSON Schema, `validateGraph`                                                                                                                                   | nada                             |
+| `@rastro/graph`       | `GraphBuilder` (deduplicação, evidências, `depends_on`, ciclos via Tarjan iterativo), `GraphIndex` (vizinhança, impacto, busca), `computeView` (o que aparece na tela), exportadores (`toMermaid`, `toDot`, `toGraphML`) e `compareGraphs` | core                             |
+| `@rastro/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regra de rotas do Express                                                                                                                       | core, graph, ts-morph, ignore    |
+| `rastro` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local, relatório HTML offline (`report.ts`)                                                                                                                                     | core, graph, analyzer            |
+| `@rastro/web`         | Interface; usa `@rastro/graph` diretamente no navegador                                                                                                                                                                                    | core, graph, React, Cytoscape.js |
 
 `core` e `graph` não usam APIs do Node.js, para rodarem no navegador.
 
