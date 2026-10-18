@@ -31,8 +31,8 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 4. Caminhos: "como A chega em B?"
 
-- ⬜ Seleção de origem e destino e o **menor caminho** pelas chamadas, imports e herança, desenhado no mapa com as evidências de cada passo.
-- ⬜ Lista dos caminhos alternativos (até N).
+- ✅ Seleção de origem e destino e o **menor caminho** pelas chamadas, imports e herança, desenhado no mapa com as evidências de cada passo.
+- ✅ Lista dos caminhos alternativos (até N).
 
 ### 5. Ao vivo: modo `--watch`
 

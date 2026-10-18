@@ -121,6 +121,13 @@ export const IconBack = (p: SVGProps<SVGSVGElement>) => (
     <path d="M15 6l-6 6 6 6" />
   </svg>
 );
+export const IconRoute = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="6" cy="18" r="2.2" />
+    <circle cx="18" cy="6" r="2.2" />
+    <path d="M8 18h6a3 3 0 0 0 0-6h-4a3 3 0 0 1 0-6h6" />
+  </svg>
+);
 export const IconFile = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M14 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8Z" />

@@ -6,7 +6,7 @@ import {
   type NodeKind,
   type RastroGraph,
 } from '@rastro/core';
-import { computeView, GraphIndex, groupableModules } from '@rastro/graph';
+import { computeView, findPaths, GraphIndex, groupableModules } from '@rastro/graph';
 import { DetailsPanel } from './components/DetailsPanel';
 import { EdgeDetails } from './components/EdgeDetails';
 import { GraphCanvas, type GraphCanvasHandle, type LayoutMode } from './components/GraphCanvas';
@@ -26,6 +26,7 @@ import {
 } from './components/Icons';
 import { Insights } from './components/Insights';
 import { Overview } from './components/Overview';
+import { PathPanel } from './components/PathPanel';
 import { Search } from './components/Search';
 import { NODE_KIND_ORDER, Sidebar } from './components/Sidebar';
 import { downloadBlob, downloadText, slug } from './lib/download';
@@ -205,7 +206,11 @@ function Explorer({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [hideTypeOnly, setHideTypeOnly] = useState(false);
   const [highlightNeighbors, setHighlightNeighbors] = useState(true);
-  const [centerRequest, setCenterRequest] = useState<{ id: string; seq: number } | null>(null);
+  const [centerRequest, setCenterRequest] = useState<{
+    id: string;
+    seq: number;
+    fitIds?: string[];
+  } | null>(null);
   /** Gaveta de filtros em telas estreitas. */
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** Painel de filtros recolhido em telas largas (o mapa ganha a largura). */
@@ -214,6 +219,12 @@ function Explorer({
   );
   const [history, setHistory] = useState<string[]>([]);
   const [panelTab, setPanelTab] = useState<'summary' | 'insights'>('summary');
+  /** Caminho A → B: origem escolhida e, depois, o destino. */
+  const [pathMode, setPathMode] = useState<{ from: string; to?: string } | null>(null);
+  const [activePath, setActivePath] = useState(0);
+  const [searchFocus, setSearchFocus] = useState(0);
+  const pathModeRef = useRef(pathMode);
+  pathModeRef.current = pathMode;
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedId;
 
@@ -285,6 +296,13 @@ function Explorer({
     (id: string, remember = true, center = true) => {
       const node = index.node(id);
       if (!node) return;
+      // escolhendo o destino de um caminho: a próxima entidade escolhida vira o destino
+      const picking = pathModeRef.current;
+      if (picking && !picking.to && id !== picking.from) {
+        setPathMode({ from: picking.from, to: id });
+        setActivePath(0);
+        return;
+      }
       if (focus && focus.id !== id) {
         const hood = index.neighborhood(focus.id, focus.depth, [...edgeKinds]);
         if (!hood.has(id)) setFocus({ id, depth: focus.depth });
@@ -409,6 +427,7 @@ function Explorer({
       if (typing) return;
       if (e.key === 'Escape') {
         if (sidebarOpen) setSidebarOpen(false);
+        else if (pathModeRef.current) setPathMode(null);
         else if (selectedEdgeId) setSelectedEdgeId(null);
         else if (selectedId) setSelectedId(null);
         else if (focus) setFocus(null);
@@ -454,11 +473,42 @@ function Explorer({
     const replacement = view.edges.find((e) => e.members.some((m) => members.has(m)));
     setSelectedEdgeId(replacement ? replacement.id : null);
   }, [view, selectedEdgeId]);
-  const panelMode = selectedEdge
-    ? 'edge'
-    : selectedId && index.node(selectedId)
-      ? 'node'
-      : 'overview';
+  const pathResult = useMemo(
+    () => (pathMode?.to ? findPaths(index, pathMode.from, pathMode.to) : null),
+    [index, pathMode],
+  );
+  const pathHighlight = useMemo(() => {
+    const path = pathResult?.paths[activePath];
+    return path ? { nodes: path.nodes, edges: path.edges.map((e) => e.id) } : null;
+  }, [pathResult, activePath]);
+  // os nós dos caminhos precisam aparecer no mapa: abre pastas e arquivos e fixa os nós
+  const collapsedRef = useRef(collapsedModules);
+  collapsedRef.current = collapsedModules;
+  const setModuleOpenRef = useRef(setModuleOpen);
+  setModuleOpenRef.current = setModuleOpen;
+  useEffect(() => {
+    if (!pathResult?.paths.length) return;
+    const ids = new Set(pathResult.paths.flatMap((p) => p.nodes));
+    for (const id of ids) {
+      for (const ancestor of index.ancestors(id))
+        if (collapsedRef.current.has(ancestor.id)) setModuleOpenRef.current(ancestor.id, true);
+      const file = index.fileOf(id);
+      if (file && file.id !== id)
+        setExpandedFiles((s) => (s.has(file.id) ? s : new Set(s).add(file.id)));
+    }
+    setPinned((s) => new Set([...s, ...ids]));
+    const origin = pathModeRef.current?.from;
+    if (origin) setCenterRequest((r) => ({ id: origin, seq: (r?.seq ?? 0) + 1, fitIds: [...ids] }));
+  }, [pathResult, index]);
+
+  const panelMode =
+    pathMode?.to && pathResult
+      ? 'path'
+      : selectedEdge
+        ? 'edge'
+        : selectedId && index.node(selectedId)
+          ? 'node'
+          : 'overview';
 
   return (
     <div
@@ -487,7 +537,7 @@ function Explorer({
           </span>
           <span className="beta">v0.1</span>
         </div>
-        <Search index={index} onPick={(id) => navigate(id)} />
+        <Search index={index} onPick={(id) => navigate(id)} focusSignal={searchFocus} />
         <div className="top-actions">
           <button
             type="button"
@@ -556,6 +606,7 @@ function Explorer({
           layout={layout}
           selectedId={selectedId}
           selectedEdgeId={selectedEdge ? selectedEdge.id : null}
+          pathHighlight={pathHighlight}
           highlightNeighbors={highlightNeighbors}
           fitKey={fitKey}
           centerRequest={centerRequest}
@@ -574,6 +625,14 @@ function Explorer({
         />
 
         <div className="stage-top">
+          {pathMode && !pathMode.to && (
+            <div className="focus-pill pick-pill" role="status">
+              {t.paths.pick}
+              <button type="button" className="link-button" onClick={() => setPathMode(null)}>
+                {t.paths.cancel}
+              </button>
+            </div>
+          )}
           {focusNode && (
             <div className="focus-pill">
               {t.stage.focus}{' '}
@@ -688,7 +747,26 @@ function Explorer({
               : t.stage.panelSummary
         }
       >
-        {panelMode === 'edge' && selectedEdge ? (
+        {panelMode === 'path' && pathMode?.to && pathResult ? (
+          <PathPanel
+            index={index}
+            from={pathMode.from}
+            to={pathMode.to}
+            result={pathResult}
+            active={activePath}
+            editor={editor}
+            onActive={setActivePath}
+            onNavigate={(id) => {
+              setPathMode(null);
+              navigate(id);
+            }}
+            onSwap={() => {
+              setPathMode({ from: pathMode.to!, to: pathMode.from });
+              setActivePath(0);
+            }}
+            onClose={() => setPathMode(null)}
+          />
+        ) : panelMode === 'edge' && selectedEdge ? (
           <EdgeDetails
             key={selectedEdge.id}
             index={index}
@@ -715,6 +793,11 @@ function Explorer({
             onExpandNeighbors={expandNeighbors}
             onToggleExpand={toggleExpand}
             onToggleModule={(id) => setModuleOpen(id, collapsedModules.has(id))}
+            onStartPath={(id) => {
+              setPathMode({ from: id });
+              setActivePath(0);
+              setSearchFocus((n) => n + 1);
+            }}
             onClose={() => setSelectedId(null)}
           />
         ) : (

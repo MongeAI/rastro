@@ -29,11 +29,13 @@ interface Props {
   layout: LayoutMode;
   selectedId: string | null;
   selectedEdgeId: string | null;
+  /** Caminho a destacar (ids de nós e de relações reais do grafo). */
+  pathHighlight: { nodes: string[]; edges: string[] } | null;
   highlightNeighbors: boolean;
   /** Muda quando o mapa deve reenquadrar tudo (ex.: trocar de nível ou entrar no foco). */
   fitKey: string;
   /** Pedido para centralizar um nó (o número garante que pedidos repetidos sejam atendidos). */
-  centerRequest: { id: string; seq: number } | null;
+  centerRequest: { id: string; seq: number; fitIds?: string[] } | null;
   onSelect(id: string | null): void;
   onSelectEdge(id: string): void;
   /** Duplo clique: expande/recolhe arquivos e pastas. */
@@ -83,7 +85,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   const groupWidths = useRef(new Map<string, number>());
   const currentLayout = useRef<cytoscape.Layouts | null>(null);
   const layoutActive = useRef(false);
-  const pendingCenter = useRef<string | null>(null);
+  const pendingCenter = useRef<{ id: string; fitIds?: string[] } | null>(null);
 
   /** Enquadra tudo, sem aproximar demais quando há poucos nós. */
   const fitAll = (animate: boolean) => {
@@ -107,10 +109,27 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   /** Centraliza o nó pedido (se ainda estiver no mapa). */
   const centerPending = () => {
     const cy = cyRef.current;
-    const id = pendingCenter.current;
+    const pending = pendingCenter.current;
     pendingCenter.current = null;
-    if (!cy || !id) return;
-    const node = cy.getElementById(id);
+    if (!cy || !pending) return;
+    // vários nós (ex.: um caminho): enquadra todos, sem aproximar demais
+    if (pending.fitIds?.length) {
+      const wanted = new Set(pending.fitIds);
+      const eles = cy.nodes().filter((n) => wanted.has(n.id()));
+      if (eles.nonempty()) {
+        const before = { zoom: cy.zoom(), pan: { ...cy.pan() } };
+        cy.fit(eles, 80);
+        if (cy.zoom() > MAX_FIT_ZOOM) {
+          cy.zoom(MAX_FIT_ZOOM);
+          cy.center(eles);
+        }
+        const target = { zoom: cy.zoom(), pan: { ...cy.pan() } };
+        cy.viewport(before);
+        cy.animate(target, { duration: 380, easing: 'ease-out-cubic' });
+        return;
+      }
+    }
+    const node = cy.getElementById(pending.id);
     if (node.empty()) return;
     cy.animate(
       { center: { eles: node }, zoom: Math.max(cy.zoom(), 1) },
@@ -428,6 +447,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
         if (existing.nonempty()) {
           if (existing.data('count') !== e.count || existing.data('resolution') !== e.resolution)
             existing.data({ count: e.count, resolution: e.resolution });
+          if ((existing.data('members') as string[] | undefined)?.join('|') !== e.members.join('|'))
+            existing.data('members', e.members);
           if (!sameClasses(existing, classes)) existing.classes(classes);
           continue;
         }
@@ -442,6 +463,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
             resolution: e.resolution,
             count: e.count,
             aggregated: e.aggregated,
+            members: e.members,
           },
           classes,
         });
@@ -468,7 +490,23 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     const cy = cyRef.current;
     if (!cy) return;
     cy.batch(() => {
-      cy.elements().removeClass('faded highlight chosen');
+      cy.elements().removeClass('faded highlight chosen path');
+      if (props.pathHighlight) {
+        // caminho: os nós e as linhas que representam cada passo ficam em destaque
+        const nodeIds = new Set(props.pathHighlight.nodes);
+        const edgeIds = new Set(props.pathHighlight.edges);
+        const nodes = cy.nodes().filter((n) => nodeIds.has(n.id()));
+        const edges = cy
+          .edges()
+          .filter((e) =>
+            ((e.data('members') as string[] | undefined) ?? [e.id()]).some((m) => edgeIds.has(m)),
+          );
+        nodes.addClass('path');
+        edges.addClass('path');
+        const keep = nodes.union(edges).union(nodes.ancestors());
+        cy.elements().not(keep).addClass('faded');
+        return;
+      }
       if (props.selectedEdgeId) {
         const edge = cy.getElementById(props.selectedEdgeId);
         if (edge.nonempty()) {
@@ -491,13 +529,19 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       edges.addClass('highlight');
       cy.elements().not(keep).addClass('faded');
     });
-  }, [props.selectedId, props.selectedEdgeId, props.highlightNeighbors, props.view]);
+  }, [
+    props.selectedId,
+    props.selectedEdgeId,
+    props.highlightNeighbors,
+    props.view,
+    props.pathHighlight,
+  ]);
 
   // centraliza quando pedido: se um layout estiver em andamento, espera ele terminar
   useEffect(() => {
     const req = props.centerRequest;
     if (!req) return;
-    pendingCenter.current = req.id;
+    pendingCenter.current = { id: req.id, ...(req.fitIds ? { fitIds: req.fitIds } : {}) };
     if (!layoutActive.current) centerPending();
   }, [props.centerRequest]);
 

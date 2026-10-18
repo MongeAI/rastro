@@ -216,6 +216,19 @@ const pt = {
     analyzedAt: (date: string, ms: number, ts: string) =>
       `Analisado em ${date} · ${ms} ms · TypeScript ${ts}`,
   },
+  paths: {
+    start: 'Traçar caminho a partir daqui',
+    startTitle: 'Descobre como esta entidade chega em outra (chamadas, imports e herança)',
+    pick: 'Escolha o destino: clique em um nó do mapa ou use a busca.',
+    cancel: 'cancelar',
+    title: 'Caminho',
+    reversed:
+      'Não há caminho no sentido escolhido; este é o caminho inverso (o destino chega na origem).',
+    none: 'Nenhum caminho comprovado liga essas duas entidades (considerando chamadas, imports e herança resolvidos).',
+    option: (i: number, steps: number) => `Opção ${i} · ${n(steps, 'passo', 'passos')}`,
+    swap: 'Inverter',
+    close: 'Fechar caminho',
+  },
   insights: {
     tabSummary: 'Resumo',
     tabInsights: 'Insights',
@@ -482,6 +495,19 @@ const en: Messages = {
       'Dashed red lines are references that could not be resolved.',
     ],
     analyzedAt: (date, ms, ts) => `Analyzed on ${date} · ${ms} ms · TypeScript ${ts}`,
+  },
+  paths: {
+    start: 'Trace a path from here',
+    startTitle: 'Find out how this entity reaches another one (calls, imports and inheritance)',
+    pick: 'Pick the destination: click a node on the map or use search.',
+    cancel: 'cancel',
+    title: 'Path',
+    reversed:
+      'There is no path in the chosen direction; this is the reverse path (the destination reaches the origin).',
+    none: 'No proven path connects these two entities (considering resolved calls, imports and inheritance).',
+    option: (i, steps) => `Option ${i} · ${n(steps, 'step', 'steps')}`,
+    swap: 'Swap',
+    close: 'Close path',
   },
   insights: {
     tabSummary: 'Summary',

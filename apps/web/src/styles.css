@@ -1347,3 +1347,34 @@ kbd {
   border-radius: 2px;
   background: var(--border-strong);
 }
+
+/* ---------- caminhos ---------- */
+.path-option-head {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.path-option.on .path-option-head {
+  color: var(--text);
+}
+.path-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.path-link {
+  margin: 2px 0 4px 3px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong);
+}
+.path-link .evidence {
+  margin-left: 0;
+}
+.pick-pill {
+  border-color: var(--accent);
+}

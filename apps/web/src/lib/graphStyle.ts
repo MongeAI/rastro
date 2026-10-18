@@ -210,5 +210,20 @@ export function buildStyle(
       },
     },
     { selector: 'node.hover', style: { 'border-width': 2, 'border-color': p.selection } },
+    {
+      selector: 'node.path',
+      style: { 'border-width': 2.5, 'border-color': p.selection, 'z-index': 25 },
+    },
+    {
+      selector: 'edge.path',
+      style: {
+        width: 3.6,
+        opacity: 1,
+        'line-color': p.selection,
+        'target-arrow-color': p.selection,
+        'line-style': 'solid',
+        'z-index': 40,
+      },
+    },
   ];
 }

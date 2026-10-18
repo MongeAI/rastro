@@ -7,11 +7,13 @@ import { KindDot } from './KindBadge';
 interface Props {
   index: GraphIndex;
   onPick(id: string): void;
+  /** Quando muda, a busca é limpa e recebe o foco (ex.: ao escolher o destino de um caminho). */
+  focusSignal?: number;
 }
 
 const optionId = (i: number) => `search-option-${i}`;
 
-export function Search({ index, onPick }: Props) {
+export function Search({ index, onPick, focusSignal }: Props) {
   const { t, labels } = useI18n();
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -21,6 +23,12 @@ export function Search({ index, onPick }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const results = useMemo(() => index.search(query, 40), [index, query]);
   const showList = open && query.trim().length > 0;
+
+  useEffect(() => {
+    if (!focusSignal) return;
+    setQuery('');
+    inputRef.current?.focus();
+  }, [focusSignal]);
 
   // atalhos globais: "/" e Ctrl/Cmd+K focam a busca
   useEffect(() => {

@@ -3,7 +3,15 @@ import { type EdgeKind, type GraphEdge, type GraphNode } from '@rastro/core';
 import type { GraphIndex } from '@rastro/graph';
 import { absolutePath, copyText, EDITORS, type EditorId } from '../lib/editor';
 import { useI18n, type Messages } from '../lib/i18n';
-import { IconClose, IconCopy, IconExpand, IconExternal, IconLayers, IconTarget } from './Icons';
+import {
+  IconClose,
+  IconCopy,
+  IconExpand,
+  IconExternal,
+  IconLayers,
+  IconRoute,
+  IconTarget,
+} from './Icons';
 import { KindBadge, KindDot } from './KindBadge';
 import { SourceView } from './SourceView';
 
@@ -25,6 +33,7 @@ interface Props {
   onExpandNeighbors(id: string): void;
   onToggleExpand(fileId: string): void;
   onToggleModule(moduleId: string): void;
+  onStartPath(id: string): void;
   onClose(): void;
 }
 
@@ -157,6 +166,14 @@ export function DetailsPanel(p: Props) {
             title={t.details.expandTitle}
           >
             <IconExpand /> {t.details.expand}
+          </button>
+          <button
+            type="button"
+            className="button ghost"
+            onClick={() => p.onStartPath(node.id)}
+            title={t.paths.startTitle}
+          >
+            <IconRoute /> {t.paths.start}
           </button>
           {node.kind === 'file' && children.length > 0 && !p.allSymbols && (
             <button
