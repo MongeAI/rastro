@@ -87,6 +87,7 @@ describe('computeChangeImpact: trechos só removidos', () => {
       sample(),
       changes({ file: 'src/config.ts', status: 'modified', ranges: [], deletionsAt: [2] }),
     );
+    expect(impact.changedEntities).toEqual([]); // `f` em si não mudou
     expect(impact.impacted.map((i) => i.node.id)).toContain('file:src/use.ts');
   });
 

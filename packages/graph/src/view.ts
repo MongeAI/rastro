@@ -221,8 +221,14 @@ export function computeView(index: GraphIndex, options: ViewOptions): GraphView 
     if (edge.kind === 'contains' || !options.edgeKinds.has(edge.kind)) continue;
     let source = repFor(edge.source);
     let target = repFor(edge.target);
-    if (!source && target && repOf.has(edge.target)) source = liftHidden(edge.source);
-    else if (source && !target && repOf.has(edge.source)) target = liftHidden(edge.target);
+    // só a partir de um símbolo visível (função, classe, método, rota): arquivos estão sempre
+    // visíveis, e subir a partir deles desenharia só as chamadas feitas no topo do arquivo
+    const visibleSymbol = (id: string) => {
+      const node = repOf.has(id) ? index.node(id) : undefined;
+      return !!node && isSymbolLevel(node);
+    };
+    if (!source && target && visibleSymbol(edge.target)) source = liftHidden(edge.source);
+    else if (source && !target && visibleSymbol(edge.source)) target = liftHidden(edge.target);
     if (!source || !target || source === target) continue;
     if (isViewAncestor(source, target) || isViewAncestor(target, source)) continue;
     const aggregated = source !== edge.source || target !== edge.target;

@@ -31,10 +31,12 @@ export const isTestFile = (path: string) => TEST_FILE.test(path);
 function touches(node: GraphNode, file: ChangedFile): boolean {
   const loc = node.location;
   if (!loc) return false;
-  const inside = (line: number) => line >= loc.startLine && line <= loc.endLine;
+  // `deletionsAt` é a linha logo depois do trecho removido: removido logo acima da entidade
+  // aponta para a primeira linha dela, mas não a altera (o código no topo do arquivo é que mudou)
+  const removedInside = (line: number) => line > loc.startLine && line <= loc.endLine;
   return (
     file.ranges.some(([a, b]) => a <= loc.endLine && b >= loc.startLine) ||
-    (file.deletionsAt ?? []).some(inside)
+    (file.deletionsAt ?? []).some(removedInside)
   );
 }
 

@@ -291,6 +291,24 @@ describe('computeView (expansão progressiva)', () => {
       aggregated: true,
       members: ['calls:method:src/b.ts#Svc.go->fn:src/a.ts#run'],
     });
+    // chamada no topo de um arquivo fechado não sobe: só a partir de símbolos visíveis (senão
+    // o mapa mostraria as chamadas do topo e esconderia as feitas dentro de funções)
+    const withTopLevel = sampleGraph();
+    withTopLevel.edges.push({
+      id: 'calls:file:lib/c.ts->fn:src/a.ts#run',
+      kind: 'calls',
+      source: 'file:lib/c.ts',
+      target: 'fn:src/a.ts#run',
+      resolution: 'resolved',
+      discovery: 'static-typecheck',
+      evidence: [{ file: 'lib/c.ts', line: 3, column: 1 }],
+    });
+    const topLevel = computeView(new GraphIndex(withTopLevel), {
+      nodeKinds: allKinds,
+      edgeKinds,
+      expandedFiles: new Set(),
+    });
+    expect(topLevel.edges.some((e) => e.kind === 'calls')).toBe(false);
     // os dois arquivos fechados: chamadas entre símbolos escondidos não viram linha
     const closed = computeView(index, { nodeKinds: allKinds, edgeKinds, expandedFiles: new Set() });
     expect(closed.edges.some((e) => e.kind === 'calls')).toBe(false);
