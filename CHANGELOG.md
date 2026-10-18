@@ -28,6 +28,8 @@ The map now answers **what matters**: what a change affects, how one part reache
 - A relationship from a visible entity to one inside a closed file now goes to that file instead of disappearing.
 - The folders level opens a project that lives in a single folder (like `src/`) by itself.
 - Options that do not apply to a command are rejected instead of silently ignored.
+- More honest about what can't be proven: a call on a receiver typed as a union (or intersection) of several project classes, and a call to a module whose `module.exports` is assigned in more than one branch (`if (prod) module.exports = require('./a') else …`), are now unresolved with the _possible_ targets listed, instead of resolved edges to every branch.
+- A relative import counts as a framework (its own repository and examples) only when the entry point really exports the framework's factory; a `package.json` that merely uses the name no longer turns plain objects into routes.
 
 ### Fixed (found by analyzing 8 open-source projects: Express, Fastify, Hono, NestJS, Vite, tRPC, Excalidraw and a Next.js app)
 
