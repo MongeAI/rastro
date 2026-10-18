@@ -24,7 +24,7 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
 | `@rastro/core`        | Tipos (`GraphNode`, `GraphEdge`, `Evidence`...), ids, rótulos em português, JSON Schema, `validateGraph`                                                               | nada                             |
 | `@rastro/graph`       | `GraphBuilder` (deduplicação, evidências, `depends_on`, ciclos via Tarjan iterativo), `GraphIndex` (vizinhança, impacto, busca), `computeView` (o que aparece na tela) | core                             |
-| `@rastro/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regra de rotas do Express                                                   | core, graph, ts-morph, ignore    |
+| `@rastro/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regras de rotas (Express, Fastify, Hono, NestJS, Next.js)                   | core, graph, ts-morph, ignore    |
 | `rastro` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local                                                                                                       | core, graph, analyzer            |
 | `@rastro/web`         | Interface; usa `@rastro/graph` diretamente no navegador                                                                                                                | core, graph, React, Cytoscape.js |
 
@@ -34,9 +34,15 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 
 1. **Descoberta** (`discover.ts`): percorre a pasta sem seguir links simbólicos; aplica exclusões padrão (`node_modules`, `dist`, `build`, `.git`, `.next`, `coverage`...), o `.gitignore` da raiz e padrões `--exclude`; ignora `.d.ts`, `*.min.js` e arquivos acima de 1 MB.
 2. **Configuração** (`resolve.ts`): lê `tsconfig.json`/`jsconfig.json` apenas para opções de resolução. Sem configuração, usa `moduleResolution: Bundler` (aceita imports sem extensão, `index`, `.js`→`.ts`).
-3. **Passo 1, entidades**: arquivos (agrupados por pasta), funções (declarações, `const f = () => {}`, funções embrulhadas como `memo(...)`), classes e membros, exports CommonJS, rotas do Express.
+3. **Passo 1, entidades**: arquivos (agrupados por pasta), funções (declarações, `const f = () => {}`, funções embrulhadas como `memo(...)`), classes e membros, exports CommonJS e rotas HTTP (`routes/`: uma regra por framework, ver abaixo).
 4. **Passo 2, relações**: imports (estáticos, reexportações, `require`, `import()`), exports (pelo verificador de tipos, incluindo `module.exports`), chamadas, uso de JSX e herança.
 5. **Fechamento** (`GraphBuilder.finalize`): deriva `depends_on` entre pastas, marca ciclos de importação, calcula estatísticas e ordena tudo.
+
+### Rotas HTTP
+
+Cada framework tem uma regra em `packages/analyzer/src/routes/` (`express.ts`, `fastify.ts`, `hono.ts`, `nest.ts`, `next.ts`), com as utilidades comuns em `common.ts`. A regra da casa vale para todas: **uma rota só existe quando o framework é comprovado**. O receptor (`app`, `router`, instância) precisa vir de uma fábrica importada do pacote do framework (`express()`, `fastify()`, `new Hono()`), seguida pelo verificador de tipos através de imports, `require`, `export default` e `module.exports`; decorators do NestJS precisam vir de `@nestjs/common`; as rotas por arquivo do Next.js só valem com `next` declarado no `package.json` do projeto. Imports só de tipo, homônimos de outros pacotes e funções locais com o mesmo nome não contam.
+
+As montagens (`app.use('/api', router)`, `register(plugin, { prefix })`, `app.route('/x', sub)`, `basePath`, `setGlobalPrefix`) formam um pequeno grafo de donos. No fim do passo 1 o caminho completo de cada rota é composto por ele: só um prefixo comprovado vira `meta.fullPath` e o nome da rota; vários prefixos ficam em `meta.mountedAt`, sem escolher um; prefixo não literal deixa o caminho completo desconhecido.
 
 ### Como uma chamada é resolvida
 

@@ -49,7 +49,29 @@ Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`.
 
 Se dois símbolos geram o mesmo id no mesmo arquivo, o segundo recebe o sufixo `~2`, o terceiro `~3` etc.
 
-`meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework` (rotas), `reason` e `reference` (não resolvidos).
+`meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework`/`fullPath`/`mountedAt`/`routeKind` (rotas, ver abaixo), `reason` e `reference` (não resolvidos).
+
+### Rotas
+
+O `id` de uma rota usa o **caminho local** (como escrito no código), o que o mantém estável mesmo quando a montagem muda em outro arquivo. O receptor depende do framework:
+
+| Framework (`meta.framework`) | Receptor no `id`                               | Caminho no `id`                        | Exemplo                                                              |
+| ---------------------------- | ---------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+| `express`                    | variável do app/roteador                       | o do `app.get(...)`                    | `route:src/routes/users.js#router GET /:id`                          |
+| `fastify`                    | variável da instância (ou parâmetro do plugin) | o do `app.get(...)` / `route({ url })` | `route:src/routes/users.ts#fastify GET /`                            |
+| `hono`                       | variável do app                                | o do `app.get(...)`                    | `route:src/users.ts#users GET /:id`                                  |
+| `nestjs`                     | nome da classe do controller                   | `@Controller` + decorator do método    | `route:src/users/users.controller.ts#UsersController GET /users/:id` |
+| `next`                       | `next`                                         | derivado da pasta                      | `route:app/blog/[slug]/page.tsx#next GET /blog/:slug`                |
+
+Metadados das rotas:
+
+- `httpMethod`: `GET`, `POST`... (`ALL` para `app.all`, `@All()` e rotas de API do Pages Router).
+- `routePath`: o caminho local. No Next.js, `[id]` vira `:id`, `[...slug]` vira `*slug`, `[[...slug]]` vira `*slug?` e grupos `(x)` somem.
+- `fullPath`: o caminho completo, com os prefixos de montagem (`app.use('/api', router)`, `register(plugin, { prefix })`, `app.route('/x', sub)`, `basePath`, `setGlobalPrefix` do NestJS). Só existe quando há **um único** prefixo comprovado; nesse caso o `name` do nó também mostra o caminho completo (`GET /api/users/:id`).
+- `mountedAt`: os prefixos completos onde o roteador foi montado. Com mais de um, o `fullPath` fica de fora e o `name` mostra o caminho local.
+- `routeKind` (Next.js): `page` (página, `GET`) ou `api` (rota de API).
+
+A rota é ligada ao handler por uma relação `calls` com `callKind: "route-handler"` e `discovery: "framework-rule"`: a função referenciada, o método do controller (NestJS) ou a função exportada (Next.js). Chamadas feitas dentro de um handler inline são atribuídas à própria rota.
 
 Motivos de `unresolved` (`meta.reason`):
 
@@ -72,7 +94,7 @@ Motivos de `unresolved` (`meta.reason`):
 | `source`     | Id do nó de origem                                                                                                                                                                              |
 | `target`     | Id do nó de destino                                                                                                                                                                             |
 | `resolution` | `resolved` (no projeto), `external` (pacote/Node.js), `unresolved`                                                                                                                              |
-| `discovery`  | `static-ast` (sintaxe), `static-typecheck` (verificador de tipos), `derived` (calculada), `framework-rule` (regra do Express)                                                                   |
+| `discovery`  | `static-ast` (sintaxe), `static-typecheck` (verificador de tipos), `derived` (calculada), `framework-rule` (regra de framework: rotas do Express, Fastify, Hono, NestJS e Next.js)              |
 | `evidence`   | Até 20 ocorrências `{ file, line, column, snippet }`; o total fica em `meta.count`                                                                                                              |
 | `meta`       | `specifier`, `typeOnly`, `importKind` (`static`/`dynamic`/`require`/`re-export`), `names`, `callKind` (`call`/`new`/`jsx`/`route-handler`), `reexport`, `exportedAs`, `viaDeclaration`, `count` |
 

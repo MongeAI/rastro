@@ -110,20 +110,21 @@ O trecho da definição aparece no painel, com a região destacada, sem sair da 
 
 ### 5. Rotas HTTP, tema claro e muito mais
 
-Rotas do **Express** viram nós ligados aos seus handlers. Também há **tema claro**, **foco na vizinhança** (distância 1 a 3), **análise de impacto**, filtros, legenda e exportação em **JSON** e **PNG**.
+Rotas HTTP do **Express**, **Fastify**, **Hono**, **NestJS** e **Next.js** viram nós ligados aos seus handlers, com o caminho completo quando os prefixos de montagem podem ser comprovados. Também há **tema claro**, **foco na vizinhança** (distância 1 a 3), **análise de impacto**, filtros, legenda e exportação em **JSON** e **PNG**.
 
 <p align="center"><img src="docs/assets/express.png" alt="API Express no tema claro: rota GET /users ligada ao handler listUsers" width="900" /></p>
 
 ## O que ele entende
 
-| Área           | Suporte na v0.1                                                                                                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Linguagens** | `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.mts` `.cts`                                                                                                    |
-| **Módulos**    | ESM, CommonJS (`require`, `module.exports`, `exports.x`), `import()` dinâmico, reexportações (`export * from`)                                           |
-| **Resolução**  | Compilador do TypeScript via [ts-morph](https://ts-morph.com): `tsconfig`/`jsconfig` (`paths`, `baseUrl`, `references`), `.js`→`.ts`, `index`, monorepos |
-| **Entidades**  | Funções, classes, métodos (construtor, getters/setters, propriedades-função), componentes React (`memo`, `forwardRef`), rotas Express                    |
-| **Relações**   | `importa` · `exporta` · `contém` · `chama` (incluindo `new` e `<Componente />`) · `estende` · `depende de` (entre pastas)                                |
-| **Análises**   | Ciclos de importação, análise de impacto, vizinhança, busca                                                                                              |
+| Área           | Suporte na v0.1                                                                                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Linguagens** | `.js` `.jsx` `.ts` `.tsx` `.mjs` `.cjs` `.mts` `.cts`                                                                                                                                                                |
+| **Módulos**    | ESM, CommonJS (`require`, `module.exports`, `exports.x`), `import()` dinâmico, reexportações (`export * from`)                                                                                                       |
+| **Resolução**  | Compilador do TypeScript via [ts-morph](https://ts-morph.com): `tsconfig`/`jsconfig` (`paths`, `baseUrl`, `references`), `.js`→`.ts`, `index`, monorepos                                                             |
+| **Entidades**  | Funções, classes, métodos (construtor, getters/setters, propriedades-função), componentes React (`memo`, `forwardRef`)                                                                                               |
+| **Relações**   | `importa` · `exporta` · `contém` · `chama` (incluindo `new` e `<Componente />`) · `estende` · `depende de` (entre pastas)                                                                                            |
+| **Rotas HTTP** | Express (com prefixos de `app.use('/api', router)`), Fastify (`register` com `prefix`), Hono (`app.route`, `basePath`), NestJS (`@Controller` + `@Get`…), Next.js App Router e Pages Router (páginas e rotas de API) |
+| **Análises**   | Ciclos de importação, análise de impacto, vizinhança, busca                                                                                                                                                          |
 
 ## Honesto por design
 
@@ -204,11 +205,11 @@ O Rastro está na **v0.1**. Hoje:
 - Chamadas dinâmicas (callbacks, `obj[nome]()`, injeção de dependência, eventos) aparecem como não resolvidas ou só nas contagens.
 - Em JavaScript sem tipos, `obj.metodo()` só é ligado quando o TypeScript consegue inferir o tipo de `obj`.
 - Funções declaradas dentro de outras funções não viram nós próprios.
-- Rotas: só **Express**, com caminho literal e `app`/`router` criado no próprio código.
+- Rotas: **Express**, **Fastify**, **Hono**, **NestJS** e **Next.js**, só quando o framework é comprovado (importado do pacote do framework, ou `next` declarado no `package.json` para as rotas por arquivos) e o caminho é literal. Prefixos não literais, roteadores montados em mais de um lugar, `basePath` do Next.js e versionamento do NestJS deixam o caminho completo desconhecido em vez de adivinhado. Ainda não cobertos: roteadores ou apps passados como parâmetro de função (exceto plugins do Fastify), `fastify-plugin`/autoload, `RouterModule` do NestJS, `pageExtensions` e middleware do Next.js.
 - Monorepos usam o `tsconfig` da raiz (e seus `references`); `paths` só de subpacotes podem não ser resolvidos.
 - Testado em projetos de dezenas a algumas centenas de arquivos; num teste sintético, cerca de 1 000 arquivos foram analisados em ~3 s.
 
-Próximos passos no [roadmap](ROADMAP.md): mais frameworks de rotas, análise incremental, diff entre versões e impacto de um _pull request_.
+Próximos passos no [roadmap](ROADMAP.md): análise incremental, diff entre versões e impacto de um _pull request_.
 
 ## Estrutura do repositório
 
