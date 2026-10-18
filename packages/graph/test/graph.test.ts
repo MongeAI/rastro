@@ -11,6 +11,7 @@ import {
   GraphBuilder,
   GraphIndex,
   groupableModules,
+  initialOpenModules,
   MAX_EVIDENCE_PER_EDGE,
   stronglyConnectedComponents,
 } from '@rastro/graph';
@@ -372,5 +373,35 @@ describe('computeView (expansão progressiva)', () => {
       expandAll: true,
     });
     expect(view.hiddenCount).toBe(0);
+  });
+});
+
+describe('initialOpenModules', () => {
+  /** Grafo só com pastas e arquivos. */
+  function filesGraph(files: string[]): GraphIndex {
+    const b = new GraphBuilder();
+    for (const f of files) {
+      const dir = f.split('/').slice(0, -1).join('/');
+      const mod = b.ensureModule(dir);
+      b.addNode({ id: nodeId.file(f), kind: 'file', name: f, qualifiedName: f, parent: mod });
+    }
+    const g = b.finalize();
+    return new GraphIndex({ ...sampleGraph(), nodes: g.nodes, edges: g.edges });
+  }
+
+  it('abre a cadeia de pastas únicas no topo (projeto inteiro dentro de src/)', () => {
+    const index = filesGraph(['src/main.ts', 'src/app/a.ts', 'src/lib/b.ts', 'README.ts']);
+    expect(initialOpenModules(index, groupableModules(index))).toEqual(['module:src']);
+    // pastas sem arquivos diretos (packages/) não contam como degrau
+    const mono = filesGraph(['packages/core/src/x.ts', 'packages/core/src/y/z.ts']);
+    expect(initialOpenModules(mono, groupableModules(mono))).toEqual([
+      'module:packages/core/src',
+      'module:packages/core/src/y',
+    ]);
+  });
+
+  it('não abre nada quando o topo já tem várias pastas', () => {
+    const index = filesGraph(['src/a.ts', 'lib/b.ts']);
+    expect(initialOpenModules(index, groupableModules(index))).toEqual([]);
   });
 });

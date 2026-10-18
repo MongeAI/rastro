@@ -160,6 +160,9 @@ export function buildStyle(
       selector: `edge[kind = "${kind}"]`,
       style: { 'line-color': p.edge[kind], 'target-arrow-color': p.edge[kind] },
     })),
+    // mapas com milhares de linhas: retas (as curvas calculam pontos de controle e agrupam
+    // linhas paralelas, caro nessa escala) e sem transição de opacidade
+    { selector: 'edge.fast', style: { 'curve-style': 'straight', 'transition-duration': 0 } },
     {
       selector: 'edge[kind = "extends"]',
       style: { 'target-arrow-fill': 'hollow', 'arrow-scale': 1.1 },

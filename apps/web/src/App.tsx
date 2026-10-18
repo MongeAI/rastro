@@ -12,6 +12,7 @@ import {
   findPaths,
   GraphIndex,
   groupableModules,
+  initialOpenModules,
 } from '@rastro/graph';
 import { ChangesPanel } from './components/ChangesPanel';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
@@ -220,6 +221,10 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
   );
 }
 
+/** Nível inicial: projetos grandes abrem no nível de pastas; os pequenos, direto nos arquivos. */
+const level0 = (groupable: number, files: number): Level =>
+  groupable > 3 && files > 60 ? 'modules' : 'files';
+
 function Explorer({
   graph,
   fromServer,
@@ -251,12 +256,13 @@ function Explorer({
   const [layout, setLayout] = useState<LayoutMode>(() =>
     readPref<LayoutMode>('layout', 'hierarchical', ['hierarchical', 'organic']),
   );
-  // projetos grandes abrem no nível de pastas; os pequenos, direto nos arquivos
-  const [level, setLevelState] = useState<Level>(() =>
-    groupable.length > 3 && graph.stats.files > 60 ? 'modules' : 'files',
-  );
+  const [level, setLevelState] = useState<Level>(() => level0(groupable.length, graph.stats.files));
+  /** Pastas abertas de início no nível "pastas" (ex.: o `src/` de um projeto todo dentro dele). */
+  const autoOpen = useMemo(() => initialOpenModules(index, groupable), [index, groupable]);
   /** No nível "pastas" guarda as pastas abertas; nos outros, as pastas recolhidas. */
-  const [moduleToggles, setModuleToggles] = useState<Set<string>>(() => new Set());
+  const [moduleToggles, setModuleToggles] = useState<Set<string>>(() =>
+    level0(groupable.length, graph.stats.files) === 'modules' ? new Set(autoOpen) : new Set(),
+  );
   const [nodeKinds, setNodeKinds] = useState<Set<NodeKind>>(() => new Set(DEFAULT_NODES));
   const [edgeKinds, setEdgeKinds] = useState<Set<EdgeKind>>(() => new Set(DEFAULT_EDGES));
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(() => new Set());
@@ -344,7 +350,7 @@ function Explorer({
 
   const setLevel = (next: Level) => {
     setLevelState(next);
-    setModuleToggles(new Set());
+    setModuleToggles(new Set(next === 'modules' ? autoOpen : []));
     setPinned(new Set());
   };
 

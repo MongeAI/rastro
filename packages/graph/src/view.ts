@@ -81,6 +81,24 @@ export function groupableModules(index: GraphIndex): string[] {
   return result.sort();
 }
 
+/**
+ * Pastas a abrir ao mostrar o nível de pastas: enquanto o topo tiver uma pasta só (ex.: o
+ * projeto inteiro dentro de `src/`), abri-la é o único próximo passo útil. Para em 4 níveis.
+ */
+export function initialOpenModules(index: GraphIndex, groupable: readonly string[]): string[] {
+  const set = new Set(groupable);
+  /** A pasta agrupável mais próxima acima (ou `null` no topo). */
+  const groupParent = (id: string) => index.ancestors(id).find((a) => set.has(a.id))?.id ?? null;
+  const open: string[] = [];
+  let level = groupable.filter((id) => groupParent(id) === null);
+  while (level.length === 1 && open.length < 4) {
+    const only = level[0]!;
+    open.push(only);
+    level = groupable.filter((id) => groupParent(id) === only);
+  }
+  return open;
+}
+
 const RESOLUTION_RANK: Record<Resolution, number> = { resolved: 0, unresolved: 1, external: 2 };
 
 export function computeView(index: GraphIndex, options: ViewOptions): GraphView {

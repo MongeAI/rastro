@@ -10,6 +10,13 @@ const PAD = 6;
 /** Intervalo mínimo entre redesenhos dos nós (o retângulo da tela acompanha cada quadro). */
 const NODES_EVERY_MS = 120;
 
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 interface Frame {
   x1: number;
   y1: number;
@@ -58,45 +65,68 @@ export function Minimap({ cy, palette }: { cy: Core; palette: Palette }) {
         frame.current = null;
         return;
       }
-      const bb = nodes.boundingBox({ includeLabels: false });
-      const scale = Math.min((WIDTH - 2 * PAD) / (bb.w || 1), (HEIGHT - 2 * PAD) / (bb.h || 1));
+      // retângulos em coordenadas do mapa; nós simples só precisam de posição e tamanho
+      // (boundingBox() de milhares de nós custava mais de um segundo por desenho)
+      const groups: Box[] = [];
+      const leaves: Array<Box & { node: NodeSingular }> = [];
+      let x1 = Infinity;
+      let y1 = Infinity;
+      let x2 = -Infinity;
+      let y2 = -Infinity;
+      nodes.forEach((n) => {
+        let b: Box;
+        if (n.isParent()) {
+          const bb = n.boundingBox({ includeLabels: false });
+          b = { x: bb.x1, y: bb.y1, w: bb.w, h: bb.h };
+          groups.push(b);
+        } else {
+          const pos = n.position();
+          const w = n.width();
+          const h = n.height();
+          b = { x: pos.x - w / 2, y: pos.y - h / 2, w, h };
+          leaves.push({ ...b, node: n });
+        }
+        x1 = Math.min(x1, b.x);
+        y1 = Math.min(y1, b.y);
+        x2 = Math.max(x2, b.x + b.w);
+        y2 = Math.max(y2, b.y + b.h);
+      });
+      const bw = x2 - x1 || 1;
+      const bh = y2 - y1 || 1;
+      const scale = Math.min((WIDTH - 2 * PAD) / bw, (HEIGHT - 2 * PAD) / bh);
       const f: Frame = {
-        x1: bb.x1,
-        y1: bb.y1,
+        x1,
+        y1,
         scale,
-        offX: (WIDTH - bb.w * scale) / 2,
-        offY: (HEIGHT - bb.h * scale) / 2,
+        offX: (WIDTH - bw * scale) / 2,
+        offY: (HEIGHT - bh * scale) / 2,
       };
       frame.current = f;
-      const rect = (n: NodeSingular) => {
-        const b = n.boundingBox({ includeLabels: false });
-        return [
-          f.offX + (b.x1 - f.x1) * scale,
-          f.offY + (b.y1 - f.y1) * scale,
+      const rect = (b: Box) =>
+        [
+          f.offX + (b.x - f.x1) * scale,
+          f.offY + (b.y - f.y1) * scale,
           Math.max(1.5, b.w * scale),
           Math.max(1.5, b.h * scale),
         ] as const;
-      };
       // grupos (pastas, arquivos expandidos) só com contorno; nós com a cor do tipo
       layerCtx.lineWidth = 1;
       layerCtx.strokeStyle = p.border;
-      nodes.parents().forEach((n) => {
-        const [x, y, w, h] = rect(n);
+      for (const g of groups) {
+        const [x, y, w, h] = rect(g);
         layerCtx.strokeRect(x + 0.5, y + 0.5, w, h);
-      });
-      nodes
-        .filter((n) => !n.isParent())
-        .forEach((n) => {
-          const [x, y, w, h] = rect(n);
-          const faded = n.hasClass('faded');
-          layerCtx.globalAlpha = faded ? 0.25 : 0.9;
-          layerCtx.fillStyle = n.hasClass('chosen')
-            ? p.selection
-            : n.hasClass('changed')
-              ? p.changed
-              : p.node[n.data('kind') as NodeKind];
-          layerCtx.fillRect(x, y, w, h);
-        });
+      }
+      for (const leaf of leaves) {
+        const n = leaf.node;
+        const [x, y, w, h] = rect(leaf);
+        layerCtx.globalAlpha = n.hasClass('faded') ? 0.25 : 0.9;
+        layerCtx.fillStyle = n.hasClass('chosen')
+          ? p.selection
+          : n.hasClass('changed')
+            ? p.changed
+            : p.node[n.data('kind') as NodeKind];
+        layerCtx.fillRect(x, y, w, h);
+      }
       layerCtx.globalAlpha = 1;
       lastNodes = performance.now();
     };

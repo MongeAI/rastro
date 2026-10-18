@@ -283,6 +283,35 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     }
   });
 
+  it('projeto grande (1500 arquivos): pastas abertas no início e nível de arquivos rápido', async () => {
+    const root = tmp('rastro-e2e-big-');
+    // o mesmo gerador dos benchmarks: tudo dentro de src/, pastas que se importam entre si
+    const { generateProject } = (await import(
+      pathToFileURL(path.join(repo, 'scripts', 'bench.mjs')).href
+    )) as { generateProject(root: string, files: number): void };
+    generateProject(root, 1500);
+    const run = await startRastro([root, '-o', path.join(graphOut, 'big.json')]);
+    try {
+      const { page, problems } = await openPage(browser, run.url);
+      // o projeto inteiro está em src/: a pasta já vem aberta, mostrando as subpastas
+      const status = (await text(page, '.stage-status')) ?? '';
+      expect(Number(/^(\d+) nós/.exec(status)?.[1])).toBeGreaterThan(10);
+      const start = Date.now();
+      const [files] = await page.$$(
+        'xpath/.//div[contains(@class,"segmented")]//button[contains(., "Arquivos")]',
+      );
+      await files!.click();
+      await sleep(300);
+      await waitForMap(page);
+      expect(Date.now() - start).toBeLessThan(30_000);
+      expect(await text(page, '.stage-status')).toMatch(/^15\d\d nós/);
+      expect(problems).toEqual([]);
+      await page.close();
+    } finally {
+      await run.stop();
+    }
+  });
+
   it('relatório HTML offline: abre por file:// sem nenhuma requisição externa', async () => {
     const out = path.join(tmp('rastro-e2e-report-'), 'relatorio.html');
     execFileSync(process.execPath, [bin, 'export', fixture('ts-basic'), '-f', 'html', '-o', out], {

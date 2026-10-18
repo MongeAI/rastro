@@ -40,6 +40,13 @@ function getElk(): ELK {
 }
 
 export class LayoutCancelled extends Error {}
+export class LayoutTimeout extends Error {}
+
+/** Tempo máximo do ELK; depois disso o mapa usa o layout orgânico (bem mais rápido). */
+const ELK_TIMEOUT_MS = 20_000;
+/** Acima disso o mapa é "grande": o ELK usa estratégias mais baratas. */
+const LARGE_NODES = 1500;
+const LARGE_EDGES = 4000;
 
 /**
  * Layout hierárquico em camadas (ELK "layered"), feito de dentro para fora:
@@ -57,8 +64,20 @@ export async function computeElkPositions(cy: Core, aspectRatio: number): Promis
   const root = buildGraph(cy, aspectRatio);
   running = true;
   const instance = getElk();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await instance.layout(root);
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // encerra o worker: o cálculo para de consumir CPU
+        if (instance === elk) {
+          elk.terminateWorker();
+          elk = null;
+          running = false;
+        }
+        reject(new LayoutTimeout());
+      }, ELK_TIMEOUT_MS);
+    });
+    const result = await Promise.race([instance.layout(root), timeout]);
     const positions: Positions = {};
     const walk = (node: ElkNode, offsetX: number, offsetY: number) => {
       for (const child of node.children ?? []) {
@@ -72,10 +91,12 @@ export async function computeElkPositions(cy: Core, aspectRatio: number): Promis
     walk(result, 0, 0);
     return positions;
   } catch (err) {
+    if (err instanceof LayoutTimeout) throw err;
     // worker encerrado por um pedido mais novo
     if (instance !== elk) throw new LayoutCancelled();
     throw err;
   } finally {
+    clearTimeout(timer);
     if (instance === elk) running = false;
   }
 }
@@ -85,6 +106,7 @@ function buildGraph(cy: Core, aspectRatio: number): ElkNode {
   const root: ElkNode = { id: '__root__', children: [], edges: [] };
   containers.set(root.id, root);
 
+  const large = cy.nodes().length > LARGE_NODES || cy.edges().length > LARGE_EDGES;
   const layoutOptions = (ratio: number, isRoot: boolean): Record<string, string> => ({
     'elk.algorithm': 'layered',
     'elk.direction': 'RIGHT',
@@ -94,10 +116,16 @@ function buildGraph(cy: Core, aspectRatio: number): ElkNode {
     'elk.spacing.componentComponent': isRoot ? '48' : '22',
     'elk.separateConnectedComponents': 'true',
     'elk.aspectRatio': String(ratio),
-    'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
     'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
     'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
-    'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+    // mapas grandes: posicionamento e compactação mais baratos (o NETWORK_SIMPLEX e a
+    // compactação somam segundos com milhares de nós)
+    ...(large
+      ? { 'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', 'elk.layered.thoroughness': '2' }
+      : {
+          'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+          'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+        }),
   });
   root.layoutOptions = layoutOptions(Math.max(0.6, Math.min(aspectRatio, 3)), true);
 
@@ -183,5 +211,23 @@ function buildGraph(cy: Core, aspectRatio: number): ElkNode {
       targets: [childB],
     } as ElkExtendedEdge);
   });
+
+  // Grupos densos (bem mais relações que nós, ex.: pastas que se importam todas entre si)
+  // não têm "fluxo" para mostrar em camadas, e o ELK layered explode em nós auxiliares
+  // (cada relação longa vira dezenas). Esses grupos são empacotados em grade; as linhas
+  // continuam desenhadas normalmente pelo Cytoscape.
+  for (const container of containers.values()) {
+    const n = container.children?.length ?? 0;
+    const m = container.edges?.length ?? 0;
+    if (n >= 12 && m > n * 4) {
+      container.layoutOptions = {
+        ...container.layoutOptions,
+        'elk.algorithm': 'rectpacking',
+        'elk.aspectRatio': container === root ? root.layoutOptions!['elk.aspectRatio']! : '1.6',
+        'elk.spacing.nodeNode': container === root ? '40' : '16',
+      };
+      container.edges = [];
+    }
+  }
   return root;
 }

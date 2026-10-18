@@ -5,14 +5,96 @@ import layoutUtilities from 'cytoscape-layout-utilities';
 import type { EdgeKind, NodeKind } from '@rastro/core';
 import { useI18n } from '../lib/i18n';
 import type { GraphView, ViewNode } from '@rastro/graph';
-import { computeElkPositions, LayoutCancelled } from '../lib/elkLayout';
+import { computeElkPositions, LayoutCancelled, LayoutTimeout } from '../lib/elkLayout';
 import { buildStyle, displayLabel, estimateNodeWidth } from '../lib/graphStyle';
 import type { Palette } from '../lib/theme';
 import { Minimap } from './Minimap';
 
+// avisos internos (ex.: linha entre dois nós sobrepostos antes do layout) são esperados e só
+// poluiriam o console de quem usa
+cytoscape.warnings(false);
 cytoscape.use(fcose);
 // necessário para o fcose empacotar componentes desconectados (packComponents)
 cytoscape.use(layoutUtilities);
+
+/**
+ * Propriedades de que dependem os estados derivados que o Cytoscape guarda em cache
+ * (`visible`, `takesUpSpace`, `interactive`, `isBundledBezier`).
+ */
+const DERIVED_STATE_PROPS = new Set([
+  'display',
+  'visibility',
+  'opacity',
+  'events',
+  'curve-style',
+  'width',
+  'height',
+]);
+
+/**
+ * Atalhos para um caminho quente do Cytoscape, com o mesmo resultado:
+ *
+ * - a cada propriedade de estilo aplicada, `checkTriggers` invalida o cache de estados
+ *   derivados do elemento, dos descendentes, dos pais e das linhas conectadas. Isso só é
+ *   necessário quando muda uma propriedade da qual esses estados dependem; para cor, fonte,
+ *   borda... basta o próprio elemento. Com grupos de milhares de nós, a invalidação ampla a
+ *   cada propriedade custava segundos;
+ * - para linhas, o conjunto invalidado é sempre só a própria linha, então não é montado.
+ */
+function patchStyleCache(cy: Core) {
+  interface Ele {
+    isEdge(): boolean;
+    _private: { styleCache: unknown; parent?: Ele | null; children?: Ele[]; edges?: Ele[] };
+  }
+  type Eles = Ele[] & { dirtyStyleCache(): unknown };
+  const eles = Object.getPrototypeOf(cy.collection()) as {
+    dirtyStyleCache(this: Eles): Eles;
+    __rastroPatched?: boolean;
+  };
+  if (eles.__rastroPatched) return;
+  eles.__rastroPatched = true;
+  // o mesmo conjunto do original (elemento, descendentes, pais e as linhas de todos eles),
+  // percorrido direto na árvore em vez de montar coleções intermediárias a cada chamada
+  const clear = (el: Ele) => {
+    el._private.styleCache = null;
+    for (const edge of el._private.edges ?? []) edge._private.styleCache = null;
+  };
+  eles.dirtyStyleCache = function (this: Eles) {
+    for (let i = 0; i < this.length; i++) {
+      const el = this[i]!;
+      if (el.isEdge()) {
+        el._private.styleCache = null;
+        continue;
+      }
+      clear(el);
+      const stack = [...(el._private.children ?? [])];
+      while (stack.length) {
+        const child = stack.pop()!;
+        clear(child);
+        if (child._private.children?.length) stack.push(...child._private.children);
+      }
+      for (let p = el._private.parent; p; p = p._private.parent) clear(p);
+    }
+    return this;
+  };
+
+  type Check = (ele: Eles & Ele, name: string, from: unknown, to: unknown) => void;
+  const style = Object.getPrototypeOf(cy.style()) as {
+    checkTriggers: Check;
+    checkZOrderTrigger: Check;
+    checkBoundsTrigger: Check;
+    checkConnectedEdgesBoundsTrigger: Check;
+    checkParallelEdgesBoundsTrigger: Check;
+  };
+  style.checkTriggers = function (ele, name, from, to) {
+    if (DERIVED_STATE_PROPS.has(name)) ele.dirtyStyleCache();
+    else ele._private.styleCache = null;
+    this.checkZOrderTrigger(ele, name, from, to);
+    this.checkBoundsTrigger(ele, name, from, to);
+    this.checkConnectedEdgesBoundsTrigger(ele, name, from, to);
+    this.checkParallelEdgesBoundsTrigger(ele, name, from, to);
+  };
+}
 
 export type LayoutMode = 'hierarchical' | 'organic';
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -63,6 +145,8 @@ interface Tooltip {
 }
 
 const MAX_FIT_ZOOM = 1.25;
+/** A partir de quantas linhas o mapa usa o estilo rápido (linhas retas, sem transições). */
+const FAST_EDGES = 2500;
 
 /** As classes do elemento já são exatamente estas? (evita reaplicar estilo à toa) */
 function sameClasses(el: cytoscape.SingularElementReturnValue, classes: string): boolean {
@@ -229,8 +313,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       .catch((err: unknown) => {
         if (err instanceof LayoutCancelled || run !== layoutRun.current || cyRef.current !== cy)
           return;
-        // se o ELK falhar (grafo patológico), cai para o layout orgânico
-        console.warn('Layout hierárquico falhou, usando o orgânico.', err);
+        // se o ELK falhar ou demorar demais (grafo patológico), cai para o layout orgânico
+        if (!(err instanceof LayoutTimeout))
+          console.warn('Layout hierárquico falhou, usando o orgânico.', err);
         runOrganic(true, false);
       });
   };
@@ -249,6 +334,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       boxSelectionEnabled: false,
       autounselectify: true,
     });
+    patchStyleCache(cy);
     cyRef.current = cy;
     setCyInstance(cy);
     firstLayout.current = true;
@@ -368,73 +454,85 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       neighborsOf.get(e.target)!.push(e.source);
     }
 
-    cy.batch(() => {
-      const depth = new Map(view.nodes.map((n) => [n.id, depthOf(n, byId)]));
-      const sorted = [...view.nodes].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!);
-      const ext = cy.extent();
-      const viewportCenter = { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 };
-      // 1. adiciona nós novos (pais antes dos filhos), perto do pai ou de um vizinho
-      for (const n of sorted) {
-        const display = displayLabel(n);
-        const classes = [
-          n.inCycle && 'cycle',
-          n.expandable && !n.expanded && 'expandable',
-          n.collapsed && 'collapsed',
-          !n.analyzed && 'not-analyzed',
-        ]
-          .filter(Boolean)
-          .join(' ');
-        const existing = cy.getElementById(n.id);
-        if (existing.nonempty()) {
-          // só escreve o que mudou: cada alteração de estilo em um grupo invalida o cache de
-          // todos os descendentes dele (caríssimo com milhares de nós)
-          if (existing.data('display') !== display) {
-            structural = true; // tamanho mudou
-            existing.data({ display, w: estimateNodeWidth(display, n.kind, n.collapsed) });
-          }
-          if (
-            existing.data('expandable') !== n.expandable ||
-            existing.data('expanded') !== n.expanded ||
-            existing.data('collapsed') !== n.collapsed
-          )
-            existing.data({
-              expandable: n.expandable,
-              expanded: n.expanded,
-              collapsed: n.collapsed,
-            });
-          if (!sameClasses(existing, classes)) existing.classes(classes);
-          continue;
+    const depth = new Map(view.nodes.map((n) => [n.id, depthOf(n, byId)]));
+    const sorted = [...view.nodes].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!);
+    const ext = cy.extent();
+    const viewportCenter = { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 };
+    const groups = new Set(view.nodes.flatMap((n) => (n.parent ? [n.parent] : [])));
+
+    /** Atualiza um nó que já está no mapa ou o adiciona perto do pai ou de um vizinho. */
+    const syncNode = (n: ViewNode) => {
+      const display = displayLabel(n);
+      const classes = [
+        n.inCycle && 'cycle',
+        n.expandable && !n.expanded && 'expandable',
+        n.collapsed && 'collapsed',
+        !n.analyzed && 'not-analyzed',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const existing = cy.getElementById(n.id);
+      if (existing.nonempty()) {
+        // só escreve o que mudou: cada alteração de estilo em um grupo invalida o cache de
+        // todos os descendentes dele (caríssimo com milhares de nós)
+        if (existing.data('display') !== display) {
+          structural = true; // tamanho mudou
+          existing.data({ display, w: estimateNodeWidth(display, n.kind, n.collapsed) });
         }
-        structural = true;
-        const anchor =
-          (n.parent &&
-            cy.getElementById(n.parent).nonempty() &&
-            cy.getElementById(n.parent).position()) ||
-          (neighborsOf.get(n.id) ?? [])
-            .map((id) => cy.getElementById(id))
-            .find((x) => x.nonempty())
-            ?.position();
-        const base = anchor ?? viewportCenter;
-        cy.add({
-          group: 'nodes',
-          data: {
-            id: n.id,
-            kind: n.kind,
-            display,
-            w: estimateNodeWidth(display, n.kind, n.collapsed),
-            full: n.kind === 'module' ? `${n.label}/` : n.label,
+        if (
+          existing.data('expandable') !== n.expandable ||
+          existing.data('expanded') !== n.expanded ||
+          existing.data('collapsed') !== n.collapsed
+        )
+          existing.data({
             expandable: n.expandable,
             expanded: n.expanded,
             collapsed: n.collapsed,
-            ...(n.parent ? { parent: n.parent } : {}),
-          },
-          classes,
-          position: {
-            x: base.x + (Math.random() - 0.5) * 40,
-            y: base.y + (Math.random() - 0.5) * 40,
-          },
-        } as ElementDefinition);
+          });
+        if (!sameClasses(existing, classes)) existing.classes(classes);
+        return;
       }
+      structural = true;
+      const anchor =
+        (n.parent &&
+          cy.getElementById(n.parent).nonempty() &&
+          cy.getElementById(n.parent).position()) ||
+        (neighborsOf.get(n.id) ?? [])
+          .map((id) => cy.getElementById(id))
+          .find((x) => x.nonempty())
+          ?.position();
+      const base = anchor ?? viewportCenter;
+      cy.add({
+        group: 'nodes',
+        data: {
+          id: n.id,
+          kind: n.kind,
+          display,
+          w: estimateNodeWidth(display, n.kind, n.collapsed),
+          full: n.kind === 'module' ? `${n.label}/` : n.label,
+          expandable: n.expandable,
+          expanded: n.expanded,
+          collapsed: n.collapsed,
+          ...(n.parent ? { parent: n.parent } : {}),
+        },
+        classes,
+        position: {
+          x: base.x + (Math.random() - 0.5) * 40,
+          y: base.y + (Math.random() - 0.5) * 40,
+        },
+      } as ElementDefinition);
+    };
+
+    // 1a. grupos primeiro, num lote próprio: o estilo deles é calculado enquanto ainda estão
+    // vazios. No Cytoscape, cada propriedade de estilo aplicada a um grupo percorre todos os
+    // descendentes e as linhas deles; com o grupo cheio (milhares de nós) isso custava segundos.
+    cy.batch(() => {
+      for (const n of sorted) if (groups.has(n.id)) syncNode(n);
+    });
+
+    cy.batch(() => {
+      // 1b. o resto, pais antes dos filhos
+      for (const n of sorted) if (!groups.has(n.id)) syncNode(n);
       // 2. move nós cujo grupo mudou
       for (const n of sorted) {
         const el = cy.getElementById(n.id);
@@ -451,8 +549,16 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
       }
       // 4. relações
       const cycleNodes = new Set(view.nodes.filter((n) => n.inCycle).map((n) => n.id));
+      const fast = view.edges.length > FAST_EDGES;
+      // mapas grandes: ao arrastar ou dar zoom, o Cytoscape move uma imagem do mapa em vez de
+      // redesenhar milhares de linhas a cada quadro
+      // (renderer() existe no Cytoscape, mas não está na tipagem oficial)
+      (
+        cy as unknown as { renderer(): { textureOnViewport: boolean } }
+      ).renderer().textureOnViewport = fast;
       for (const e of view.edges) {
         const classes = [
+          fast && 'fast',
           e.typeOnly && 'type-only',
           e.aggregated && 'aggregated',
           e.kind === 'imports' && cycleNodes.has(e.source) && cycleNodes.has(e.target) && 'cycle',
