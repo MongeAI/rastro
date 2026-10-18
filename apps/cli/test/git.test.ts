@@ -97,6 +97,37 @@ describe('parseUnifiedDiff', () => {
       { file: 'z\\w.ts', status: 'renamed', previous: 'x"y.ts', ranges: [] },
     ]);
   });
+  it('linhas de conteúdo que parecem cabeçalhos ("+++ ", "--- ") não trocam o arquivo', () => {
+    // "++ n;" adicionada vira "+++ n;"; "-- comentário" removida vira "--- comentário"
+    const diff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -2 +2,2 @@',
+      '--- comentário removido',
+      '+++ n;',
+      '+++ b/outro.ts',
+      '@@ -9,0 +10 @@',
+      '+--- /dev/null',
+      'diff --git a/src/b.ts b/src/b.ts',
+      '--- a/src/b.ts',
+      '+++ b/src/b.ts',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+    ].join('\n');
+    expect(parseUnifiedDiff(diff)).toEqual([
+      {
+        file: 'src/a.ts',
+        status: 'modified',
+        ranges: [
+          [2, 3],
+          [10, 10],
+        ],
+      },
+      { file: 'src/b.ts', status: 'modified', ranges: [[1, 1]] },
+    ]);
+  });
 });
 
 describe('unquote', () => {
@@ -274,6 +305,54 @@ describe('collectChanges + impacto', () => {
     fs.appendFileSync(path.join(root, 'outro/z.ts'), '// fora\n');
     const changes = collectChanges(path.join(root, 'src'));
     expect(changes.files.map((f) => f.file)).toEqual(['main.ts']);
+  });
+
+  it('conteúdo real com "++"/"--" no começo da linha: o arquivo certo, nas linhas certas', () => {
+    const root = repo({ 'src/a.ts': 'let n = 0;\nexport const x = n;\n' });
+    fs.writeFileSync(
+      path.join(root, 'src/a.ts'),
+      'let n = 0;\n++ n;\n-- n;\nexport const x = n;\n',
+    );
+    const changes = collectChanges(root);
+    expect(changes.files).toEqual([{ file: 'src/a.ts', status: 'modified', ranges: [[2, 3]] }]);
+  });
+
+  it('nunca entra em submódulos: um filtro em .git/modules/<nome>/config não roda', () => {
+    const sub = repo({ 'x.ts': 'export const a = 1;\n' });
+    const root = repo(base);
+    run(root, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'sub');
+    run(root, 'commit', '-q', '-m', 'submódulo');
+    const pwned = path.join(root, 'PWNED');
+    const modules = path.join(root, '.git', 'modules', 'sub');
+    run(
+      root,
+      'config',
+      '-f',
+      path.join(modules, 'config'),
+      'filter.evil.clean',
+      `sh -c 'touch "${pwned}"; cat'`,
+    );
+    fs.mkdirSync(path.join(modules, 'info'), { recursive: true });
+    fs.writeFileSync(path.join(modules, 'info', 'attributes'), '*.ts filter=evil\n');
+    // arquivo do submódulo "sujo" (stat diferente): o status dentro dele rodaria o filtro
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(path.join(root, 'sub', 'x.ts'), later, later);
+    fs.appendFileSync(path.join(root, 'src/main.ts'), '// mudança\n');
+    const changes = collectChanges(root);
+    expect(changes.files.map((f) => f.file)).toEqual(['src/main.ts']);
+    expect(fs.existsSync(pwned)).toBe(false);
+  });
+
+  it('pasta analisada com nome de "mágica" de pathspec (":(top)x") é lida como caminho', () => {
+    const root = repo({ ...base, ':(top)x/a.ts': 'export const a = 1;\n' });
+    fs.appendFileSync(path.join(root, ':(top)x/a.ts'), '// mudança\n');
+    fs.writeFileSync(path.join(root, ':(top)x/novo.ts'), 'export const b = 1;\n');
+    fs.appendFileSync(path.join(root, 'src/main.ts'), '// fora da pasta\n');
+    const changes = collectChanges(path.join(root, ':(top)x'));
+    expect(changes.files.map((f) => [f.file, f.status])).toEqual([
+      ['a.ts', 'modified'],
+      ['novo.ts', 'added'],
+    ]);
   });
 
   it('explica quando a pasta não é um repositório git', () => {

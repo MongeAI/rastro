@@ -392,7 +392,9 @@ describe.skipIf(!fs.existsSync(bundled))('opções que não teriam efeito (CLI e
   it('--trust-git-config sozinho não faria nada e por isso falha', () => {
     const res = run(['analyze', fixture, '--stdout', '--trust-git-config']);
     expect(res.status).toBe(1);
-    expect(res.stderr).toContain('--trust-git-config só tem efeito junto com --changes ou --since');
+    expect(res.stderr).toContain(
+      '--trust-git-config só tem efeito com "rastro impact" ou junto com',
+    );
   });
 });
 

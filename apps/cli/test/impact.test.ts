@@ -210,6 +210,23 @@ describe.skipIf(!bundled)('rastro impact (CLI empacotada)', () => {
     expect(fs.readFileSync(out, 'utf8').startsWith('<!-- rastro-impact -->')).toBe(true);
   });
 
+  it('impact de uma pasta aceita --trust-git-config (sempre lê o git)', () => {
+    const root = changedProject();
+    execFileSync('git', ['config', 'core.pager', 'cat'], { cwd: root });
+    const refused = run(['impact', root]);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('--trust-git-config');
+    const trusted = run(['impact', root, '--trust-git-config']);
+    expect(trusted.status, trusted.stderr).toBe(0);
+    expect(trusted.stdout).toContain('What changed');
+    // com um grafo salvo não há git para ler: a opção continua recusada
+    const saved = path.join(tmp('rastro-impact-out-'), 'g.json');
+    expect(run(['analyze', root, '--changes', '--trust-git-config', '-o', saved]).status).toBe(0);
+    expect(run(['impact', saved, '--trust-git-config']).stderr).toContain(
+      'it only works when analyzing a folder',
+    );
+  });
+
   it('erros de uso claros', () => {
     const root = changedProject();
     expect(run(['impact', root, '--format', 'mermaid']).stderr).toContain(

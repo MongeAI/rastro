@@ -57,6 +57,10 @@ const DIFF_FLAGS = [
   '--unified=0',
   '--inter-hunk-context=0',
   '-M',
+  // nunca entra em submódulos: o git rodaria o status dentro deles, lendo a configuração de
+  // .git/modules/<nome>/config (que a checagem de configurações arriscadas não vê) e
+  // executando, por exemplo, um filter.<x>.clean definido lá
+  '--ignore-submodules=all',
 ];
 
 /** Limite para contar as linhas de arquivos novos (o mesmo tamanho máximo do analisador). */
@@ -71,12 +75,14 @@ function git(cwd: string, args: string[]): string {
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // sem prompts, sem travas no índice, sem configuração global de sistema
+      // sem prompts, sem travas no índice, sem configuração global de sistema; caminhos são
+      // sempre literais (uma pasta chamada ":(top)x" não vira "mágica" de pathspec)
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
         GIT_OPTIONAL_LOCKS: '0',
         GIT_CONFIG_NOSYSTEM: '1',
+        GIT_LITERAL_PATHSPECS: '1',
       },
     });
   } catch (err) {
@@ -238,13 +244,18 @@ function headerPath(rest: string): string {
 export function parseUnifiedDiff(text: string): ChangedFile[] {
   const files: ChangedFile[] = [];
   let current: ChangedFile | null = null;
+  // depois do primeiro @@ de um arquivo, tudo é conteúdo (linhas com +, -, espaço ou \) até o
+  // próximo "diff --git": uma linha adicionada "++ n;" aparece como "+++ n;" e não é cabeçalho
+  let inHunk = false;
   for (const line of text.split('\n')) {
     if (line.startsWith('diff --git ')) {
       current = { file: '', status: 'modified', ranges: [] };
       files.push(current);
+      inHunk = false;
       continue;
     }
     if (!current) continue;
+    if (inHunk && !line.startsWith('@@')) continue;
     if (line.startsWith('new file mode')) current.status = 'added';
     else if (line.startsWith('deleted file mode')) current.status = 'deleted';
     else if (line.startsWith('rename from ')) {
@@ -259,6 +270,7 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
       const p = headerPath(line.slice(4));
       if (p !== '/dev/null') current.file = p.replace(/^b\//, '');
     } else if (line.startsWith('@@')) {
+      inHunk = true;
       const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
       if (!m) continue;
       const start = Number(m[2]);

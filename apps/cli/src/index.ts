@@ -195,6 +195,9 @@ async function main(argv: string[]): Promise<void> {
   const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
   const command = isCommand ? first! : 'open';
   const target = isCommand ? rest[0] : first;
+  // argumentos a mais falham (o compare recebe dois arquivos; os outros comandos, um)
+  const extra = isCommand ? rest.slice(command === 'compare' ? 2 : 1) : rest;
+  if (extra.length) fail(`${u.unexpectedArg(extra[0]!)}\n${u.seeHelp}`);
   if (!target)
     fail(
       command === 'compare'
@@ -204,15 +207,23 @@ async function main(argv: string[]): Promise<void> {
           : u.needPath(command),
     );
 
+  // um valor vazio (--since "", -o "") nunca é o que se quis: falha em vez de ser ignorado
+  const empty = (
+    ['out', 'since', 'port', 'max-files', 'format', 'level', 'folder', 'edges', 'link'] as const
+  ).find((k) => values[k] === '');
+  if (empty) fail(`${u.needsValue(`--${empty}`)}\n${u.seeHelp}`);
+  if (values.exclude?.includes('')) fail(`${u.needsValue('--exclude')}\n${u.seeHelp}`);
+
   const servesUi = command === 'open' || command === 'serve';
   if (values.port !== undefined && (!servesUi || !/^\d+$/.test(values.port)))
     fail(servesUi ? u.portRange : u.notApplicable('--port', command));
   const port = values.port !== undefined ? Number(values.port) : 4321;
   if (port > 65535) fail(u.portRange);
+  if (values['no-open'] && !servesUi) fail(u.notApplicable('--no-open', command));
   if (values.stdout && command !== 'analyze') fail(u.onlyWith('--stdout', 'analyze'));
   if (values.stdout && values.out !== undefined) fail(u.notTogether('--stdout', '--out'));
   if (
-    values.out &&
+    values.out !== undefined &&
     command !== 'analyze' &&
     command !== 'open' &&
     command !== 'export' &&
@@ -237,7 +248,13 @@ async function main(argv: string[]): Promise<void> {
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1)) fail(u.maxFiles);
   // opções que nunca teriam efeito falham, em vez de serem ignoradas em silêncio
   if (values.watch && command !== 'open') fail(u.watchOnly);
-  if (values['trust-git-config'] && !values.changes && values.since === undefined)
+  // o impact de uma pasta sempre lê o git; os outros comandos só com --changes ou --since
+  if (
+    values['trust-git-config'] &&
+    command !== 'impact' &&
+    !values.changes &&
+    values.since === undefined
+  )
     fail(u.trustNeedsChanges);
   /** Opções que só valem ao analisar uma pasta (o export confere depois se a fonte é pasta). */
   const analysisFlag = (
@@ -296,7 +313,7 @@ async function main(argv: string[]): Promise<void> {
   const precheckGit = (root: string) => {
     try {
       checkGit(root, {
-        ...(values.since ? { since: values.since } : {}),
+        ...(values.since !== undefined ? { since: values.since } : {}),
         trustConfig: !!values['trust-git-config'],
       });
     } catch (err) {
@@ -306,10 +323,10 @@ async function main(argv: string[]): Promise<void> {
 
   /** Anexa as mudanças do git ao grafo quando `--changes`/`--since` foram pedidos. */
   const attachChanges = (graph: RastroGraph, root: string, warn: boolean) => {
-    if (!values.changes && !values.since) return;
+    if (!values.changes && values.since === undefined) return;
     try {
       graph.changes = collectChanges(root, {
-        ...(values.since ? { since: values.since } : {}),
+        ...(values.since !== undefined ? { since: values.since } : {}),
         trustConfig: !!values['trust-git-config'],
       });
     } catch (err) {
@@ -327,7 +344,7 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === 'compare') {
     const other = rest[1];
-    if (!other || rest.length > 2) fail(u.compareNeedsTwo);
+    if (!other) fail(u.compareNeedsTwo);
     let before: RastroGraph;
     let after: RastroGraph;
     try {
@@ -361,7 +378,7 @@ async function main(argv: string[]): Promise<void> {
     const fromFolder = fs.statSync(source).isDirectory();
     if (!fromFolder && analysisFlag) fail(u.needsFolder(analysisFlag, command));
     if (fromFolder) {
-      if (values.changes || values.since) precheckGit(source);
+      if (values.changes || values.since !== undefined) precheckGit(source);
       graph = await analyzeProject(source, { ...discover, onProgress: showProgress });
       attachChanges(graph, source, true);
     } else {
@@ -416,7 +433,7 @@ async function main(argv: string[]): Promise<void> {
       try {
         // sem --changes nem --since: o que ainda não foi commitado
         graph.changes = collectChanges(source, {
-          ...(values.since ? { since: values.since } : {}),
+          ...(values.since !== undefined ? { since: values.since } : {}),
           trustConfig: !!values['trust-git-config'],
         });
       } catch (err) {
@@ -447,7 +464,7 @@ async function main(argv: string[]): Promise<void> {
         ...(values.link !== undefined ? { link: values.link } : {}),
       });
     }
-    if (values.out) {
+    if (values.out !== undefined) {
       try {
         // cores do terminal não vão para arquivos
         // eslint-disable-next-line no-control-regex
@@ -485,7 +502,7 @@ async function main(argv: string[]): Promise<void> {
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) fail(u.dirNotFound(root));
   const quiet = command === 'analyze' && values.stdout;
   // analyze com --changes/--since falha sem as mudanças; ao abrir o mapa, só avisa (depois)
-  if (command === 'analyze' && (values.changes || values.since)) precheckGit(root);
+  if (command === 'analyze' && (values.changes || values.since !== undefined)) precheckGit(root);
 
   /**
    * Analisa o projeto (e as mudanças do git, se pedidas). No modo --watch, a sessão mantém o

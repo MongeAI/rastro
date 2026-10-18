@@ -34,18 +34,20 @@ O Rastro é **local-first** e **somente leitura**. Este documento lista exatamen
 
 Encerre o servidor com `Ctrl+C` quando terminar. Os arquivos estáticos da interface (HTML, JS, CSS) não exigem token, porque não contêm dados do projeto.
 
-## Mudanças do git (`--changes`, `--since`)
+## Mudanças do git (`--changes`, `--since`, `rastro impact`)
 
-Sem essas opções o Rastro não chama o `git`. Com elas, roda apenas comandos de leitura (`rev-parse`, `config --list`, `merge-base`, `diff`, `ls-files`), sem `shell`, com os argumentos passados diretamente ao processo, e:
+Sem essas opções (ou o `rastro impact` de uma pasta) o Rastro não chama o `git`. Com elas, roda apenas comandos de leitura (`rev-parse`, `config --list`, `merge-base`, `diff`, `ls-files`), sem `shell`, com os argumentos passados diretamente ao processo, e:
 
 - com `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` e `--no-pager`, e no `diff` com `--no-ext-diff` e `--no-textconv`, o que desliga as extensões que executariam programas;
 - com `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` e `GIT_OPTIONAL_LOCKS=0`: sem configuração do sistema, sem pedir senha e sem travar o índice do repositório;
+- no `diff` com `--ignore-submodules=all`: o git nunca entra num submódulo (lá ele leria a configuração de `.git/modules/<nome>/config`, que a checagem abaixo não vê, e rodaria um filtro definido nela);
+- com `GIT_LITERAL_PATHSPECS=1`: a pasta analisada é sempre um caminho literal (uma pasta chamada `:(top)x` não vira “mágica” de pathspec);
 - com prefixos fixos (`--src-prefix=a/ --dst-prefix=b/ --no-relative`), para que opções como `diff.noprefix` ou `diff.mnemonicPrefix` na sua configuração global não confundam a leitura dos caminhos;
 - recusando referências que começam com `-` em `--since` (não viram opções do git).
 
 **Configuração arriscada do repositório.** Um repositório baixado de fonte não confiável (por exemplo, um `.zip` com a pasta `.git`) pode trazer configurações que fazem o próprio git executar comandos ao gerar um diff: filtros (`filter.<nome>.clean`/`smudge`/`process`, ativados por um `.gitattributes`), `diff.<nome>.textconv`/`command`, `diff.external`, `core.fsmonitor`, `core.hooksPath`, `core.pager`, `core.sshCommand`, `include.path` e `includeIf.<condição>.path`. Antes de rodar o diff, o Rastro lista a configuração efetiva com o escopo de cada chave (`git config --list --show-scope`, já seguindo os `include.path`) e **recusa** o repositório se alguma dessas chaves vier de um escopo que não seja o seu (`global`) ou o do sistema (`system`): o `.git/config` (`local`), o `.git/config.worktree` (`worktree`, lido quando `extensions.worktreeConfig` está ligado) ou variáveis `GIT_CONFIG_*` (`command`). Se a listagem falhar, o Rastro também não continua. A mensagem diz quais chaves encontrou.
 
-**`--trust-git-config`** desliga essa recusa. Use só em repositórios em que você confia tanto quanto em rodar `git diff` neles por conta própria: com essa opção, um filtro ou `textconv` definido no repositório **será executado** com as suas permissões. As proteções da lista acima continuam valendo. Sem `--changes` ou `--since` a opção não tem efeito, e a CLI recusa o uso isolado.
+**`--trust-git-config`** desliga essa recusa. Use só em repositórios em que você confia tanto quanto em rodar `git diff` neles por conta própria: com essa opção, um filtro ou `textconv` definido no repositório **será executado** com as suas permissões. As proteções da lista acima continuam valendo. Sem `--changes` ou `--since` (ou fora do `rastro impact` de uma pasta, que sempre lê o git) a opção não tem efeito, e a CLI recusa o uso isolado.
 
 Arquivos novos (não versionados) entram como adicionados. O Rastro só lê os que o analisador leria: arquivo regular (sem seguir links simbólicos, então nada de `/dev/zero` ou FIFOs), extensão JS/TS e até 1 MB. Os demais entram como uma linha alterada, sem leitura.
 
@@ -82,8 +84,8 @@ Por favor, não abra uma issue pública. Envie os detalhes de forma privada para
 A action roda no pull request, então o código dele é tratado como não confiável:
 
 - **Nada do pull request é executado.** O Rastro não é rodado com `npx` dentro do checkout (o npm leria o `.npmrc` do pull request, que pode trocar o registro ou injetar `node-options`, e até um `node_modules` commitado). Ele é instalado numa pasta do runner, do registro público (`--registry=https://registry.npmjs.org/`), com `--ignore-scripts`, e roda pelo caminho absoluto do bin com `NODE_OPTIONS` removido.
-- **Entradas nunca entram direto no shell.** Todas passam por variáveis de ambiente; a base é recusada se começar com `-`; o login do autor do comentário só aceita `[A-Za-z0-9-]` (e `[bot]`).
+- **Entradas nunca entram direto no shell.** Todas passam por variáveis de ambiente; a base é recusada se começar com `-`; os padrões de `exclude` vão como `--exclude=<padrão>` (um padrão que começa com `-` não vira opção); o login do autor do comentário só aceita `[A-Za-z0-9-]` (e `[bot]`).
 - **Config do git.** No runner, o `.git/config` é escrito pelo `actions/checkout` (que, a partir da v6, guarda credenciais num `includeIf`), não pelo pull request; por isso a action usa `--trust-git-config`. Fora do Actions, a recusa padrão continua valendo.
-- **Comentário.** Só é atualizado o comentário com o marcador `<!-- rastro-impact -->` escrito pelo autor esperado (`comment-author`): ninguém toma o comentário publicando o marcador. Nomes vindos do código (arquivos, funções, rotas) entram como código inline e com tamanho limitado; links para `arquivo:linha` codificam também `( ) ! * ' ~`, para um nome de arquivo não fechar o link e injetar Markdown.
+- **Comentário.** Só é atualizado o comentário com o marcador da pasta analisada (`<!-- rastro-impact -->` para a raiz, `<!-- rastro-impact:<pasta> -->` para as outras, com a pasta codificada parte a parte, então nada nela fecha o comentário HTML) escrito pelo autor esperado (`comment-author`): ninguém toma o comentário publicando o marcador, e duas chamadas da action para pastas diferentes não sobrescrevem o comentário uma da outra. Nomes vindos do código (arquivos, funções, rotas) entram como código inline e com tamanho limitado; links para `arquivo:linha` codificam também `( ) ! * ' ~`, para um nome de arquivo não fechar o link e injetar Markdown.
 - **Saídas.** A lista de testes vai para `$GITHUB_OUTPUT` com um delimitador aleatório; nomes de teste com caracteres de controle ficam de fora da lista.
 - **Forks.** Pull requests de forks recebem um token só de leitura: o comentário é pulado com um aviso e o relatório continua no resumo do job. Use o evento `pull_request`, nunca `pull_request_target`, que daria permissões de escrita a código de terceiros.

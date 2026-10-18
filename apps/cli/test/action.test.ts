@@ -57,8 +57,11 @@ function featureRepo(sub = ''): string {
   return root;
 }
 
-function runImpact(root: string, env: Record<string, string>) {
-  const work = tmp('rastro-action-out-');
+/** Commit do checkout (o que o Rastro analisou). */
+const headOf = (root: string) =>
+  execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+
+function runImpact(root: string, env: Record<string, string>, work = tmp('rastro-action-out-')) {
   const summary = path.join(work, 'summary.md');
   const output = path.join(work, 'output.txt');
   const res = spawnSync('bash', [impactSh], {
@@ -85,15 +88,20 @@ describe.skipIf(!bundled || !hasTools || process.platform === 'win32')('GitHub A
     const root = featureRepo();
     // o actions/checkout v6+ guarda as credenciais num includeIf do .git/config
     execFileSync('git', ['config', `includeIf.gitdir:${root}/.git.path`, '/tmp/x'], { cwd: root });
+    // padrões que começam com "-" não viram opções do Rastro
+    fs.mkdirSync(path.join(root, '-gerado'));
+    fs.writeFileSync(path.join(root, '-gerado', 'x.ts'), 'export const x = 1;\n');
     const { res, summary, outputs } = runImpact(root, {
-      RASTRO_LINK_BASE: 'https://github.com/org/repo/blob/abc',
-      RASTRO_EXCLUDE: 'dist\nbuild',
+      RASTRO_REPO_URL: 'https://github.com/org/repo',
+      RASTRO_EXCLUDE: 'dist\n-gerado\nbuild',
     });
     expect(res.status, res.stderr).toBe(0);
 
     expect(summary.startsWith('<!-- rastro-impact -->')).toBe(true);
     expect(summary).toContain('`sum`');
-    expect(summary).toContain('(https://github.com/org/repo/blob/abc/src/math.ts#L1)');
+    // links para o commit do checkout (de onde vêm as linhas), não para outro
+    const head = headOf(root);
+    expect(summary).toContain(`(https://github.com/org/repo/blob/${head}/src/math.ts#L1)`);
     expect(summary).toContain('`test/math.test.ts`');
 
     expect(outputs).toMatch(/^changed=1$/m);
@@ -105,16 +113,70 @@ describe.skipIf(!bundled || !hasTools || process.platform === 'win32')('GitHub A
       baseLabel: string;
     };
     expect(json.baseLabel).toBe('main');
+    const graph = JSON.parse(fs.readFileSync(path.join(dir, 'graph.json'), 'utf8')) as {
+      nodes: Array<{ id: string }>;
+    };
+    expect(graph.nodes.some((n) => n.id.includes('-gerado/'))).toBe(false);
+    expect(graph.nodes.some((n) => n.id === 'file:src/math.ts')).toBe(true);
   });
 
   it('impact.sh: subpasta com espaço entra codificada nos links', () => {
     const root = featureRepo('my app');
     const { res, summary } = runImpact(root, {
       RASTRO_PATH: './my app/',
-      RASTRO_LINK_BASE: 'https://github.com/org/repo/blob/abc/',
+      RASTRO_REPO_URL: 'https://github.com/org/repo/',
     });
     expect(res.status, res.stderr).toBe(0);
-    expect(summary).toContain('(https://github.com/org/repo/blob/abc/my%20app/src/math.ts#L1)');
+    expect(summary).toContain(
+      `(https://github.com/org/repo/blob/${headOf(root)}/my%20app/src/math.ts#L1)`,
+    );
+  });
+
+  it('impact.sh: links relativos à raiz do git, com o checkout em outra pasta (path: r1)', () => {
+    // o actions/checkout com `path: r1`: o repositório fica numa subpasta do workspace
+    const workspace = tmp('rastro-action-ws-');
+    const root = featureRepo('pkg');
+    fs.renameSync(root, path.join(workspace, 'r1'));
+    const r1 = path.join(workspace, 'r1');
+    const expected = `(https://github.com/org/repo/blob/${headOf(r1)}/pkg/src/math.ts#L1)`;
+    for (const RASTRO_PATH of ['r1/pkg', path.join(r1, 'pkg')]) {
+      const { res, summary } = runImpact(workspace, {
+        RASTRO_PATH,
+        RASTRO_REPO_URL: 'https://github.com/org/repo',
+      });
+      expect(res.status, res.stderr).toBe(0);
+      expect(summary, RASTRO_PATH).toContain(expected);
+      expect(summary).not.toContain('/r1/');
+    }
+  });
+
+  it('impact.sh duas vezes no mesmo job: cada execução tem a sua pasta de saída', () => {
+    const root = featureRepo();
+    const work = tmp('rastro-action-out-');
+    const first = runImpact(root, {}, work);
+    expect(first.res.status, first.res.stderr).toBe(0);
+    const firstDir = /^dir=(.+)$/m.exec(first.outputs)![1]!;
+    const before = fs.readFileSync(path.join(firstDir, 'impact.md'), 'utf8');
+    const second = runImpact(root, { RASTRO_EXCLUDE: 'test', RASTRO_REPORT: 'false' }, work);
+    expect(second.res.status, second.res.stderr).toBe(0);
+    const dirs = [...second.outputs.matchAll(/^dir=(.+)$/gm)].map((m) => m[1]!);
+    expect(dirs).toHaveLength(2);
+    expect(dirs[0]).not.toBe(dirs[1]);
+    for (const dir of dirs) expect(path.dirname(dir)).toBe(work);
+    expect(fs.readFileSync(path.join(firstDir, 'impact.md'), 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(firstDir, 'rastro-report.html'))).toBe(true);
+  });
+
+  it('impact.sh sem jq: erro claro antes de qualquer coisa', () => {
+    const root = featureRepo();
+    const bash = execFileSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
+    const res = spawnSync(bash, [impactSh], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { PATH: tmp('rastro-action-nopath-'), RUNNER_TEMP: tmp('rastro-action-out-') },
+    });
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain('::error title=Rastro::jq is required');
   });
 
   it('impact.sh: git sem a base falha com o erro do git, não com uma mensagem enganosa', () => {
@@ -244,6 +306,44 @@ describe.skipIf(!bundled || !hasTools || process.platform === 'win32')('GitHub A
     const only = fakeGh([{ id: 1, user: { login: 'mallory' }, body: '<!-- rastro-impact -->x' }]);
     expect(only.run().status).toBe(0);
     expect(only.calls().some((c) => c.startsWith('api -X POST'))).toBe(true);
+  });
+
+  it('comment.sh: um comentário por pasta analisada (a action rodando uma vez por pacote)', () => {
+    const comments = [
+      { id: 777, user: { login: 'github-actions[bot]' }, body: '<!-- rastro-impact -->\nraiz' },
+      {
+        id: 888,
+        user: { login: 'github-actions[bot]' },
+        body: '<!-- rastro-impact:packages/api -->\napi',
+      },
+      { id: 2, user: { login: 'mallory' }, body: '<!-- rastro-impact:packages/web -->\nx' },
+    ];
+    // pasta nova: não toca no comentário da raiz nem no de outra pessoa; cria o seu
+    const web = fakeGh(comments);
+    expect(web.run({ RASTRO_PATH: './packages/web/' }).status).toBe(0);
+    expect(web.calls().some((c) => c.startsWith('api -X POST repos/org/repo/issues/42/'))).toBe(
+      true,
+    );
+    expect(web.calls().some((c) => c.includes('PATCH'))).toBe(false);
+    expect(web.body().startsWith('<!-- rastro-impact:packages/web -->\n### impact\n')).toBe(true);
+    expect(web.body()).not.toContain('<!-- rastro-impact -->');
+    // pasta que já tem comentário: atualiza o dela
+    const api = fakeGh(comments);
+    expect(api.run({ RASTRO_PATH: 'packages/api' }).status).toBe(0);
+    expect(
+      api.calls().some((c) => c.startsWith('api -X PATCH repos/org/repo/issues/comments/888')),
+    ).toBe(true);
+    // a raiz continua com o marcador de antes (acha os comentários das versões anteriores)
+    const root = fakeGh(comments);
+    expect(root.run({ RASTRO_PATH: '.' }).status).toBe(0);
+    expect(
+      root.calls().some((c) => c.startsWith('api -X PATCH repos/org/repo/issues/comments/777')),
+    ).toBe(true);
+    expect(root.body().startsWith('<!-- rastro-impact -->\n### impact\n')).toBe(true);
+    // nada no caminho fecha o comentário HTML nem quebra o filtro do jq
+    const odd = fakeGh([]);
+    expect(odd.run({ RASTRO_PATH: 'a/-->"x' }).status).toBe(0);
+    expect(odd.body().split('\n')[0]).toBe('<!-- rastro-impact:a/--%3E%22x -->');
   });
 
   it('comment.sh: sem permissão (PR de fork) avisa e não falha; autor inválido é recusado', () => {

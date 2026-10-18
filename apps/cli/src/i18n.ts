@@ -92,7 +92,8 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     watchOnly: '--watch só funciona ao abrir o mapa (rastro <caminho>).',
     needsFolder: (flag: string, command: string) =>
       `${flag} não se aplica a "rastro ${command}" com um JSON salvo: só vale ao analisar uma pasta.`,
-    trustNeedsChanges: '--trust-git-config só tem efeito junto com --changes ou --since.',
+    trustNeedsChanges:
+      '--trust-git-config só tem efeito com "rastro impact" ou junto com --changes ou --since.',
     dirNotFound: (dir: string) => `diretório não encontrado: ${dir}`,
     pathNotFound: (p: string) => `caminho não encontrado: ${p}`,
     compareNeedsTwo: 'informe dois arquivos JSON. Exemplo: rastro compare antes.json depois.json',
@@ -413,7 +414,8 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     watchOnly: '--watch only works when opening the map (rastro <path>).',
     needsFolder: (flag, command) =>
       `${flag} does not apply to "rastro ${command}" with a saved JSON: it only works when analyzing a folder.`,
-    trustNeedsChanges: '--trust-git-config only has an effect together with --changes or --since.',
+    trustNeedsChanges:
+      '--trust-git-config only has an effect with "rastro impact" or together with --changes or --since.',
     dirNotFound: (dir) => `directory not found: ${dir}`,
     pathNotFound: (p) => `path not found: ${p}`,
     compareNeedsTwo: 'pass two JSON files. Example: rastro compare before.json after.json',

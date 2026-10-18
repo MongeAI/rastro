@@ -18,7 +18,7 @@ inputs:
     description: Paths to ignore, one per line (.gitignore syntax).
     default: ''
   comment:
-    description: Post the impact as a pull request comment (updated on every push).
+    description: Post the impact as a pull request comment (updated on every push; one comment per analyzed path).
     default: 'true'
   comment-author:
     description: Login that posts the comment (to find and update it). Change it when using a custom token.
@@ -85,7 +85,8 @@ runs:
         RASTRO_LANG: ${{ inputs.lang }}
         RASTRO_VERSION: ${{ inputs.version }}
         RASTRO_REPORT: ${{ inputs.report }}
-        RASTRO_LINK_BASE: https://github.com/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha || github.sha }}
+        # o commit dos links é o do checkout (lido pelo script), de onde vêm as linhas
+        RASTRO_REPO_URL: https://github.com/${{ github.repository }}
       run: bash "$GITHUB_ACTION_PATH/scripts/action/impact.sh"
 
     - id: upload
@@ -101,6 +102,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         RASTRO_MARKDOWN: ${{ steps.impact.outputs.markdown }}
+        RASTRO_PATH: ${{ inputs.path }}
         RASTRO_REPORT_URL: ${{ steps.upload.outputs.artifact-url }}
         RASTRO_LANG: ${{ inputs.lang }}
         RASTRO_AUTHOR: ${{ inputs.comment-author }}

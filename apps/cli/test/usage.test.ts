@@ -272,6 +272,22 @@ describe.skipIf(!fs.existsSync(bundled))('CLI empacotada: uso e entradas inváli
         'error: --link must be an http:// or https:// address',
       ],
     ];
+    // argumentos a mais, valores vazios e --no-open fora do mapa: nunca ignorados em silêncio
+    cases.push(
+      [['impact', fixture, 'main'], 'error: unexpected argument: main\n'],
+      [[fixture, 'outra-pasta'], 'error: unexpected argument: outra-pasta\n'],
+      [['compare', 'a.json', 'b.json', 'c.json'], 'error: unexpected argument: c.json\n'],
+      [['analyze', fixture, '--since', ''], 'error: --since needs a value\n'],
+      [['impact', fixture, '--since='], 'error: --since needs a value\n'],
+      [['impact', fixture, '-o', ''], 'error: --out needs a value\n'],
+      [['export', fixture, '-f', 'json', '-o', ''], 'error: --out needs a value\n'],
+      [['analyze', fixture, '-o', ''], 'error: --out needs a value\n'],
+      [['analyze', fixture, '-e', ''], 'error: --exclude needs a value\n'],
+      [['analyze', fixture, '--no-open'], 'error: --no-open does not apply to "analyze".'],
+      [['impact', fixture, '--no-open'], 'error: --no-open does not apply to "impact".'],
+      [['export', fixture, '--no-open'], 'error: --no-open does not apply to "export".'],
+      [['validate', 'g.json', '--no-open'], 'error: --no-open does not apply to "validate".'],
+    );
     if (process.platform !== 'win32')
       cases.push([
         ['analyze', fixture, '-o', '/dev/null'],

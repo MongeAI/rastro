@@ -5,7 +5,7 @@
 #
 # Entradas (variáveis de ambiente, nunca interpoladas no script):
 #   RASTRO_PATH, RASTRO_BASE, RASTRO_EXCLUDE (uma por linha), RASTRO_LANG, RASTRO_VERSION,
-#   RASTRO_LINK_BASE (https://github.com/<repo>/blob/<commit>), RASTRO_REPORT (true/false)
+#   RASTRO_REPO_URL (https://github.com/<repo>, base dos links), RASTRO_REPORT (true/false)
 #   RASTRO_BIN: comando do Rastro já instalado (usado nos testes; sem ele, instala do npm)
 set -euo pipefail
 
@@ -13,8 +13,11 @@ path="${RASTRO_PATH:-.}"
 base="${RASTRO_BASE:-${GITHUB_BASE_REF:-}}"
 lang="${RASTRO_LANG:-en}"
 temp="${RUNNER_TEMP:-$(mktemp -d)}"
-out="$temp/rastro"
-mkdir -p "$out"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "::error title=Rastro::jq is required but was not found on the runner."
+  exit 1
+fi
 
 if [ -z "$base" ]; then
   echo "::error title=Rastro::No base branch to compare against. Run on pull_request or set the 'base' input."
@@ -23,6 +26,11 @@ fi
 case "$base" in
   -*) echo "::error title=Rastro::Invalid base: $base"; exit 1 ;;
 esac
+
+# uma pasta nova por execução: a action pode rodar mais de uma vez no mesmo job (uma por
+# pacote de um monorepo, com artifact-name diferente) sem uma sobrescrever a outra
+mkdir -p "$temp"
+out="$(mktemp -d "$temp/rastro.XXXXXX")"
 
 # Nada da pasta do pull request pode influenciar o Rastro: o npx/npm rodando ali leria o
 # .npmrc da PR (node-options, registry) e até um node_modules commitado. Instala numa pasta
@@ -58,7 +66,8 @@ fi
 # não do pull request: confiar nele aqui é seguro e necessário com o checkout v6+.
 args=(--lang "$lang" --trust-git-config)
 while IFS= read -r pattern; do
-  [ -n "$pattern" ] && args+=(--exclude "$pattern")
+  # com "=": um padrão que começa com "-" não vira outra opção
+  [ -n "$pattern" ] && args+=("--exclude=$pattern")
 done <<<"${RASTRO_EXCLUDE:-}"
 
 # uma análise só; o impacto e o relatório saem do mesmo grafo. Se o git falhar, o analyze
@@ -66,10 +75,13 @@ done <<<"${RASTRO_EXCLUDE:-}"
 "${rastro[@]}" analyze "$path" --since "$ref" -o "$out/graph.json" "${args[@]}"
 
 link_args=()
-if [ -n "${RASTRO_LINK_BASE:-}" ]; then
-  # a pasta analisada entra nos links, com cada parte codificada
-  sub="$(jq -rn --arg p "$path" '$p | sub("^(\\./)+"; "") | sub("/+$"; "") | if . == "." then "" else split("/") | map(@uri) | join("/") end')"
-  link_args=(--link "${RASTRO_LINK_BASE%/}${sub:+/$sub}")
+if [ -n "${RASTRO_REPO_URL:-}" ]; then
+  # links para o commit que foi analisado (no pull_request, o merge commit do checkout, não o
+  # head da PR: as linhas vêm dele) e para a pasta analisada relativa à raiz do repositório
+  # git (não ao workspace: o checkout pode estar em outra pasta), com cada parte codificada
+  commit="$(git -C "$path" rev-parse --verify HEAD)"
+  sub="$(jq -rn --arg p "$(git -C "$path" rev-parse --show-prefix)" '$p | sub("/+$"; "") | if . == "" then "" else split("/") | map(@uri) | join("/") end')"
+  link_args=(--link "${RASTRO_REPO_URL%/}/blob/${commit}${sub:+/$sub}")
 fi
 "${rastro[@]}" impact "$out/graph.json" --format markdown "${link_args[@]}" --lang "$lang" >"$out/impact.md"
 "${rastro[@]}" impact "$out/graph.json" --format json --lang "$lang" >"$out/impact.json"

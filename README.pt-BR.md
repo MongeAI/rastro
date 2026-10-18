@@ -326,7 +326,7 @@ Tudo o que vem do projeto analisado (nomes, caminhos) entra no Markdown como có
 
 ### GitHub Action
 
-`uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário só, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`.
+`uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário por `path` analisado, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`. Num monorepo, chame a action uma vez por pacote, com `path` e `artifact-name` diferentes: cada chamada tem o seu comentário, as suas saídas e o seu relatório. Os links do comentário apontam para o commit analisado e para o caminho do arquivo no repositório.
 
 | Entrada          | Padrão                 | Para que serve                                                      |
 | ---------------- | ---------------------- | ------------------------------------------------------------------- |
@@ -391,7 +391,7 @@ No modo `--watch`, reanalisar um projeto de 5 000 arquivos depois de salvar leva
 
 - 🔒 **Local-first.** Nenhum código sai da sua máquina. Sem conta, sem API paga, sem telemetria, sem CDN.
 - 📖 **Só leitura.** O Rastro **nunca executa** o projeto analisado, nunca roda os scripts do `package.json` e nunca instala as dependências dele. A suíte de testes confere isso.
-- 🌿 **Cuidado com o git.** `--changes` e `--since` só rodam comandos de leitura do git, com ferramentas externas de diff, conversão de texto, hooks, pagers e fsmonitor desligados. Se a configuração local ou do worktree do repositório definir comandos que o git executaria (filtros, por exemplo), o Rastro se recusa, a não ser que você passe `--trust-git-config`. Use só em repositórios em que você confia.
+- 🌿 **Cuidado com o git.** `--changes` e `--since` só rodam comandos de leitura do git, com ferramentas externas de diff, conversão de texto, hooks, pagers e fsmonitor desligados. O git nunca entra em submódulos, e a pasta analisada é sempre lida como caminho literal. Se a configuração local ou do worktree do repositório definir comandos que o git executaria (filtros, por exemplo), o Rastro se recusa, a não ser que você passe `--trust-git-config`. Use só em repositórios em que você confia.
 - 🛡️ **Servidor trancado.** Ele só escuta em `127.0.0.1`, exige um **token aleatório por execução**, só aceita `GET`/`HEAD`, bloqueia DNS rebinding e só entrega o código-fonte de arquivos que fazem parte do grafo. As atualizações ao vivo usam as mesmas proteções.
 - 🧭 **Nada é gravado no seu repositório.** Os resultados vão para a pasta de cache do usuário (ou para `--out`).
 

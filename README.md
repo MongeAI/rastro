@@ -326,7 +326,7 @@ Everything that comes from the analyzed project (names, paths) goes into Markdow
 
 ### GitHub Action
 
-`uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact.
+`uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment per analyzed `path`, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact. In a monorepo, call it once per package with a different `path` and `artifact-name`: each call gets its own comment, outputs and report. Links in the comment point to the analyzed commit and to the file's path in the repository.
 
 | Input            | Default                 | Purpose                                                             |
 | ---------------- | ----------------------- | ------------------------------------------------------------------- |
@@ -391,7 +391,7 @@ In `--watch` mode, re-analyzing a 5,000-file project after a save takes about 2.
 
 - 🔒 **Local-first.** No code leaves your machine. No account, no paid API, no telemetry, no CDN.
 - 📖 **Read-only.** Rastro **never executes** the analyzed project, never runs its `package.json` scripts and never installs its dependencies. The test suite checks this.
-- 🌿 **Careful with git.** `--changes` and `--since` only run read-only git commands, with external diff tools, text conversion, hooks, pagers and fsmonitor disabled. If the repository's local or worktree config defines commands git would run (filters, for example), Rastro refuses unless you pass `--trust-git-config`. Use it only on repositories you trust.
+- 🌿 **Careful with git.** `--changes` and `--since` only run read-only git commands, with external diff tools, text conversion, hooks, pagers and fsmonitor disabled. Git never enters submodules, and the analyzed folder is always taken as a literal path. If the repository's local or worktree config defines commands git would run (filters, for example), Rastro refuses unless you pass `--trust-git-config`. Use it only on repositories you trust.
 - 🛡️ **Locked-down server.** It only listens on `127.0.0.1`, requires a **random per-run token**, only accepts `GET`/`HEAD`, blocks DNS rebinding and only serves source code of files that are part of the graph. Live updates use the same protections.
 - 🧭 **Nothing written to your repository.** Results go to the user cache folder (or to `--out`).
 
