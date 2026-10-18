@@ -184,7 +184,7 @@ export type ResolvedTarget =
 
 /** Resolve especificadores de módulo usando o algoritmo do próprio compilador TypeScript. */
 export class ModuleResolver {
-  private readonly declaredByDir = new Map<string, Set<string>>();
+  private readonly declaredByDir = new Map<string, DeclaredPackage>();
   private readonly base: { options: ts.CompilerOptions; cache: ts.ModuleResolutionCache };
   private readonly scopes: Array<ConfigScope & { cache: ts.ModuleResolutionCache }>;
 
@@ -274,23 +274,48 @@ export class ModuleResolver {
 
   /** O pacote está declarado no package.json mais próximo do arquivo (ou em algum acima, até a raiz)? */
   private isDeclared(name: string, fromAbsolute: string): boolean {
+    return (
+      this.findPackageDir(fromAbsolute, (pkg) => pkg.deps.has(name) || pkg.name === name) !==
+      undefined
+    );
+  }
+
+  /**
+   * Pasta (absoluta, com `/`) do package.json mais próximo do arquivo, até a raiz, que declara
+   * `name` como dependência (o nome do próprio pacote não conta). Só lê os JSON, nada é executado.
+   */
+  packageDirDeclaring(name: string, fromAbsolute: string): string | undefined {
+    return this.findPackageDir(fromAbsolute, (pkg) => pkg.deps.has(name));
+  }
+
+  private findPackageDir(
+    fromAbsolute: string,
+    matches: (pkg: DeclaredPackage) => boolean,
+  ): string | undefined {
     for (let dir = path.dirname(fromAbsolute); ; dir = path.dirname(dir)) {
       const posix = toPosix(dir);
-      if (posix !== this.root && !posix.startsWith(`${this.root}/`)) return false;
-      let deps = this.declaredByDir.get(posix);
-      if (!deps) this.declaredByDir.set(posix, (deps = readDeclaredDependencies(dir)));
-      if (deps.has(name)) return true;
-      if (posix === this.root || path.dirname(dir) === dir) return false;
+      if (posix !== this.root && !posix.startsWith(`${this.root}/`)) return undefined;
+      let pkg = this.declaredByDir.get(posix);
+      if (!pkg) this.declaredByDir.set(posix, (pkg = readDeclaredDependencies(dir)));
+      if (matches(pkg)) return posix;
+      if (posix === this.root || path.dirname(dir) === dir) return undefined;
     }
   }
 }
 
-/** Dependências declaradas no package.json da raiz (apenas leitura do JSON). */
-function readDeclaredDependencies(root: string): Set<string> {
-  const names = new Set<string>();
+interface DeclaredPackage {
+  /** Dependências declaradas (dependencies, devDependencies, peer e optional). */
+  deps: Set<string>;
+  /** Nome do próprio pacote. */
+  name?: string;
+}
+
+/** Dependências declaradas no package.json de uma pasta (apenas leitura do JSON). */
+function readDeclaredDependencies(root: string): DeclaredPackage {
+  const deps = new Set<string>();
   const file = path.join(root, 'package.json');
   try {
-    if (fs.lstatSync(file).isSymbolicLink()) return names;
+    if (fs.lstatSync(file).isSymbolicLink()) return { deps };
     const pkg = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
     for (const field of [
       'dependencies',
@@ -298,12 +323,13 @@ function readDeclaredDependencies(root: string): Set<string> {
       'peerDependencies',
       'optionalDependencies',
     ]) {
-      const deps = pkg[field];
-      if (deps && typeof deps === 'object') for (const name of Object.keys(deps)) names.add(name);
+      const declared = pkg[field];
+      if (declared && typeof declared === 'object')
+        for (const name of Object.keys(declared)) deps.add(name);
     }
-    if (typeof pkg.name === 'string') names.add(pkg.name);
+    return typeof pkg.name === 'string' ? { deps, name: pkg.name } : { deps };
   } catch {
     // sem package.json ou JSON inválido
+    return { deps };
   }
-  return names;
 }

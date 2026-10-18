@@ -51,6 +51,11 @@ export class GraphBuilder {
     return this.nodes.get(id);
   }
 
+  /** Relações que saem de um nó (na ordem em que foram adicionadas). */
+  edgesFrom(source: string): GraphEdge[] {
+    return [...this.edges.values()].filter((e) => e.source === source);
+  }
+
   /** Adiciona um nó. Se já existir, mescla os metadados e mantém o primeiro registro. */
   addNode(node: GraphNode): GraphNode {
     const existing = this.nodes.get(node.id);
