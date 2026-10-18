@@ -111,7 +111,18 @@ export function filterGraphByFolder(graph: RastroGraph, folder: string | undefin
     if (byId.get(edge.target)?.kind === 'package' && isInside(byId.get(edge.source), prefix))
       keep.add(edge.target);
   }
-  const nodes = graph.nodes.filter((n) => keep.has(n.id));
+  const nodes = graph.nodes
+    .filter((n) => keep.has(n.id))
+    .map((n) => {
+      // candidatos possíveis de fora da pasta somem junto com os nós deles
+      const candidates = n.meta?.candidates;
+      if (!candidates?.some((id) => !keep.has(id))) return n;
+      const inside = candidates.filter((id) => keep.has(id));
+      const meta = { ...n.meta };
+      if (inside.length) meta.candidates = inside;
+      else delete meta.candidates;
+      return { ...n, meta };
+    });
   // a moldura só participa da hierarquia: um depends_on dela viria de arquivos de fora
   const edges = graph.edges.filter(
     (e) =>

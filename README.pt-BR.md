@@ -235,7 +235,7 @@ O Rastro está na **v0.1**. Hoje:
 - Em JavaScript sem tipos, `obj.metodo()` só é ligado quando o TypeScript consegue inferir o tipo de `obj`.
 - Funções declaradas dentro de outras funções não viram nós próprios.
 - Rotas: **Express**, **Fastify**, **Hono**, **NestJS** e **Next.js**, só quando o framework é comprovado (importado do pacote do framework, ou `next` declarado no `package.json` para as rotas por arquivos) e o caminho é literal. Prefixos não literais, roteadores montados em mais de um lugar, `basePath` do Next.js e versionamento do NestJS deixam o caminho completo desconhecido em vez de adivinhado. Ainda não cobertos: roteadores ou apps passados como parâmetro de função (exceto plugins do Fastify), `fastify-plugin`/autoload, `RouterModule` do NestJS, `pageExtensions` e middleware do Next.js.
-- Monorepos usam o `tsconfig` da raiz (e seus `references`); `paths` só de subpacotes podem não ser resolvidos.
+- Chamadas por interface ou método abstrato continuam não resolvidas; as classes do projeto que declaram `implements` (ou estendem a classe abstrata) aparecem como candidatas _possíveis_, nunca como ligações comprovadas.
 - Testado em projetos de dezenas a algumas centenas de arquivos; num teste sintético, cerca de 1 000 arquivos foram analisados em ~3 s.
 
 Próximos passos no [roadmap](ROADMAP.md): análise incremental, diff entre versões e impacto de um _pull request_.

@@ -239,7 +239,7 @@ Rastro is at **v0.1**. Today:
 - In untyped JavaScript, `obj.method()` is only linked when TypeScript can infer the type of `obj`.
 - Functions declared inside other functions do not become nodes of their own.
 - Routes: **Express**, **Fastify**, **Hono**, **NestJS** and **Next.js**, only when the framework is proven (imported from the framework package, or `next` declared in `package.json` for file-based routes) and the path is a literal. Prefixes that are not literals, routers mounted in more than one place, Next.js `basePath` and NestJS versioning leave the full path unknown instead of guessed. Not covered yet: routers or apps passed as function parameters (except Fastify plugins), `fastify-plugin`/autoload, NestJS `RouterModule`, Next.js `pageExtensions` and middleware.
-- Monorepos use the root `tsconfig` (and its `references`); `paths` defined only in sub-packages may not be resolved.
+- Calls through an interface or abstract method stay unresolved; the project classes that declare `implements` (or extend the abstract class) are listed as _possible_ candidates, never as proven links.
 - Tested on projects from dozens to a few hundred files; in a synthetic test, about 1,000 files were analyzed in ~3 s. Showing every symbol of a very large project (thousands of nodes) can take a few seconds.
 - The interface and CLI messages are in Portuguese for now.
 

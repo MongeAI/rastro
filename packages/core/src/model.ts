@@ -120,6 +120,14 @@ export interface NodeMeta {
   mentions?: number;
   /** Para nós não resolvidos: o texto original da referência. */
   reference?: string;
+  /**
+   * Para chamadas não resolvidas por interface ou método abstrato: ids das implementações
+   * _possíveis_ no projeto (métodos de classes que declaram `implements` da interface, ou que
+   * estendem a classe abstrata). Nunca são relações resolvidas: o alvo real só existe em execução.
+   */
+  candidates?: string[];
+  /** Para classes: interfaces (ou classes) da cláusula `implements`, como escritas no código. */
+  implements?: string[];
 }
 
 export type UnresolvedReason =

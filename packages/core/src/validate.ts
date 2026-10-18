@@ -106,6 +106,19 @@ export function validateGraph(input: unknown, maxErrors = 50): ValidationResult 
     }
   }
 
+  // candidatos possíveis (chamadas por interface) também precisam apontar para nós existentes
+  for (const [i, node] of graph.nodes.entries()) {
+    if (!isObject(node) || !isObject(node.meta)) continue;
+    for (const key of ['candidates', 'implements'] as const) {
+      const list = node.meta[key];
+      if (list !== undefined && (!Array.isArray(list) || !list.every((c) => typeof c === 'string')))
+        fail(`nodes[${i}].meta.${key} deve ser uma lista de textos.`);
+    }
+    for (const candidate of Array.isArray(node.meta.candidates) ? node.meta.candidates : [])
+      if (typeof candidate === 'string' && !ids.has(candidate))
+        fail(`nodes[${i}].meta.candidates aponta para nó inexistente: ${candidate}`);
+  }
+
   const parentOf = new Map<string, string>();
   for (const [i, node] of graph.nodes.entries()) {
     if (!isObject(node) || node.parent === undefined) continue;

@@ -614,7 +614,10 @@ describe('regressões da segunda revisão', () => {
     expect(
       g.edges.some((e) => e.target === 'fn:apps/web/src/util.ts#helper' && e.kind === 'calls'),
     ).toBe(false);
-    expect(g.diagnostics.some((d) => d.code === 'ambiguous-paths')).toBe(true);
+    // o verificador de tipos também resolve cada arquivo com o tsconfig dele: a chamada é ligada
+    expect(
+      edge(g, 'calls', 'fn:apps/api/src/main.ts#run', 'fn:apps/api/src/util.ts#helper')?.resolution,
+    ).toBe('resolved');
   });
 
   it('arquivo impossível de interpretar vira aviso e sai da análise', async () => {

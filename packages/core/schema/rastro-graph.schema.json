@@ -334,7 +334,22 @@
           "$ref": "#/$defs/range"
         },
         "meta": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "candidates": {
+              "description": "Implementações possíveis (nunca resolvidas) de uma chamada por interface ou método abstrato.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "implements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

@@ -109,6 +109,21 @@ describe('validateGraph — integridade extra', () => {
     (noStats as unknown as { stats: Record<string, unknown> }).stats.nodesByKind = undefined;
     expect(validateGraph(noStats).errors.join()).toContain('stats.nodesByKind');
   });
+
+  it('candidatos possíveis precisam apontar para nós existentes', () => {
+    const g = minimalGraph();
+    g.nodes.push({
+      id: 'unresolved:src/a.ts#call:repo.save',
+      kind: 'unresolved',
+      name: 'repo.save',
+      meta: { reason: 'indirect-call', candidates: [g.nodes[1]!.id] },
+    });
+    expect(validateGraph(g)).toEqual({ valid: true, errors: [] });
+    g.nodes[2]!.meta!.candidates!.push('method:src/b.ts#Sql.save');
+    expect(validateGraph(g).errors.join()).toContain('candidates aponta para nó inexistente');
+    (g.nodes[2]!.meta as { candidates: unknown }).candidates = 'x';
+    expect(validateGraph(g).errors.join()).toContain('meta.candidates deve ser uma lista');
+  });
 });
 
 describe('parseGraph', () => {

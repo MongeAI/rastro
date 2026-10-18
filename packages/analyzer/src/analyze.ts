@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { Node, Project, SyntaxKind, ts, type KindToNodeMappings, type SourceFile } from 'ts-morph';
 import {
+  compareStrings,
   nodeId,
   SCHEMA_VERSION,
   RASTRO_VERSION,
@@ -17,6 +18,7 @@ import {
 import { GraphBuilder } from '@rastro/graph';
 import { discoverFiles, toPosix, type DiscoverOptions, type DiscoveredFile } from './discover.js';
 import { loadCompilerOptions, ModuleResolver, packageNameOf } from './resolve.js';
+import { ImplementationIndex, MAX_CANDIDATES } from './implementations.js';
 import { RouteDetector } from './routes/index.js';
 
 export interface AnalyzeOptions extends DiscoverOptions {
@@ -68,10 +70,19 @@ export async function analyzeProject(
   progress(`${discovered.files.length} arquivos encontrados.`);
 
   const config = loadCompilerOptions(root);
+  const diagnostics: Diagnostic[] = [...discovered.diagnostics, ...config.diagnostics];
+  const resolver = new ModuleResolver(root, config.options, config.scopes, diagnostics);
   const project = new Project({
     compilerOptions: config.options,
     skipAddingFilesFromTsConfig: true,
     skipFileDependencyResolution: true,
+    // o verificador de tipos resolve cada import com o tsconfig do próprio arquivo (subpacotes)
+    resolutionHost: () => ({
+      resolveModuleNames: (names, containingFile, _reused, _redirected, _options, sourceFile) =>
+        names.map((name) =>
+          resolver.resolveForProgram(name, containingFile, sourceFile?.impliedNodeFormat),
+        ),
+    }),
   });
   // o parse acontece aqui: um arquivo extremo (aninhamento profundo, sem permissão de leitura)
   // vira um aviso e sai da análise, em vez de derrubar tudo
@@ -81,7 +92,7 @@ export async function analyzeProject(
       project.addSourceFileAtPath(file.absolute);
       readable.push(file);
     } catch (err) {
-      discovered.diagnostics.push({
+      diagnostics.push({
         level: 'warning',
         code: 'parse-failed',
         message: `Arquivo ignorado: não foi possível ler ou interpretar (${describeError(err)}).`,
@@ -105,12 +116,12 @@ export async function analyzeProject(
   const ctx: Ctx = {
     root,
     builder: new GraphBuilder(),
-    resolver: new ModuleResolver(root, config.options, config.scopes),
+    resolver,
     checker: program.getTypeChecker(),
     filesByAbs: new Map(discovered.files.map((f) => [f.absolute, f])),
     entities: new Map(),
     lines: new Map(),
-    diagnostics: [...discovered.diagnostics, ...config.diagnostics],
+    diagnostics,
     counters: { externalCallsSkipped: 0, unknownReceiverCalls: 0, computedCalls: 0, localCalls: 0 },
   };
 
@@ -183,7 +194,7 @@ export async function analyzeProject(
       name: options.name ?? projectName(root),
       root,
       languages,
-      ...(config.configFile ? { tsconfig: config.configFile } : {}),
+      ...tsconfigInfo(config.configFile, resolver.nestedConfigs()),
     },
     analyzer: {
       name: '@rastro/analyzer (ts-morph)',
@@ -221,6 +232,15 @@ export async function analyzeProject(
 }
 
 export type AnalyzerContext = Ctx;
+
+/** Configurações usadas: a da raiz (com referências) e as dos subpacotes. */
+function tsconfigInfo(rootConfig: string | undefined, nested: string[]): { tsconfig?: string } {
+  if (!nested.length) return rootConfig ? { tsconfig: rootConfig } : {};
+  const MAX_LISTED = 5;
+  const listed = [...(rootConfig ? [rootConfig] : []), ...nested.slice(0, MAX_LISTED)];
+  const more = nested.length > MAX_LISTED ? ` +${nested.length - MAX_LISTED}` : '';
+  return { tsconfig: `${listed.join(', ')}${more}` };
+}
 
 /**
  * Executa uma etapa da análise de um arquivo sem derrubar a análise inteira:
@@ -494,8 +514,15 @@ function extractEntities(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       fileId,
       [node.compilerNode, ...extra],
     );
-    if (Node.isClassDeclaration(node) || Node.isClassExpression(node))
+    if (Node.isClassDeclaration(node) || Node.isClassExpression(node)) {
+      // `implements` como escrito no código (interfaces não viram nós; ver candidatos possíveis)
+      const implemented = node.getImplements().map((t) => t.getExpression().getText());
+      if (implemented.length) {
+        const classNode = ctx.builder.getNode(classId)!;
+        classNode.meta = { ...classNode.meta, implements: [...new Set(implemented)] };
+      }
       extractMembers(ctx, rel, lang, name, classId, node);
+    }
     return classId;
   };
 
@@ -1006,7 +1033,7 @@ function exportStatementEvidence(
 }
 
 /** Encontra a entidade que corresponde exatamente a uma declaração. */
-function entityForDeclaration(ctx: Ctx, decl: ts.Node): string | undefined {
+export function entityForDeclaration(ctx: Ctx, decl: ts.Node): string | undefined {
   const direct = ctx.entities.get(decl);
   if (direct) return direct;
   // `exports.foo = ...`: a declaração pode ser o acesso à propriedade dentro da atribuição
@@ -1333,8 +1360,11 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   for (const call of calls) {
     const isNew = Node.isNewExpression(call);
     const raw = call.getExpression();
-    if (raw.getKind() === SyntaxKind.ImportKeyword || raw.getKind() === SyntaxKind.SuperKeyword)
+    if (raw.getKind() === SyntaxKind.ImportKeyword) continue;
+    if (raw.getKind() === SyntaxKind.SuperKeyword) {
+      if (Node.isCallExpression(call)) extractSuperCall(ctx, file, call, fileId);
       continue;
+    }
     if (Node.isIdentifier(raw) && raw.getText() === 'require') continue;
     const callee = unwrap(raw)!;
 
@@ -1421,6 +1451,12 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       continue;
     }
     const target = addUnresolvedNode(ctx, file.relative, 'call', reference, reason, call);
+    if (reason === 'indirect-call')
+      addCandidates(
+        ctx,
+        target,
+        implementationsOf(ctx).candidatesFor(nameNode.compilerNode, symbol),
+      );
     ctx.builder.addEdge({
       kind: 'calls',
       source: sourceId,
@@ -1429,6 +1465,87 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       discovery: 'static-typecheck',
       evidence,
       meta,
+    });
+  }
+}
+
+const implementationIndexes = new WeakMap<Ctx, ImplementationIndex>();
+
+function implementationsOf(ctx: Ctx): ImplementationIndex {
+  let index = implementationIndexes.get(ctx);
+  if (!index) implementationIndexes.set(ctx, (index = new ImplementationIndex(ctx)));
+  return index;
+}
+
+/**
+ * Guarda no nó não resolvido as implementações _possíveis_ de uma chamada por interface ou
+ * método abstrato. Não cria relação: o alvo continua não comprovado.
+ */
+function addCandidates(ctx: Ctx, unresolvedId: string, candidates: string[]): void {
+  if (!candidates.length) return;
+  const node = ctx.builder.getNode(unresolvedId);
+  if (!node) return;
+  const merged = [...new Set([...(node.meta?.candidates ?? []), ...candidates])]
+    .sort(compareStrings)
+    .slice(0, MAX_CANDIDATES);
+  node.meta = { ...node.meta, candidates: merged };
+}
+
+/**
+ * `super(...)` no construtor de uma subclasse: liga ao construtor que o verificador de tipos
+ * escolhe (o da classe base ou, se ela não declara um, o herdado de mais acima). Sem nenhum
+ * construtor declarado, liga à própria classe base, como `new Base()`.
+ */
+function extractSuperCall(
+  ctx: Ctx,
+  file: DiscoveredFile,
+  call: Node & { compilerNode: ts.CallExpression },
+  fileId: string,
+): void {
+  let declaration: ts.Declaration | undefined;
+  try {
+    declaration = ctx.checker.getResolvedSignature(call.compilerNode)?.getDeclaration();
+  } catch {
+    declaration = undefined;
+  }
+  let targets: SymbolTarget[] = [];
+  if (declaration && !ts.isJSDocSignature(declaration)) {
+    const symbol = (declaration as unknown as { symbol?: ts.Symbol }).symbol;
+    targets = resolveSymbolTargets(ctx, symbol);
+  }
+  if (!targets.some((t) => t.kind === 'entity' || t.kind === 'external')) {
+    // construtor implícito: a classe base é o alvo (se estiver no projeto)
+    const cls = call.getFirstAncestor(
+      (n) => Node.isClassDeclaration(n) || Node.isClassExpression(n),
+    );
+    const base =
+      cls && (Node.isClassDeclaration(cls) || Node.isClassExpression(cls))
+        ? cls.getExtends()
+        : undefined;
+    if (!base) return;
+    const expr = unwrap(base.getExpression())!;
+    const nameNode = Node.isPropertyAccessExpression(expr) ? expr.getNameNode() : expr;
+    targets = resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(nameNode.compilerNode));
+  }
+  const entities = targets.filter(
+    (t): t is Extract<SymbolTarget, { kind: 'entity' }> => t.kind === 'entity',
+  );
+  if (!entities.length) {
+    // classe base externa (ex.: `extends Error`); base desconhecida já aparece em `extends`
+    if (targets.some((t) => t.kind === 'external')) ctx.counters.externalCallsSkipped++;
+    return;
+  }
+  const sourceId = enclosingEntity(ctx, call.compilerNode, fileId);
+  const evidence = evidenceAt(ctx, file.relative, call);
+  for (const target of entities) {
+    ctx.builder.addEdge({
+      kind: 'calls',
+      source: sourceId,
+      target: target.id,
+      resolution: 'resolved',
+      discovery: 'static-typecheck',
+      evidence,
+      meta: { callKind: 'call', ...(target.mapped ? { viaDeclaration: true } : {}) },
     });
   }
 }

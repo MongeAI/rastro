@@ -33,7 +33,7 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 ## Pipeline do analisador
 
 1. **Descoberta** (`discover.ts`): percorre a pasta sem seguir links simbólicos; aplica exclusões padrão (`node_modules`, `dist`, `build`, `.git`, `.next`, `coverage`...), o `.gitignore` da raiz e padrões `--exclude`; ignora `.d.ts`, `*.min.js` e arquivos acima de 1 MB.
-2. **Configuração** (`resolve.ts`): lê `tsconfig.json`/`jsconfig.json` apenas para opções de resolução. Sem configuração, usa `moduleResolution: Bundler` (aceita imports sem extensão, `index`, `.js`→`.ts`).
+2. **Configuração** (`resolve.ts`): lê `tsconfig.json`/`jsconfig.json` apenas para opções de resolução. Sem configuração, usa `moduleResolution: Bundler` (aceita imports sem extensão, `index`, `.js`→`.ts`). Cada arquivo resolve seus imports com o tsconfig referenciado pela raiz que o inclui ou, senão, com o `tsconfig.json`/`jsconfig.json` mais próximo (subindo as pastas até a raiz, seguindo `extends`; nunca dentro de `node_modules`). A busca é feita uma vez por pasta, com um cache de resolução por configuração. O mesmo `ModuleResolver` é usado pelo programa do TypeScript (`resolutionHost` do ts-morph), então os `paths` de cada subpacote valem também para o verificador de tipos que liga as chamadas.
 3. **Passo 1, entidades**: arquivos (agrupados por pasta), funções (declarações, `const f = () => {}`, funções embrulhadas como `memo(...)`), classes e membros, exports CommonJS e rotas HTTP (`routes/`: uma regra por framework, ver abaixo).
 4. **Passo 2, relações**: imports (estáticos, reexportações, `require`, `import()`), exports (pelo verificador de tipos, incluindo `module.exports`), chamadas, uso de JSX e herança.
 5. **Fechamento** (`GraphBuilder.finalize`): deriva `depends_on` entre pastas, marca ciclos de importação, calcula estatísticas e ordena tudo.
@@ -51,12 +51,18 @@ Para `alvo()` ou `obj.alvo()`, o Rastro pede ao verificador de tipos o **símbol
 | A declaração é...                                         | Resultado                                           |
 | --------------------------------------------------------- | --------------------------------------------------- |
 | uma função/classe/método registrado no grafo              | relação `calls` **resolvida** (`static-typecheck`)  |
+| um método herdado (`this.x()`, `obj.x()`, `super.x()`)    | resolvida, para o método da classe que o declara    |
 | um `.d.ts` de pacote do workspace com fonte em `src/`     | relação resolvida com `meta.viaDeclaration`         |
 | algo em `node_modules` ou nas libs do TypeScript          | não entra no grafo; conta em `externalCallsSkipped` |
 | função declarada dentro de outra função                   | não entra no grafo; conta em `localCalls`           |
 | valor produzido por uma chamada externa (ex.: `useState`) | tratado como externo                                |
 | parâmetro, propriedade ou interface                       | **não resolvida**, motivo `indirect-call`           |
+| membro de interface ou método abstrato                    | não resolvida, com `meta.candidates` (_possíveis_)  |
 | inexistente                                               | **não resolvida**, motivo `symbol-not-found`        |
+
+`super(...)` usa a assinatura escolhida pelo verificador de tipos: o construtor da base (ou o herdado de mais acima) ou, sem nenhum construtor declarado, a própria classe base.
+
+Os candidatos de uma chamada por interface vêm de `implementations.ts`: um índice (montado uma vez, a partir das classes do grafo) de tudo o que cada classe declara implementar ou estender, direta ou indiretamente. Para o tipo do receptor, cada classe que o implementa contribui com o membro de mesmo nome (próprio ou herdado), se ele for uma entidade do grafo. Os candidatos ficam no nó não resolvido e nunca viram relações (ver [formato dos dados](formato-dos-dados.md#candidatos-possíveis-chamadas-por-interface)).
 
 `obj.metodo()` sem tipo conhecido e `obj[nome]()` não viram nós: entram em `unknownReceiverCalls` e `computedCalls`, para não poluir o mapa com suposições.
 
