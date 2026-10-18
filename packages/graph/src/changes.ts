@@ -62,9 +62,38 @@ export interface ChangeImpact {
 }
 
 const SYMBOLS = new Set<NodeKind>(['function', 'class', 'method', 'route']);
-const TEST_FILE = /(^|\/)(__tests__|tests?|spec|e2e)\/|\.(test|spec|e2e)\.[cm]?[jt]sx?$/i;
+/** Nome de arquivo de teste: `a.test.ts`, `a.spec.tsx`, `a.e2e.ts`, `a_test.js`, `a-spec.js`. */
+const TEST_NAME = /[._-](test|spec|e2e)\.[cm]?[jt]sx?$/i;
+/** Pastas de testes. */
+const TEST_DIR = /^(__tests__|tests?|spec|e2e)$/i;
+/** Pastas de apoio dentro das de testes: dados, simulações e ajudantes, não testes. */
+const HELPER_DIR =
+  /^(helpers?|fixtures?|__fixtures__|utils?|support|mocks?|__mocks__|stubs?|factories|data|setup)$/i;
+/** Arquivos de apoio comuns direto nas pastas de testes. */
+const HELPER_NAME =
+  /^(helpers?|utils?|setup|teardown|global-?setup|global-?teardown|fixtures?|factory|factories|mocks?|support|test-?utils|types)\.[cm]?[jt]sx?$/i;
 
-export const isTestFile = (path: string) => TEST_FILE.test(path);
+/**
+ * Arquivo de teste: pelo nome (`.test.`/`.spec.`/`.e2e.`) sempre; dentro de uma pasta de
+ * testes (`test/`, `__tests__/`...), qualquer arquivo de código, porque há projetos cujos
+ * testes são arquivos comuns ali (mocha: `test/foo.js`, `test/unit/user.js`), exceto os de
+ * apoio: em subpastas como `helpers/`, `fixtures/`, `utils/`, `support/`, `mocks/` ou com
+ * nomes como `setup.ts` e `helpers.ts`, e declarações `.d.ts`. Esses não são testes para rodar.
+ */
+export function isTestFile(path: string): boolean {
+  if (/\.d\.[cm]?ts$/i.test(path)) return false;
+  if (TEST_NAME.test(path)) return true;
+  if (!/\.[cm]?[jt]sx?$/i.test(path)) return false;
+  const parts = path.split('/');
+  const base = parts.pop()!;
+  let inside = -1;
+  parts.forEach((part, i) => {
+    if (TEST_DIR.test(part)) inside = i;
+  });
+  if (inside < 0) return false;
+  if (parts.slice(inside + 1).some((part) => HELPER_DIR.test(part))) return false;
+  return !HELPER_NAME.test(base);
+}
 
 type Lines = [number, number];
 

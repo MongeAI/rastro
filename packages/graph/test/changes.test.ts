@@ -14,6 +14,7 @@ import {
   GraphBuilder,
   GraphIndex,
   IMPACT_EDGE_KINDS,
+  isTestFile,
   type ImpactEntry,
 } from '@rastro/graph';
 
@@ -371,5 +372,36 @@ describe('GraphIndex.impactOfAll', () => {
     expect(index.impactOfAll(['file:a.ts', 'fn:b.ts#b']).map((e) => [e.node.id, e.depth])).toEqual([
       ['fn:a.ts#f3', 1],
     ]);
+  });
+});
+
+describe('isTestFile', () => {
+  it('testes pelo nome ou pela pasta; ajudantes dentro das pastas de teste não', () => {
+    const tests = [
+      'src/a.test.ts',
+      'src/a.spec.tsx',
+      'e2e/login.e2e.ts',
+      'src/__tests__/a.ts',
+      // mocha: arquivos comuns direto em test/, ou em subpastas que não são de ajudantes
+      'test/foo.js',
+      'test/unit/user.js',
+      'packages/x/tests/api.ts',
+      'test/helpers/factory.test.ts',
+    ];
+    const helpers = [
+      'test/helpers/factory.ts',
+      'test/fixtures/data.ts',
+      'test/utils/render.tsx',
+      'tests/support/server.ts',
+      'src/__tests__/__fixtures__/x.ts',
+      'test/mocks/api.ts',
+      'src/__mocks__/fs.ts',
+      'test/setup.ts',
+      'test/helpers.ts',
+      'test/types.d.ts',
+      'src/testing.ts',
+    ];
+    for (const p of tests) expect(isTestFile(p), p).toBe(true);
+    for (const p of helpers) expect(isTestFile(p), p).toBe(false);
   });
 });
