@@ -156,6 +156,67 @@ describe('validateGraph — integridade extra', () => {
     }
   });
 
+  it('exige tool, generatedAt, analyzer, project.name e as contagens que o JSON Schema exige', () => {
+    // sem `tool`, o grafo passava e `rastro compare` quebrava ao ler `tool.version`
+    /** Campo quebrado (caminho no JSON) e o valor novo; `undefined` apaga o campo. */
+    const broken: Array<[string, unknown]> = [
+      ['tool', undefined],
+      ['tool.name', 'outro'],
+      ['tool.version', undefined],
+      ['generatedAt', 0],
+      ['analyzer', undefined],
+      ['analyzer.typescriptVersion', undefined],
+      ['analyzer.options', []],
+      ['analyzer.options.exclude', [1]],
+      ['analyzer.options.respectGitignore', 'sim'],
+      ['analyzer.options.maxFiles', 0],
+      ['project.name', undefined],
+      ['stats.localCalls', undefined],
+      ['stats.durationMs', -1],
+    ];
+    for (const [field, value] of broken) {
+      const g = minimalGraph();
+      const keys = field.split('.');
+      let target = g as unknown as Record<string, unknown>;
+      for (const key of keys.slice(0, -1)) target = target[key] as Record<string, unknown>;
+      if (value === undefined) delete target[keys.at(-1)!];
+      else target[keys.at(-1)!] = value;
+      const r = validateGraph(g);
+      expect(r.valid, field).toBe(false);
+      expect(r.errors.join('\n'), field).toContain(field);
+    }
+    // a duração não precisa ser inteira
+    const g = minimalGraph();
+    g.stats.durationMs = 12.5;
+    expect(validateGraph(g)).toEqual({ valid: true, errors: [] });
+  });
+
+  it('grafos gravados pela 0.1.x continuam válidos', () => {
+    // o que a 0.1.0/0.1.1 gravava: todos os campos obrigatórios, sem `changes` nem `params`
+    const old = {
+      ...minimalGraph(),
+      tool: { name: 'rastro', version: '0.1.1' },
+      analyzer: {
+        name: '@rastro/analyzer (ts-morph)',
+        version: '0.1.1',
+        typescriptVersion: '5.9.3',
+        options: { exclude: [], respectGitignore: true, maxFiles: 10_000, maxFileSizeBytes: 1e6 },
+      },
+      stats: { ...minimalGraph().stats, durationMs: 1234 },
+    };
+    expect(validateGraph(JSON.parse(JSON.stringify(old)))).toEqual({ valid: true, errors: [] });
+  });
+
+  it('com maxErrors 0 o grafo inválido continua inválido (só sem as mensagens)', () => {
+    const g = minimalGraph();
+    (g.nodes[1] as { kind: string }).kind = 'banana';
+    expect(validateGraph(g, 0)).toEqual({ valid: false, errors: [] });
+    expect(graphIssues(g, 0)).toEqual({ valid: false, issues: [] });
+    expect(validateGraph(42, 0).valid).toBe(false);
+    expect(validateGraph({}, { maxErrors: 0 }).valid).toBe(false);
+    expect(validateGraph(minimalGraph(), 0)).toEqual({ valid: true, errors: [] });
+  });
+
   it('diagnósticos: nível conhecido e params só com textos e números', () => {
     const g = minimalGraph();
     g.diagnostics.push({

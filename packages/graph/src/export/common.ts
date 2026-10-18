@@ -11,7 +11,13 @@ import {
   type RastroGraph,
 } from '@rastro/core';
 import { GraphIndex } from '../query.js';
-import { computeView, groupableModules, type ViewEdge, type ViewNode } from '../view.js';
+import {
+  computeView,
+  groupableModules,
+  initialOpenModules,
+  type ViewEdge,
+  type ViewNode,
+} from '../view.js';
 
 /**
  * Base comum dos exportadores (Mermaid, DOT, GraphML). Tudo aqui é puro e sem APIs do Node,
@@ -193,8 +199,7 @@ export function buildExportView(graph: RastroGraph, options: ExportOptions = {})
     edgeKinds: new Set(edgeKinds),
     expandedFiles: new Set(),
     expandAll: level === 'symbols',
-    // no nível "pastas", todas as pastas com arquivos ficam recolhidas (como na interface)
-    collapsedModules: new Set(level === 'modules' ? groupableModules(index) : []),
+    collapsedModules: level === 'modules' ? collapsedAtModulesLevel(index) : new Set(),
   });
   return {
     graph: filtered,
@@ -206,6 +211,17 @@ export function buildExportView(graph: RastroGraph, options: ExportOptions = {})
     nodes: view.nodes,
     edges: view.edges,
   };
+}
+
+/**
+ * Pastas recolhidas no nível "pastas", como a interface abre o mapa: todas as que têm
+ * arquivos, menos as abertas de início (ex.: o `src/` de um projeto todo dentro dele, que
+ * recolhido viraria um nó só, sem nenhuma relação).
+ */
+function collapsedAtModulesLevel(index: GraphIndex): Set<string> {
+  const groupable = groupableModules(index);
+  const open = new Set(initialOpenModules(index, groupable));
+  return new Set(groupable.filter((id) => !open.has(id)));
 }
 
 /** Rótulo exibido de um nó: pastas recolhidas mostram quantos arquivos têm. */

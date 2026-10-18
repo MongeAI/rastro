@@ -28,15 +28,60 @@ const TEST_FILE = /(^|\/)(__tests__|tests?|spec|e2e)\/|\.(test|spec|e2e)\.[cm]?[
 
 export const isTestFile = (path: string) => TEST_FILE.test(path);
 
+type Lines = [number, number];
+
+// `deletionsAt` é a linha logo depois do trecho removido: removido logo acima da entidade
+// aponta para a primeira linha dela, mas não a altera (o código no topo do arquivo é que mudou).
+// O trecho removido ficava entre as linhas `line - 1` e `line`: dentro da entidade só se as
+// duas são dela.
+const removedInside = (node: GraphNode, line: number) =>
+  !!node.location && line > node.location.startLine && line <= node.location.endLine;
+
 function touches(node: GraphNode, file: ChangedFile): boolean {
   const loc = node.location;
   if (!loc) return false;
-  // `deletionsAt` é a linha logo depois do trecho removido: removido logo acima da entidade
-  // aponta para a primeira linha dela, mas não a altera (o código no topo do arquivo é que mudou)
-  const removedInside = (line: number) => line > loc.startLine && line <= loc.endLine;
   return (
     file.ranges.some(([a, b]) => a <= loc.endLine && b >= loc.startLine) ||
-    (file.deletionsAt ?? []).some(removedInside)
+    (file.deletionsAt ?? []).some((line) => removedInside(node, line))
+  );
+}
+
+/** Junta intervalos de linhas que se sobrepõem ou se encostam (`[1,5]` e `[6,9]` → `[1,9]`). */
+function mergeLines(list: Lines[]): Lines[] {
+  const merged: Lines[] = [];
+  for (const [a, b] of [...list].sort((x, y) => x[0] - y[0])) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1] + 1) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged;
+}
+
+/** Todas as linhas de `[a, b]` estão em algum dos intervalos (já juntados por `mergeLines`)? */
+const covered = (merged: Lines[], a: number, b: number) =>
+  merged.some(([start, end]) => a >= start && b <= end);
+
+const linesOf = (nodes: GraphNode[]): Lines[] =>
+  mergeLines(
+    nodes.flatMap((n) => (n.location ? [[n.location.startLine, n.location.endLine]] : [])),
+  );
+
+/**
+ * A entidade mudou por si, além do que mudou nas entidades de dentro dela? Um método
+ * alterado não muda a classe; um campo ou o construtor alterado junto, sim.
+ */
+function changedOutside(node: GraphNode, inner: GraphNode[], file: ChangedFile): boolean {
+  const loc = node.location!;
+  const innerLines = linesOf(inner);
+  return (
+    file.ranges.some(([a, b]) => {
+      const from = Math.max(a, loc.startLine);
+      const to = Math.min(b, loc.endLine);
+      return from <= to && !covered(innerLines, from, to);
+    }) ||
+    (file.deletionsAt ?? []).some(
+      (line) => removedInside(node, line) && !inner.some((d) => removedInside(d, line)),
+    )
   );
 }
 
@@ -54,46 +99,31 @@ export function computeChangeImpact(index: GraphIndex, changes: ChangeSet): Chan
     }
     changedFiles.push(fileNode);
     const symbols = index.descendants(fileNode.id).filter((n) => SYMBOLS.has(n.kind));
-    const hit = symbols.filter((n) => touches(n, file));
-    // fica só a entidade mais específica: se um método mudou, a classe não entra por isso
+    const hit = new Set(symbols.filter((n) => touches(n, file)));
+    // fica a entidade mais específica: se só um método mudou, a classe não entra por isso
+    // (mas entra se também mudou fora dos métodos alterados, ex.: um campo)
     for (const node of hit) {
-      const moreSpecific = index.descendants(node.id).some((d) => hit.includes(d));
-      if (!moreSpecific) changed.add(node.id);
+      const inner = index.descendants(node.id).filter((d) => hit.has(d));
+      if (!inner.length || changedOutside(node, inner, file)) changed.add(node.id);
     }
     // código no topo do arquivo (fora de qualquer entidade) também muda o arquivo: linhas
-    // alteradas ou trechos removidos (ex.: um `export const` apagado) fora das entidades
+    // alteradas ou trechos removidos (ex.: um `export const` apagado) fora das entidades.
+    // Linha a linha: um trecho que pega o fim de uma função e o começo da seguinte continua
+    // dentro de entidades
+    const symbolLines = linesOf(symbols);
     const outsideSymbols =
-      file.ranges.some(
-        ([a, b]) =>
-          !symbols.some((n) => n.location && a >= n.location.startLine && b <= n.location.endLine),
-      ) ||
-      (file.deletionsAt ?? []).some(
-        // o trecho removido ficava entre as linhas `line - 1` e `line`: dentro de uma entidade
-        // só se as duas são dela
-        (line) =>
-          !symbols.some(
-            (n) => n.location && line > n.location.startLine && line <= n.location.endLine,
-          ),
-      );
+      file.ranges.some(([a, b]) => !covered(symbolLines, a, b)) ||
+      (file.deletionsAt ?? []).some((line) => !symbols.some((n) => removedInside(n, line)));
     if (outsideSymbols || file.status === 'added') changed.add(fileNode.id);
   }
 
-  const impacted = new Map<string, ImpactEntry>();
-  for (const id of changed) {
-    for (const entry of index.impact(id)) {
-      if (changed.has(entry.node.id)) continue;
-      const previous = impacted.get(entry.node.id);
-      if (!previous || entry.depth < previous.depth) impacted.set(entry.node.id, entry);
-    }
-  }
+  // uma busca só a partir de tudo o que mudou (o mesmo que juntar o impacto de cada um)
+  const impactedList = index.impactOfAll(changed);
 
   const changedEntities = [...changed]
     .map((id) => index.node(id)!)
     .filter((n) => n && n.kind !== 'file')
     .sort((a, b) => compareStrings(a.id, b.id));
-  const impactedList = [...impacted.values()].sort(
-    (a, b) => a.depth - b.depth || compareStrings(a.node.id, b.node.id),
-  );
 
   const involved = [...changedEntities, ...changedFiles, ...impactedList.map((i) => i.node)];
   const routes = uniqueSorted(involved.filter((n) => n.kind === 'route'));

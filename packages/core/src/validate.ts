@@ -49,6 +49,18 @@ const VALIDATION_TEXTS = {
     pt: (p) => `${p.field} deve ser um inteiro não negativo.`,
     en: (p) => `${p.field} must be a non-negative integer.`,
   },
+  'not-non-negative-number': {
+    pt: (p) => `${p.field} deve ser um número não negativo.`,
+    en: (p) => `${p.field} must be a non-negative number.`,
+  },
+  'not-positive-int': {
+    pt: (p) => `${p.field} deve ser um inteiro positivo.`,
+    en: (p) => `${p.field} must be a positive integer.`,
+  },
+  'not-boolean': {
+    pt: (p) => `${p.field} deve ser verdadeiro ou falso.`,
+    en: (p) => `${p.field} must be true or false.`,
+  },
   'invalid-item': {
     pt: (p) => `${p.field} inválido.`,
     en: (p) => `${p.field} is invalid.`,
@@ -150,18 +162,52 @@ export function graphIssues(
   maxErrors = 50,
 ): { valid: boolean; issues: ValidationIssue[] } {
   const issues: ValidationIssue[] = [];
+  // separado da lista: com `maxErrors` 0 nada é guardado, mas o grafo continua inválido
+  let failed = false;
   const fail = (code: ValidationCode, params: Record<string, string | number> = {}) => {
+    failed = true;
     if (issues.length < maxErrors) issues.push({ code, params });
   };
 
-  if (!isObject(input)) return { valid: false, issues: [{ code: 'not-object-graph', params: {} }] };
+  if (!isObject(input)) {
+    fail('not-object-graph');
+    return { valid: false, issues };
+  }
   if (input.schemaVersion !== SCHEMA_VERSION)
     fail('schema-version', {
       expected: SCHEMA_VERSION,
       received: String(JSON.stringify(input.schemaVersion)),
     });
+  if (typeof input.generatedAt !== 'string') fail('required', { field: 'generatedAt' });
+  // `tool` e `analyzer` sempre foram gravados (desde a 0.1.0); sem eles, `compare` e a
+  // interface quebravam ao ler a versão
+  if (!isObject(input.tool)) fail('required', { field: 'tool' });
+  else {
+    if (input.tool.name !== 'rastro')
+      fail('invalid-value', { field: 'tool.name', value: String(JSON.stringify(input.tool.name)) });
+    if (typeof input.tool.version !== 'string') fail('required', { field: 'tool.version' });
+  }
+  if (!isObject(input.project) || typeof input.project.name !== 'string')
+    fail('required', { field: 'project.name' });
   if (!isObject(input.project) || typeof input.project.root !== 'string')
     fail('required', { field: 'project.root' });
+  if (!isObject(input.analyzer)) fail('required', { field: 'analyzer' });
+  else {
+    const analyzer = input.analyzer;
+    for (const key of ['name', 'version', 'typescriptVersion'])
+      if (typeof analyzer[key] !== 'string') fail('required', { field: `analyzer.${key}` });
+    if (!isObject(analyzer.options)) fail('required', { field: 'analyzer.options' });
+    else {
+      const options = analyzer.options;
+      if (!Array.isArray(options.exclude) || !options.exclude.every((e) => typeof e === 'string'))
+        fail('not-string-list', { field: 'analyzer.options.exclude' });
+      if (typeof options.respectGitignore !== 'boolean')
+        fail('not-boolean', { field: 'analyzer.options.respectGitignore' });
+      for (const key of ['maxFiles', 'maxFileSizeBytes'])
+        if (!isPositiveInt(options[key]))
+          fail('not-positive-int', { field: `analyzer.options.${key}` });
+    }
+  }
   if (!Array.isArray(input.nodes)) fail('not-list', { field: 'nodes' });
   if (!Array.isArray(input.edges)) fail('not-list', { field: 'edges' });
   if (!isObject(input.stats)) fail('required', { field: 'stats' });
@@ -172,9 +218,22 @@ export function graphIssues(
         fail('not-counts', { field: `stats.${key}` });
     if (!Array.isArray(stats.importCycles) || !stats.importCycles.every((c) => Array.isArray(c)))
       fail('not-list-of-lists', { field: 'stats.importCycles' });
-    for (const key of ['files', 'externalCallsSkipped', 'unknownReceiverCalls', 'computedCalls'])
+    for (const key of [
+      'files',
+      'externalCallsSkipped',
+      'unknownReceiverCalls',
+      'computedCalls',
+      'localCalls',
+    ])
       if (!Number.isInteger(stats[key]) || (stats[key] as number) < 0)
         fail('not-non-negative-int', { field: `stats.${key}` });
+    // a duração é número (não precisa ser inteiro), como no JSON Schema
+    if (
+      typeof stats.durationMs !== 'number' ||
+      !Number.isFinite(stats.durationMs) ||
+      stats.durationMs < 0
+    )
+      fail('not-non-negative-number', { field: 'stats.durationMs' });
   }
   if (!Array.isArray(input.diagnostics)) fail('not-list', { field: 'diagnostics' });
   else
@@ -222,7 +281,7 @@ export function graphIssues(
   }
   if (!isObject(input.project) || !Array.isArray(input.project.languages))
     fail('not-list', { field: 'project.languages' });
-  if (issues.length) return { valid: false, issues };
+  if (failed) return { valid: false, issues };
 
   const graph = input as unknown as RastroGraph;
   const ids = new Set<string>();
@@ -329,7 +388,7 @@ export function graphIssues(
           fail('invalid-evidence', { field: `${at}.evidence`, id: String(edge.id) });
   }
 
-  return { valid: issues.length === 0, issues };
+  return { valid: !failed, issues };
 }
 
 /**

@@ -57,4 +57,12 @@ describe('findPaths', () => {
   it('respeita o limite de alternativas', () => {
     expect(findPaths(index, 'fn:x.ts#a', 'fn:x.ts#e', { limit: 1 }).paths).toHaveLength(1);
   });
+
+  it('limite menor que 1 não devolve caminho nenhum', () => {
+    for (const limit of [0, -1])
+      expect(findPaths(index, 'fn:x.ts#a', 'fn:x.ts#e', { limit })).toEqual({
+        paths: [],
+        reversed: false,
+      });
+  });
 });

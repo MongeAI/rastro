@@ -133,7 +133,8 @@ export function findPaths(
   const kinds = options.kinds ?? PATH_EDGE_KINDS;
   const maxDepth = options.maxDepth ?? 12;
   const limit = options.limit ?? 3;
-  if (!index.node(from) || !index.node(to)) return { paths: [], reversed: false };
+  // nenhum caminho pedido: nem procura (antes devolvia o primeiro mesmo assim)
+  if (!(limit >= 1) || !index.node(from) || !index.node(to)) return { paths: [], reversed: false };
   const forward = kShortest(index, from, to, kinds, maxDepth, limit);
   if (forward.length) return { paths: forward, reversed: false };
   const backward = kShortest(index, to, from, kinds, maxDepth, limit);

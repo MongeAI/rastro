@@ -178,6 +178,27 @@ describe('buildExportView', () => {
     expect(symbols.nodes.some((n) => n.id === 'method:src/b.ts#Svc.go')).toBe(true);
   });
 
+  it('nível "pastas" abre a pasta única do topo, como a interface (projeto todo em src/)', () => {
+    const b = new GraphBuilder();
+    const app = addFile(b, 'src/app.ts');
+    const db = addFile(b, 'src/db/pool.ts');
+    const ui = addFile(b, 'src/ui/view.ts');
+    link(b, 'imports', app, db);
+    link(b, 'imports', ui, db);
+    const view = buildExportView(wrap(b, 3), { level: 'modules' });
+    // antes: um nó só (`module:src`, recolhido) e nenhuma relação
+    expect(view.nodes.map((n) => [n.id, !!n.collapsed])).toEqual([
+      ['file:src/app.ts', false],
+      ['module:src', false],
+      ['module:src/db', true],
+      ['module:src/ui', true],
+    ]);
+    expect(view.edges.map((e) => `${e.source} -> ${e.target}`).sort()).toEqual([
+      'file:src/app.ts -> module:src/db',
+      'module:src/ui -> module:src/db',
+    ]);
+  });
+
   it('respeita os filtros de externos, não resolvidos e tipos de relação', () => {
     const g = sample();
     const ids = (o: Parameters<typeof buildExportView>[1]) =>
@@ -290,13 +311,14 @@ describe('toMermaid', () => {
 
   it('recusa diagramas grandes demais com uma dica de como reduzir', () => {
     const b = new GraphBuilder();
-    for (let i = 0; i < 30; i++) addFile(b, `src/f${i}.ts`);
+    // em duas pastas: uma pasta única no topo seria aberta no nível "pastas"
+    for (let i = 0; i < 30; i++) addFile(b, `src/${i % 2 ? 'a' : 'b'}/f${i}.ts`);
     const g = wrap(b, 30);
     expect(() => toMermaid(g, { maxNodes: 20 })).toThrow(ExportTooLargeError);
     try {
       toMermaid(g, { maxNodes: 20 });
     } catch (err) {
-      expect((err as ExportTooLargeError).message).toContain('31 nós');
+      expect((err as ExportTooLargeError).message).toContain('32 nós');
       expect((err as ExportTooLargeError).hint).toContain('--level modules');
     }
     expect(() => toMermaid(g, { level: 'modules', maxNodes: 20 })).not.toThrow();
@@ -323,7 +345,36 @@ describe('toDot', () => {
     );
     expect(out.trimEnd().endsWith('}')).toBe(true);
   });
+
+  it('ids diferentes nunca viram o mesmo nó (\\n, \\r e caracteres de controle)', () => {
+    const out = toDot(collisionSample());
+    // id entre aspas como o Graphviz lê: só `\"` é escape
+    const ids = [...out.matchAll(/^ {2}"((?:[^"\\]|\\.)*)" \[label=/gm)].map((m) => m[1]);
+    expect(ids.sort()).toEqual([
+      'file:a b.ts',
+      'file:a\\nb.ts',
+      'file:a\\rb.ts',
+      'file:c.ts',
+      'file:c\\x01.ts',
+    ]);
+    expect(out).toContain('"file:a\\nb.ts" -> "file:c.ts"');
+    expect(out).toContain('"file:a\\rb.ts" -> "file:c\\x01.ts"');
+    // ids comuns continuam iguais aos de antes
+    expect(out).toContain('"file:a b.ts" -> "file:c.ts"');
+  });
 });
+
+/** Arquivos cujos nomes só diferem em quebras de linha e caracteres de controle. */
+function collisionSample(): RastroGraph {
+  const b = new GraphBuilder();
+  const [nl, cr, space, ctrl, c] = ['a\nb.ts', 'a\rb.ts', 'a b.ts', 'c\u0001.ts', 'c.ts'].map((f) =>
+    addFile(b, f),
+  );
+  link(b, 'imports', nl!, c!);
+  link(b, 'imports', cr!, ctrl!);
+  link(b, 'imports', space!, c!);
+  return wrap(b, 5);
+}
 
 describe('toGraphML', () => {
   it('gera XML válido com chaves de tipo, resolução, contagem, arquivo e linha', () => {
@@ -350,6 +401,50 @@ describe('toGraphML', () => {
     expect(out.match(/<node /g)?.length).toBe(out.match(/<\/node>/g)?.length);
     expect(out.match(/<edge /g)?.length).toBe(out.match(/<\/edge>/g)?.length);
     expect(out).not.toMatch(/&(?!(amp|lt|gt|quot|apos);)/);
+  });
+
+  it('ids diferentes nunca viram o mesmo nó (\\n, \\r e caracteres de controle)', () => {
+    const out = toGraphML(collisionSample());
+    // valor do atributo como um leitor de XML entrega: quebras cruas viram espaço, depois
+    // as referências são decodificadas
+    const attr = (raw: string) =>
+      raw
+        .replace(/[\t\n\r]/g, ' ')
+        .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)))
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+    const nodes = [...out.matchAll(/<node id="([^"]*)">/g)].map((m) => attr(m[1]!));
+    // o XML não aceita U+0001 nem como referência: esse id perde o caractere e ganha sufixo
+    expect(nodes.sort()).toEqual([
+      'file:a\nb.ts',
+      'file:a\rb.ts',
+      'file:a b.ts',
+      'file:c.ts',
+      'file:c.ts~2',
+    ]);
+    const edges = [...out.matchAll(/<edge id="[^"]*" source="([^"]*)" target="([^"]*)">/g)].map(
+      (m) => `${attr(m[1]!)} -> ${attr(m[2]!)}`,
+    );
+    expect(edges.sort()).toEqual([
+      'file:a\nb.ts -> file:c.ts',
+      'file:a\rb.ts -> file:c.ts~2',
+      'file:a b.ts -> file:c.ts',
+    ]);
+
+    // o pai (`n_parent`) aponta para o id usado no GraphML
+    const b = new GraphBuilder();
+    addFile(b, 'd/x.ts');
+    addFile(b, 'd\u0001/y.ts');
+    const folders = toGraphML(wrap(b, 2));
+    expect(folders).toContain('<node id="module:d~2">');
+    expect(folders).toMatch(
+      /<node id="file:d\/y\.ts">\n(?: {6}<data[^\n]*\n)*? {6}<data key="n_parent">module:d~2</,
+    );
+    expect(folders).toMatch(
+      /<node id="file:d\/x\.ts">\n(?: {6}<data[^\n]*\n)*? {6}<data key="n_parent">module:d</,
+    );
   });
 
   it('escapa textos e remove caracteres proibidos no XML', () => {

@@ -146,33 +146,83 @@ export class GraphIndex {
    * Só usa relações resolvidas — referências não resolvidas não entram como fato.
    */
   impact(id: string, maxDepth = 6): ImpactEntry[] {
+    return this.impactOfAll([id], maxDepth);
+  }
+
+  /**
+   * Impacto de várias entidades de uma vez (ex.: tudo o que mudou num diff): o mesmo que
+   * juntar `impact(id)` de cada uma, com a menor distância de cada nó e sem as próprias
+   * entidades, mas numa busca só (antes, 3 mil entidades num grafo grande levavam segundos).
+   *
+   * Cada nó guarda de quais origens já foi alcançado. Um símbolo de dentro de um arquivo
+   * alterado (sem ter mudado ele mesmo) é ponto de partida daquele arquivo, mas ainda pode
+   * ser afetado por outra origem, como no cálculo separado; por isso cada nó aceita até `k`
+   * origens (as mais próximas), com `k` maior que o número de origens que partem de um mesmo
+   * símbolo desses. Sem nenhum (ex.: tudo o que está dentro também mudou), `k` é 1 e a busca
+   * é uma BFS comum. Em empates de distância, `via` pode ser outra relação igualmente curta.
+   */
+  impactOfAll(ids: Iterable<string>, maxDepth = 6): ImpactEntry[] {
+    const sources = [...new Set(ids)].filter((id) => this.nodes.has(id));
+    const isSource = new Set(sources);
+    /** Nó → origens (posições em `sources`) que já chegaram nele. */
+    const reached = new Map<string, number[]>();
+    // fronteira da busca em duas listas paralelas: nó e origem
+    let frontier: string[] = [];
+    let origins: number[] = [];
+    sources.forEach((id, origin) => {
+      for (const seed of this.impactSeeds(id)) {
+        if (!reached.has(seed)) reached.set(seed, []);
+        const from = reached.get(seed)!;
+        if (from.includes(origin)) continue;
+        from.push(origin);
+        frontier.push(seed);
+        origins.push(origin);
+      }
+    });
+    let k = 1;
+    for (const [id, from] of reached) if (!isSource.has(id)) k = Math.max(k, from.length + 1);
+
+    const kinds = new Set(IMPACT_EDGE_KINDS);
     const result = new Map<string, ImpactEntry>();
-    const start = this.nodes.get(id);
-    if (!start) return [];
+    for (let depth = 1; depth <= maxDepth && frontier.length; depth++) {
+      const next: string[] = [];
+      const nextOrigins: number[] = [];
+      for (let i = 0; i < frontier.length; i++) {
+        const origin = origins[i]!;
+        for (const edge of this.in.get(frontier[i]!) ?? []) {
+          if (edge.resolution !== 'resolved' || !kinds.has(edge.kind)) continue;
+          let from = reached.get(edge.source);
+          // já alcançado por esta origem, ou por `k` origens mais próximas (nenhuma
+          // origem a mais muda a menor distância de quem vem depois)
+          if (from && (from.length >= k || from.includes(origin))) continue;
+          const node = this.nodes.get(edge.source);
+          if (!node) continue;
+          if (!from) reached.set(node.id, (from = []));
+          from.push(origin);
+          next.push(node.id);
+          nextOrigins.push(origin);
+          // a primeira chegada com distância > 0 é a menor (a busca vai por níveis)
+          if (!isSource.has(node.id) && !result.has(node.id))
+            result.set(node.id, { node, depth, via: edge });
+        }
+      }
+      frontier = next;
+      origins = nextOrigins;
+    }
+    return [...result.values()].sort(
+      (a, b) => a.depth - b.depth || compareStrings(a.node.id, b.node.id),
+    );
+  }
+
+  /** Pontos de partida do impacto: o nó e, se for arquivo, classe ou pasta, o que tem dentro. */
+  private impactSeeds(id: string): string[] {
+    const start = this.nodes.get(id)!;
     const seeds = [id];
     if (start.kind === 'file' || start.kind === 'class' || start.kind === 'module') {
       for (const d of this.descendants(id))
         if (SYMBOL_KINDS.has(d.kind) || d.kind === 'file') seeds.push(d.id);
     }
-    const visited = new Set<string>(seeds);
-    let frontier = seeds;
-    for (let depth = 1; depth <= maxDepth && frontier.length; depth++) {
-      const next: string[] = [];
-      for (const current of frontier) {
-        for (const edge of this.incoming(current, IMPACT_EDGE_KINDS)) {
-          if (edge.resolution !== 'resolved' || visited.has(edge.source)) continue;
-          visited.add(edge.source);
-          const node = this.nodes.get(edge.source);
-          if (!node) continue;
-          result.set(node.id, { node, depth, via: edge });
-          next.push(node.id);
-        }
-      }
-      frontier = next;
-    }
-    return [...result.values()].sort(
-      (a, b) => a.depth - b.depth || compareStrings(a.node.id, b.node.id),
-    );
+    return seeds;
   }
 
   /** Busca por nome, nome qualificado ou caminho de arquivo (sem diferenciar maiúsculas). */

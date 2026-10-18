@@ -29,6 +29,27 @@ export function dotString(text: string): string {
   return `"${escaped}"`;
 }
 
+/**
+ * Id (de nó ou de cluster) no DOT, sem perda: como `dotString`, mas os caracteres de
+ * controle viram `\n`, `\r`, `\x01`... em vez de sumir ou virar a mesma quebra de linha,
+ * para ids diferentes (`a\nb.ts` e `a\rb.ts`) nunca virarem o mesmo nó. Nos ids, o Graphviz
+ * não interpreta essas sequências (só nos rótulos).
+ */
+export function dotId(id: string): string {
+  const escaped = id
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    // eslint-disable-next-line no-control-regex -- codifica caracteres de controle de propósito
+    .replace(/[\u0000-\u0008\u000a-\u001f\u007f]/g, (c) =>
+      c === '\n'
+        ? '\\n'
+        : c === '\r'
+          ? '\\r'
+          : `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`,
+    );
+  return `"${escaped}"`;
+}
+
 const NODE_ATTRS: Record<NodeKind, Record<string, string>> = {
   module: { shape: 'folder', style: 'filled', fillcolor: '#f4f4f5', color: '#71717a' },
   file: { shape: 'note', style: 'filled', fillcolor: '#ffffff', color: '#27272a' },
@@ -48,9 +69,12 @@ const EDGE_COLORS: Record<string, string> = {
   depends_on: '#db2777',
 };
 
+/** Atributos que são ids (de cluster): vão sem perda, como os próprios ids. */
+const ID_ATTRS = new Set(['ltail', 'lhead']);
+
 const attrs = (values: Record<string, string>) =>
   `[${Object.entries(values)
-    .map(([k, v]) => `${k}=${dotString(v)}`)
+    .map(([k, v]) => `${k}=${ID_ATTRS.has(k) ? dotId(v) : dotString(v)}`)
     .join(', ')}]`;
 
 /** Grafo DOT (Graphviz) da visão; pastas, arquivos e classes abertos viram `cluster`. */
@@ -83,7 +107,7 @@ export function toDot(graph: RastroGraph, options: DotOptions = {}): string {
     const label = nodeLabel(node, view.lang);
     const kids = children.get(node.id);
     if (kids?.length) {
-      lines.push(`${pad}subgraph ${dotString(`cluster_${node.id}`)} {`);
+      lines.push(`${pad}subgraph ${dotId(`cluster_${node.id}`)} {`);
       lines.push(
         `${pad}  graph ${attrs({
           label,
@@ -94,7 +118,7 @@ export function toDot(graph: RastroGraph, options: DotOptions = {}): string {
       );
       if (anchored.has(node.id))
         lines.push(
-          `${pad}  ${dotString(node.id)} ${attrs({ shape: 'point', style: 'invis', width: '0', height: '0', label: '' })};`,
+          `${pad}  ${dotId(node.id)} ${attrs({ shape: 'point', style: 'invis', width: '0', height: '0', label: '' })};`,
         );
       for (const child of kids) emit(child, depth + 1);
       lines.push(`${pad}}`);
@@ -102,7 +126,7 @@ export function toDot(graph: RastroGraph, options: DotOptions = {}): string {
     }
     const values: Record<string, string> = { label, tooltip: node.id, ...NODE_ATTRS[node.kind] };
     if (node.inCycle) Object.assign(values, { color: '#ea580c', penwidth: '2' });
-    lines.push(`${pad}${dotString(node.id)} ${attrs(values)};`);
+    lines.push(`${pad}${dotId(node.id)} ${attrs(values)};`);
   };
   for (const root of roots) emit(root, 1);
 
@@ -126,5 +150,5 @@ function edgeLine(edge: ViewEdge, label: string, isCluster: (id: string) => bool
   else if (edge.typeOnly || edge.kind === 'exports') values.style = 'dotted';
   if (isCluster(edge.source)) values.ltail = `cluster_${edge.source}`;
   if (isCluster(edge.target)) values.lhead = `cluster_${edge.target}`;
-  return `${dotString(edge.source)} -> ${dotString(edge.target)} ${attrs(values)};`;
+  return `${dotId(edge.source)} -> ${dotId(edge.target)} ${attrs(values)};`;
 }

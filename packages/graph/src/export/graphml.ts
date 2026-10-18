@@ -14,13 +14,45 @@ export type GraphMLOptions = ExportOptions;
  * que o XML não aceita (controles, surrogates soltos, U+FFFE/U+FFFF).
  */
 export function xmlEscape(text: string): string {
-  return text
-    .replace(
-      // eslint-disable-next-line no-control-regex -- remove caracteres de controle de propósito
-      /[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
-      '',
-    )
-    .replace(/[&<>"']/g, (c) => XML_ENTITIES[c]!);
+  return xmlStrip(text).replace(/[&<>"']/g, (c) => XML_ENTITIES[c]!);
+}
+
+/** Tira o que o XML 1.0 não aceita de jeito nenhum (nem como referência, ex.: `&#1;`). */
+const xmlStrip = (text: string) =>
+  text.replace(
+    // eslint-disable-next-line no-control-regex -- remove caracteres de controle de propósito
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    '',
+  );
+
+/**
+ * Id em XML sem perda: tab e quebras de linha viram referências (`&#10;`), senão o leitor
+ * de XML troca por espaço (nos atributos) ou junta `\r\n` (no conteúdo) e ids diferentes
+ * passam a ser o mesmo.
+ */
+const xmlId = (id: string) => xmlEscape(id).replace(/[\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * Ids usados no GraphML. Saem iguais aos do grafo, exceto os que têm caracteres que o XML
+ * não aceita: sem eles, poderiam coincidir com outro id (`c\u0001.ts` e `c.ts`); nesse caso
+ * ganham um sufixo (`~2`, `~3`...) até ficarem únicos no arquivo.
+ */
+function graphmlIds(ids: Iterable<string>): Map<string, string> {
+  const result = new Map<string, string>();
+  const lossy: string[] = [];
+  for (const id of ids) {
+    if (xmlStrip(id) === id) result.set(id, id);
+    else lossy.push(id);
+  }
+  const taken = new Set(result.values());
+  for (const id of lossy) {
+    const base = xmlStrip(id);
+    let candidate = base;
+    for (let n = 2; taken.has(candidate); n++) candidate = `${base}~${n}`;
+    taken.add(candidate);
+    result.set(id, candidate);
+  }
+  return result;
 }
 
 const XML_ENTITIES: Record<string, string> = {
@@ -58,6 +90,9 @@ const KEYS: Array<[string, 'graph' | 'node' | 'edge', string, 'string' | 'int' |
  */
 export function toGraphML(graph: RastroGraph, options: GraphMLOptions = {}): string {
   const view = buildExportView(graph, options);
+  const nodeIds = graphmlIds(view.nodes.map((n) => n.id));
+  const edgeIds = graphmlIds(view.edges.map((e) => e.id));
+  const nodeRef = (id: string) => xmlId(nodeIds.get(id) ?? id);
   const data = (key: string, value: string | number | boolean | undefined, pad: string) =>
     value === undefined ? '' : `${pad}<data key="${key}">${xmlEscape(String(value))}</data>\n`;
 
@@ -75,10 +110,12 @@ export function toGraphML(graph: RastroGraph, options: GraphMLOptions = {}): str
 
   for (const node of view.nodes) {
     const loc = nodeLocation(node, view.index);
-    out += `    <node id="${xmlEscape(node.id)}">\n`;
+    out += `    <node id="${nodeRef(node.id)}">\n`;
     out += data('n_label', nodeLabel(node, view.lang), '      ');
     out += data('n_kind', node.kind, '      ');
-    out += data('n_parent', node.parent, '      ');
+    // o pai é um id de nó: vai com o mesmo id do GraphML (e sem perder quebras de linha)
+    if (node.parent !== undefined)
+      out += `      <data key="n_parent">${nodeRef(node.parent)}</data>\n`;
     out += data('n_file', loc?.file, '      ');
     out += data('n_line', loc?.line, '      ');
     if (node.inCycle) out += data('n_in_cycle', true, '      ');
@@ -88,8 +125,8 @@ export function toGraphML(graph: RastroGraph, options: GraphMLOptions = {}): str
   for (const edge of view.edges) {
     const ev = firstEvidence(edge, view.index);
     out +=
-      `    <edge id="${xmlEscape(edge.id)}" source="${xmlEscape(edge.source)}" ` +
-      `target="${xmlEscape(edge.target)}">\n`;
+      `    <edge id="${xmlId(edgeIds.get(edge.id)!)}" source="${nodeRef(edge.source)}" ` +
+      `target="${nodeRef(edge.target)}">\n`;
     out += data('e_kind', edge.kind, '      ');
     out += data('e_resolution', edge.resolution, '      ');
     out += data('e_count', edge.count, '      ');
