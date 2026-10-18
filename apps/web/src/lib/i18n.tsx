@@ -113,8 +113,8 @@ const pt = {
     leaveFocus: 'Sair do foco',
     clearPinned: 'Limpar entidades expandidas',
     keywords: {
-      level: 'detalhe zoom pastas arquivos símbolos level',
-      layout: 'layout hierárquico orgânico',
+      level: 'detalhe zoom level',
+      layout: 'layout',
       theme: 'cor escuro claro dark light theme',
       lang: 'idioma language english inglês',
       export: 'baixar download salvar',
@@ -477,8 +477,8 @@ const en: Messages = {
     leaveFocus: 'Leave focus',
     clearPinned: 'Clear expanded entities',
     keywords: {
-      level: 'detail zoom folders files symbols nível',
-      layout: 'organização hierarchical organic',
+      level: 'detail zoom nível',
+      layout: 'organização',
       theme: 'color dark light tema',
       lang: 'idioma language português portuguese',
       export: 'download save baixar',

@@ -64,7 +64,7 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 10. Qualidade de lançamento
 
-- ⬜ Testes de interface ponta a ponta no CI (Chrome headless).
+- ✅ Testes de interface ponta a ponta no CI (Chrome headless, `npm run test:e2e`): 10 cenários com a CLI real — servidor com token, busca, breadcrumb, paleta, teclado, caminho, EN/PT, celular, `--changes`, `--watch` e relatório offline sem requisições externas.
 - ⬜ Benchmarks (tempo e memória) em projetos de 100, 1 000 e 5 000 arquivos, com limites no CI.
 - ⬜ Revisão de código independente (analisador, interface e segurança) antes do lançamento.
 - ⬜ Novas capturas, GIF e README da 0.2 em EN/PT.

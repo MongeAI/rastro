@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
 
 permissions:
@@ -22,4 +22,8 @@ jobs:
       - run: npm run format:check
       - run: npm run build
       - run: npm test
+      # interface de ponta a ponta no Chrome que já vem no ubuntu-latest
+      - run: npm run test:e2e
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
       - run: npm pack --dry-run -w apps/cli
