@@ -1183,10 +1183,17 @@ function collectImports(sf: SourceFile): { found: ImportFound[]; dynamic: Node[]
     const specifier = decl.getModuleSpecifierValue();
     if (!specifier) continue;
     const names = decl.isNamespaceExport() ? ['*'] : decl.getNamedExports().map((n) => n.getName());
+    // `export * as ns from`: o namespace inteiro sai com um nome só (não é um barril)
+    const namespaceAs = decl.getNamespaceExport()?.getName();
     found.push({
       specifier,
       node: decl,
-      meta: { importKind: 're-export', names, ...(decl.isTypeOnly() ? { typeOnly: true } : {}) },
+      meta: {
+        importKind: 're-export',
+        names,
+        ...(namespaceAs ? { exportedAs: namespaceAs } : {}),
+        ...(decl.isTypeOnly() ? { typeOnly: true } : {}),
+      },
     });
   }
   for (const decl of descendantsOfKind(sf, SyntaxKind.ImportEqualsDeclaration)) {

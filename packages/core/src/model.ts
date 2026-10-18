@@ -198,7 +198,10 @@ export interface EdgeMeta {
   callKind?: 'call' | 'new' | 'jsx' | 'route-handler';
   /** Para exports que reexportam entidades de outro arquivo. */
   reexport?: boolean;
-  /** Nome sob o qual a entidade é exportada. */
+  /**
+   * Nome sob o qual a entidade é exportada. Em imports `export * as ns from`, o nome do
+   * namespace reexportado.
+   */
   exportedAs?: string;
   /**
    * A relação foi ligada mapeando um `.d.ts` compilado de um pacote do workspace

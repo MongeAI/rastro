@@ -452,6 +452,27 @@ describe('possivelmente quebrado pela mudança', () => {
     setLang('en');
   });
 
+  it('nome que some de um arquivo reexportado por barris (export *, em cadeia)', async () => {
+    setLang('en');
+    const str = 'export function slug(s: string) {\n  return s;\n}\nexport const keep = 1;\n';
+    const root = gitProject(
+      {
+        'src/utils/str.ts': str,
+        'src/utils/index.ts': "export * from './str';\n",
+        'src/all.ts': "export * from './utils';\n",
+        'src/ns.ts': "export * as utils from './utils/str';\n",
+        'src/page.ts':
+          "import { slug } from './utils';\nimport { slug as s2 } from './all';\nimport { utils } from './ns';\nexport const y = slug('a') + s2('b') + utils.keep;\n",
+      },
+      ({ write }) => write('src/utils/str.ts', str.replace('slug', 'slugify')),
+    );
+    expect(await brokenOf(root)).toEqual([
+      ['import', 'page.ts', 'slug', 'src/utils/str.ts', 'not-exported', 'src/page.ts:1'],
+      ['import', 'page.ts', 'slug', 'src/utils/str.ts', 'not-exported', 'src/page.ts:2'],
+      ['call', 'page.ts', 'slug', 'src/utils/str.ts', 'not-exported', 'src/page.ts:4'],
+    ]);
+  });
+
   it('nada quebrado: nenhuma seção nova', async () => {
     setLang('en');
     const report = buildImpactReport(await graphWithChanges(changedProject()));

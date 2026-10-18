@@ -313,8 +313,31 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
     }
   }
 
-  // nomes que os arquivos alterados não exportam mais
-  for (const file of changed) {
+  // barris: arquivos que reexportam tudo (`export *`, não `export * as ns`) de um arquivo
+  // alterado, em cadeia. Quem importa um nome pelo barril também perde o nome que sumiu
+  const barrelOf = new Map<string, string>();
+  const queue = [...changed];
+  while (queue.length) {
+    const file = queue.pop()!;
+    for (const edge of index.incoming(nodeId.file(file), ['imports'])) {
+      if (
+        edge.resolution !== 'resolved' ||
+        edge.meta?.importKind !== 're-export' ||
+        edge.meta.exportedAs !== undefined ||
+        !edge.meta.names?.includes('*')
+      )
+        continue;
+      const barrel = index.node(edge.source);
+      const path = barrel && (barrel.qualifiedName ?? barrel.name);
+      if (!path || changed.has(path) || barrelOf.has(path)) continue;
+      barrelOf.set(path, barrelOf.get(file) ?? file);
+      queue.push(path);
+    }
+  }
+
+  // nomes que os arquivos alterados (ou os barris deles) não exportam mais
+  for (const file of [...changed, ...barrelOf.keys()]) {
+    const origin = barrelOf.get(file) ?? file;
     const fileNode = index.node(nodeId.file(file));
     if (!fileNode || fileNode.meta?.analyzed === false || !CODE_EXT.test(file)) continue;
     const exported = new Set(fileNode.meta?.exportNames ?? []);
@@ -337,12 +360,12 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
           from: importer,
           kind: 'import',
           reference: name,
-          target: file,
+          target: origin,
           why: 'not-exported',
           ...(evidence ? { evidence } : {}),
           count: 1,
         });
-        addName(importer.id, name, file, 'not-exported');
+        addName(importer.id, name, origin, 'not-exported');
       }
     }
   }
