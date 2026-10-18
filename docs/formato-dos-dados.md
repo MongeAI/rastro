@@ -51,7 +51,7 @@ Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`.
 
 Se dois símbolos geram o mesmo id no mesmo arquivo, o segundo recebe o sufixo `~2`, o terceiro `~3` etc. O mesmo vale para chamadas não resolvidas com o mesmo texto e [candidatos](#candidatos-possíveis-chamadas-por-interface) diferentes (`unresolved:src/a.ts#call:repo.save~2`).
 
-`meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework`/`fullPath`/`mountedAt`/`routeKind` (rotas, ver abaixo), `reason`, `reference` e `candidates` (não resolvidos, ver [candidatos possíveis](#candidatos-possíveis-chamadas-por-interface)), `implements` (classes: a cláusula `implements` como escrita no código, ex.: `["Store", "Named"]`) e `mentions` (funções, classes e métodos).
+`meta` pode conter: `language`, `exported`, `defaultExport`, `async`, `static`, `memberKind` (`method`/`constructor`/`getter`/`setter`/`property`), `lines`, `exportNames`, `inCycle`, `analyzed` (`false` para arquivos referenciados mas não analisados, como `.css`), `builtin` e `declared` (pacotes), `outsideRoot`, `httpMethod`/`routePath`/`framework`/`fullPath`/`mountedAt`/`routeKind`/`inlineHandler` (rotas, ver abaixo), `reason`, `reference`, `candidates` (não resolvidos, ver [candidatos possíveis](#candidatos-possíveis-chamadas-por-interface)) e `receiverFile` (chamada `obj.x()` não resolvida em TypeScript: o arquivo que declara o tipo de `obj`, que não tem o membro `x`), `implements` (classes: a cláusula `implements` como escrita no código, ex.: `["Store", "Named"]`), `abstractMembers` (classes: métodos abstratos, sem corpo, como escritos no código; não viram nós) e `mentions` (funções, classes e métodos).
 
 ### Rotas
 
@@ -78,7 +78,7 @@ Metadados das rotas:
 
 No Next.js, `app/` e `pages/` valem na raiz do projeto; `src/app` e `src/pages` só quando nenhuma das duas existe na raiz (como no próprio Next). `pageExtensions` do `next.config` é respeitado quando é uma lista de textos literais (`['page.tsx', 'api.ts']` faz de `index.page.tsx` a página `/` e ignora `Button.tsx`); escrito de outro jeito (variável, condição, espalhamento), nenhuma rota do Next.js é afirmada e um diagnóstico `next-routes-skipped` explica o motivo. O `next.config` é só lido como texto, nunca executado.
 
-A rota é ligada ao handler por uma relação `calls` com `callKind: "route-handler"` e `discovery: "framework-rule"`: a função referenciada, o método do controller (NestJS) ou a função exportada (Next.js). Chamadas feitas dentro de um handler inline são atribuídas à própria rota.
+A rota é ligada ao handler por uma relação `calls` com `callKind: "route-handler"` e `discovery: "framework-rule"`: a função referenciada, o método do controller (NestJS) ou a função exportada (Next.js). Chamadas feitas dentro de um handler inline são atribuídas à própria rota, que fica com `meta.inlineHandler: true`.
 
 Motivos de `unresolved` (`meta.reason`):
 
@@ -136,6 +136,8 @@ Por que não uma relação "possível"? Uma relação com destino em um método 
 | `discovery`  | `static-ast` (sintaxe), `static-typecheck` (verificador de tipos), `derived` (calculada), `framework-rule` (regra de framework: rotas do Express, Fastify, Hono, NestJS e Next.js)              |
 | `evidence`   | Até 20 ocorrências `{ file, line, column, snippet }`; o total fica em `meta.count`                                                                                                              |
 | `meta`       | `specifier`, `typeOnly`, `importKind` (`static`/`dynamic`/`require`/`re-export`), `names`, `callKind` (`call`/`new`/`jsx`/`route-handler`), `reexport`, `exportedAs`, `viaDeclaration`, `count` |
+
+Linhas e colunas (das evidências e das `location` dos nós) começam em 1 e só contam `\n` (ou `\r\n`) como quebra de linha, como o git e os editores: U+2028/U+2029 dentro de um texto não mudam a numeração.
 
 Semântica de cada tipo:
 

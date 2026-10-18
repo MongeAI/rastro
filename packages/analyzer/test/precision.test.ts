@@ -728,3 +728,89 @@ describe('regressões da revisão do analisador: alvos que não são comprovados
     expect(edge(g, 'exports', 'file:index.ts', 'fn:b.ts#onlyB')?.evidence[0]?.line).toBe(2);
   });
 });
+
+describe('linhas como no git e nos editores (U+2028/U+2029 não quebram linha)', () => {
+  it('evidências e locais depois de um U+2028 num texto continuam na linha certa', async () => {
+    const root = makeProject({
+      'src/a.ts': [
+        "export const sep = 'a\u2028b\u2029c';",
+        'export function first() {',
+        '  return second();',
+        '}',
+        '',
+        'export function second() {',
+        '  return 2;',
+        '}',
+        '',
+      ].join('\n'),
+      'src/b.ts': "import { first } from './a';\r\n\r\nexport const x = 'y\u2028';\r\nfirst();\r\n",
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    expect(node(g, 'fn:src/a.ts#first')?.location).toMatchObject({ startLine: 2, endLine: 4 });
+    expect(node(g, 'fn:src/a.ts#second')?.location).toMatchObject({
+      startLine: 6,
+      startColumn: 1,
+      endLine: 8,
+    });
+    expect(edge(g, 'calls', 'fn:src/a.ts#first', 'fn:src/a.ts#second')?.evidence[0]).toMatchObject({
+      line: 3,
+      column: 10,
+      snippet: 'return second();',
+    });
+    // \r\n conta uma linha só; o U+2028 dentro do texto, nenhuma
+    expect(edge(g, 'calls', 'file:src/b.ts', 'fn:src/a.ts#first')?.evidence[0]).toMatchObject({
+      line: 4,
+      snippet: 'first();',
+    });
+    expect(node(g, 'file:src/a.ts')?.meta?.lines).toBe(8);
+  });
+});
+
+describe('o que o grafo guarda para explicar e comparar mudanças', () => {
+  it('métodos abstratos ficam na classe (não viram nós)', async () => {
+    const g = await analyzeProject(fixture('oop'));
+    expect(node(g, `class:${A}#Animal`)?.meta?.abstractMembers).toEqual(['sound']);
+    expect(node(g, `method:${A}#Animal.sound`)).toBeUndefined();
+    expect(node(g, `class:${A}#Dog`)?.meta?.abstractMembers).toBeUndefined();
+  });
+
+  it('obj.x() sem o membro x num tipo do projeto: não resolvida, com o arquivo do tipo', async () => {
+    const root = makeProject({
+      'src/dog.ts': 'export class Dog {\n  run(): number {\n    return 1;\n  }\n}\n',
+      'src/use.ts': [
+        "import { Dog } from './dog';",
+        "import * as dogs from './dog';",
+        'export function walk(d: Dog, anything: any, m: Record<string, () => void>) {',
+        '  d.move();',
+        '  d.run();',
+        '  anything.move();',
+        '  m.go();',
+        '  return dogs.nope();',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    expect(node(g, 'unresolved:src/use.ts#call:d.move')?.meta).toMatchObject({
+      reason: 'symbol-not-found',
+      receiverFile: 'src/dog.ts',
+    });
+    expect(node(g, 'unresolved:src/use.ts#call:dogs.nope')?.meta?.receiverFile).toBe('src/dog.ts');
+    // `any` e assinatura de índice: nada provado, continua só contado
+    expect(node(g, 'unresolved:src/use.ts#call:anything.move')).toBeUndefined();
+    expect(node(g, 'unresolved:src/use.ts#call:m.go')).toBeUndefined();
+    expect(edge(g, 'calls', 'fn:src/use.ts#walk', 'method:src/dog.ts#Dog.run')?.resolution).toBe(
+      'resolved',
+    );
+  });
+
+  it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
+    const g = await analyzeProject(fixture('express-api'));
+    const routes = g.nodes.filter((n) => n.kind === 'route');
+    const inline = routes.filter((n) => n.meta?.inlineHandler).map((n) => n.name);
+    const named = routes.filter((n) => !n.meta?.inlineHandler).map((n) => n.name);
+    expect(named).toEqual(expect.arrayContaining(['GET /users/:id', 'DELETE /users/:id']));
+    expect(inline).toEqual(['POST /users']);
+  });
+});

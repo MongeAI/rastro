@@ -200,3 +200,50 @@ export function findPossiblePath(
   }
   return null;
 }
+
+/**
+ * Menor caminho de qualquer nó de `from` até qualquer nó de `to` (pastas viram os arquivos e
+ * entidades de dentro; um pacote externo é alcançado pelo último import). Só relações
+ * resolvidas, mais, com `external`, uma relação externa como último passo até um nó de `to`.
+ * Nós de `from` também em `to` não contam como chegada (caminho vazio não prova nada).
+ */
+export function findPathBetween(
+  index: GraphIndex,
+  from: readonly string[],
+  to: ReadonlySet<string>,
+  options: { maxDepth?: number; kinds?: readonly EdgeKind[]; external?: boolean } = {},
+): PathResult | null {
+  const kinds = options.kinds ?? PATH_EDGE_KINDS;
+  const maxDepth = options.maxDepth ?? 12;
+  const starts = [...new Set(from)].filter((id) => index.node(id)).sort(compareStrings);
+  const previous = new Map<string, GraphEdge>();
+  const depth = new Map<string, number>(starts.map((id) => [id, 0]));
+  const queue = [...starts];
+  for (let head = 0; head < queue.length; head++) {
+    const current = queue[head]!;
+    const d = depth.get(current)!;
+    if (d >= maxDepth) continue;
+    const out = index
+      .outgoing(current, kinds)
+      .filter(
+        (e) =>
+          e.resolution === 'resolved' ||
+          (options.external && e.resolution === 'external' && to.has(e.target)),
+      )
+      .sort((a, b) => compareStrings(a.target, b.target));
+    for (const edge of out) {
+      const next = edge.target;
+      if (depth.has(next)) continue;
+      depth.set(next, d + 1);
+      previous.set(next, edge);
+      if (to.has(next)) {
+        const edges: GraphEdge[] = [];
+        for (let cur = next; previous.has(cur); cur = previous.get(cur)!.source)
+          edges.unshift(previous.get(cur)!);
+        return { nodes: [edges[0]!.source, ...edges.map((e) => e.target)], edges };
+      }
+      if (edge.resolution === 'resolved') queue.push(next);
+    }
+  }
+  return null;
+}

@@ -3,10 +3,37 @@ import {
   nodeId,
   type ChangedFile,
   type ChangeSet,
+  type Evidence,
+  type GraphEdge,
   type GraphNode,
   type NodeKind,
 } from '@rastro/core';
 import type { GraphIndex, ImpactEntry } from './query.js';
+
+/**
+ * Uma referência que aponta para algo alterado ou removido pela mudança e que não resolve no
+ * código atual: import de um arquivo removido ou renomeado, nome que o arquivo alterado não
+ * exporta mais, chamada a esse nome ou a um membro que o tipo (declarado num arquivo alterado)
+ * não tem. Provavelmente quebrada pela mudança (ou já estava): nunca vira relação.
+ */
+export interface BrokenReference {
+  /** Quem faz a referência: o arquivo que importa ou a entidade que chama. */
+  from: GraphNode;
+  kind: 'import' | 'call';
+  /** O texto da referência: o especificador (`./term.js`), o nome (`sum`) ou `obj.metodo`. */
+  reference: string;
+  /** Arquivo alterado ou removido para onde ela aponta (relativo à raiz). */
+  target: string;
+  /**
+   * `file-deleted`/`file-renamed`: o arquivo importado não existe mais nesse caminho;
+   * `not-exported`: o arquivo alterado não exporta o nome; `member-missing`: o tipo declarado
+   * no arquivo alterado não tem o membro chamado.
+   */
+  why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing';
+  /** Onde aparece (a primeira ocorrência) e quantas vezes. */
+  evidence?: Evidence;
+  count: number;
+}
 
 export interface ChangeImpact {
   /** Arquivos alterados que existem no grafo. */
@@ -21,6 +48,8 @@ export interface ChangeImpact {
   routes: GraphNode[];
   /** Arquivos de teste alterados ou afetados (pistas de quais testes rodar). */
   tests: GraphNode[];
+  /** Referências para o que mudou que não resolvem mais (possivelmente quebradas). */
+  broken: BrokenReference[];
 }
 
 const SYMBOLS = new Set<NodeKind>(['function', 'class', 'method', 'route']);
@@ -132,7 +161,193 @@ export function computeChangeImpact(index: GraphIndex, changes: ChangeSet): Chan
   ]);
 
   changedFiles.sort((a, b) => compareStrings(a.id, b.id));
-  return { changedFiles, outsideGraph, changedEntities, impacted: impactedList, routes, tests };
+  return {
+    changedFiles,
+    outsideGraph,
+    changedEntities,
+    impacted: impactedList,
+    routes,
+    tests,
+    broken: brokenReferences(index, changes),
+  };
+}
+
+const CODE_EXT = /\.(?:[cm]?[jt]sx?)$/;
+const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
+/** Extensão escrita no import (ESM) → extensões do código-fonte que o TypeScript aceita no lugar. */
+const SOURCE_FOR: Record<string, string[]> = {
+  '.js': ['.ts', '.tsx', '.js', '.jsx'],
+  '.jsx': ['.tsx', '.jsx'],
+  '.mjs': ['.mts', '.mjs'],
+  '.cjs': ['.cts', '.cjs'],
+};
+
+/** Normaliza `a/b/../c/./d` (caminho relativo à raiz, com `/`); `undefined` se sair da raiz. */
+function joinPath(dir: string, specifier: string): string | undefined {
+  const parts: string[] = [];
+  for (const part of `${dir}/${specifier}`.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (!parts.length) return undefined;
+      parts.pop();
+    } else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+/** Caminhos de arquivo que um especificador relativo pode ser (regras de resolução do TypeScript). */
+export function specifierCandidates(importer: string, specifier: string): string[] {
+  if (!specifier.startsWith('.')) return [];
+  const slash = importer.lastIndexOf('/');
+  const base = joinPath(slash >= 0 ? importer.slice(0, slash) : '', specifier);
+  if (base === undefined) return [];
+  const ext = /\.[cm]?jsx?$/.exec(base)?.[0];
+  const stem = ext ? base.slice(0, -ext.length) : base;
+  return [
+    base,
+    ...(ext ? (SOURCE_FOR[ext] ?? []).map((e) => stem + e) : []),
+    ...EXTENSIONS.map((e) => base + e),
+    ...EXTENSIONS.map((e) => `${base}/index${e}`),
+  ];
+}
+
+/** A evidência mais específica: a primeira ocorrência cujo trecho cita o nome. */
+function evidenceFor(edge: GraphEdge, name?: string): Evidence | undefined {
+  const escaped = name?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const word = escaped && new RegExp(`(^|[^\\w$])${escaped}([^\\w$]|$)`);
+  return (word && edge.evidence.find((ev) => word.test(ev.snippet ?? ''))) || edge.evidence[0];
+}
+
+/**
+ * Referências quebradas pela mudança (ver `BrokenReference`). Só o que se liga à mudança por
+ * prova: o especificador relativo resolve para o caminho removido; o nome importado de um
+ * arquivo alterado não está entre os exportados dele (pelo verificador de tipos); a chamada sem
+ * declaração usa um desses nomes no arquivo que o importa; o tipo do receptor está num arquivo
+ * alterado e não tem o membro.
+ */
+export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenReference[] {
+  const gone = new Map<string, BrokenReference['why']>();
+  const changed = new Set<string>();
+  for (const f of changes.files) {
+    if (f.status === 'deleted') gone.set(f.file, 'file-deleted');
+    else {
+      if (f.status === 'renamed' && f.previous && f.previous !== f.file)
+        gone.set(f.previous, 'file-renamed');
+      changed.add(f.file);
+    }
+  }
+  // um caminho removido que voltou a existir (outro arquivo no lugar) não está quebrado
+  for (const file of gone.keys()) if (index.node(nodeId.file(file))) gone.delete(file);
+  if (!gone.size && !changed.size) return [];
+
+  const found: BrokenReference[] = [];
+  /** Arquivo que importa → nome → arquivo alterado/removido de onde o nome vinha. */
+  const missingNames = new Map<
+    string,
+    Map<string, { target: string; why: BrokenReference['why'] }>
+  >();
+  const addName = (importer: string, name: string, target: string, why: BrokenReference['why']) => {
+    if (name === '*' || name === 'default') return;
+    if (!missingNames.has(importer)) missingNames.set(importer, new Map());
+    missingNames.get(importer)!.set(name, { target, why });
+  };
+
+  // imports de arquivos removidos ou renomeados (o especificador não resolve mais)
+  if (gone.size)
+    for (const node of index.nodes.values()) {
+      if (node.kind !== 'unresolved' || node.meta?.reason !== 'module-not-found') continue;
+      for (const edge of index.incoming(node.id, ['imports'])) {
+        const importer = index.node(edge.source);
+        const specifier = edge.meta?.specifier ?? node.meta?.reference ?? node.name;
+        if (!importer || importer.kind !== 'file') continue;
+        const importerPath = importer.qualifiedName ?? importer.name;
+        const target = specifierCandidates(importerPath, specifier).find((c) => gone.has(c));
+        if (!target) continue;
+        const why = gone.get(target)!;
+        found.push({
+          from: importer,
+          kind: 'import',
+          reference: specifier,
+          target,
+          why,
+          ...(edge.evidence[0] ? { evidence: edge.evidence[0] } : {}),
+          count: Math.max(edge.meta?.count ?? 0, edge.evidence.length, 1),
+        });
+        for (const name of edge.meta?.names ?? []) addName(importer.id, name, target, why);
+      }
+    }
+
+  // nomes que os arquivos alterados não exportam mais
+  for (const file of changed) {
+    const fileNode = index.node(nodeId.file(file));
+    if (!fileNode || fileNode.meta?.analyzed === false || !CODE_EXT.test(file)) continue;
+    const exported = new Set(fileNode.meta?.exportNames ?? []);
+    // CommonJS (`module.exports = ...`): os nomes dependem do valor, não dá para provar a falta
+    if (exported.has('module.exports')) continue;
+    for (const edge of index.incoming(fileNode.id, ['imports'])) {
+      const kind = edge.meta?.importKind;
+      if (edge.resolution !== 'resolved' || edge.meta?.viaDeclaration) continue;
+      if (kind !== 'static' && kind !== 're-export') continue;
+      const importer = index.node(edge.source);
+      if (!importer) continue;
+      for (const name of edge.meta?.names ?? []) {
+        if (name === '*' || exported.has(name)) continue;
+        const evidence = evidenceFor(edge, name);
+        found.push({
+          from: importer,
+          kind: 'import',
+          reference: name,
+          target: file,
+          why: 'not-exported',
+          ...(evidence ? { evidence } : {}),
+          count: 1,
+        });
+        addName(importer.id, name, file, 'not-exported');
+      }
+    }
+  }
+
+  // chamadas sem declaração: a um nome importado que sumiu, ou a um membro que o tipo não tem
+  for (const node of index.nodes.values()) {
+    if (node.kind !== 'unresolved' || node.meta?.reason !== 'symbol-not-found') continue;
+    const reference = node.meta.reference ?? node.name;
+    let target: string | undefined;
+    let why: BrokenReference['why'] | undefined;
+    const receiverFile = node.meta.receiverFile;
+    if (receiverFile && changed.has(receiverFile)) {
+      target = receiverFile;
+      why = 'member-missing';
+    } else {
+      const fileId = node.parent ?? index.fileOf(node.id)?.id;
+      const names = fileId ? missingNames.get(fileId) : undefined;
+      const hit = names?.get(reference.split('.')[0]!);
+      if (hit) ({ target, why } = hit);
+    }
+    if (!target || !why) continue;
+    for (const edge of index.incoming(node.id, ['calls'])) {
+      const from = index.node(edge.source);
+      if (!from) continue;
+      found.push({
+        from,
+        kind: 'call',
+        reference,
+        target,
+        why,
+        ...(edge.evidence[0] ? { evidence: edge.evidence[0] } : {}),
+        count: Math.max(edge.meta?.count ?? 0, edge.evidence.length, 1),
+      });
+    }
+  }
+
+  // imports primeiro (um por arquivo, o mais direto de corrigir), depois as chamadas
+  return found.sort(
+    (a, b) =>
+      Number(a.kind === 'call') - Number(b.kind === 'call') ||
+      compareStrings(a.evidence?.file ?? a.from.id, b.evidence?.file ?? b.from.id) ||
+      (a.evidence?.line ?? 0) - (b.evidence?.line ?? 0) ||
+      compareStrings(a.reference, b.reference) ||
+      compareStrings(a.from.id, b.from.id),
+  );
 }
 
 /**

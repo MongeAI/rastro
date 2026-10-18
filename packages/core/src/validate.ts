@@ -319,7 +319,7 @@ export function graphIssues(
   // candidatos possíveis (chamadas por interface) também precisam apontar para nós existentes
   for (const [i, node] of graph.nodes.entries()) {
     if (!isObject(node) || !isObject(node.meta)) continue;
-    for (const key of ['candidates', 'implements'] as const) {
+    for (const key of ['candidates', 'implements', 'abstractMembers'] as const) {
       const list = node.meta[key];
       if (list !== undefined && (!Array.isArray(list) || !list.every((c) => typeof c === 'string')))
         fail('not-string-list', { field: `nodes[${i}].meta.${key}` });

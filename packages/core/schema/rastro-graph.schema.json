@@ -354,6 +354,16 @@
               "items": {
                 "type": "string"
               }
+            },
+            "receiverFile": {
+              "description": "Chamada não resolvida obj.x() em TypeScript: arquivo que declara o tipo de obj, sem o membro x.",
+              "type": "string"
+            },
+            "abstractMembers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }

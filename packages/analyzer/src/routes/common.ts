@@ -721,6 +721,8 @@ export function linkHandlers(
     const handler = bound ?? item;
     const inline = inlineHandler(handler);
     if (inline) {
+      const route = ctx.builder.getNode(routeId);
+      if (route) route.meta = { ...route.meta, inlineHandler: true };
       // chamadas feitas dentro do handler inline (ou embrulhado) passam a ser atribuídas à rota
       const previous = ctx.entities.get(inline.compilerNode);
       if (previous === undefined) {

@@ -108,6 +108,8 @@ export interface NodeMeta {
   fullPath?: string;
   /** Para rotas: prefixos completos onde o roteador foi montado (quando há montagem). */
   mountedAt?: string[];
+  /** Para rotas: atendida por uma função inline (as chamadas dela são atribuídas à rota). */
+  inlineHandler?: boolean;
   /** Para rotas do Next.js: `page` (página) ou `api` (rota de API). */
   routeKind?: 'page' | 'api';
   /** Para nós não resolvidos: por que não foi possível resolver. */
@@ -126,8 +128,18 @@ export interface NodeMeta {
    * estendem a classe abstrata). Nunca são relações resolvidas: o alvo real só existe em execução.
    */
   candidates?: string[];
+  /**
+   * Para chamadas não resolvidas `obj.x()` em TypeScript: o arquivo do projeto que declara o
+   * tipo de `obj`, que não tem o membro `x` (erro de compilação, ex.: método renomeado).
+   */
+  receiverFile?: string;
   /** Para classes: interfaces (ou classes) da cláusula `implements`, como escritas no código. */
   implements?: string[];
+  /**
+   * Para classes: métodos abstratos (sem corpo), como escritos no código. Não viram entidades:
+   * chamadas a eles são não resolvidas, com as implementações como candidatas.
+   */
+  abstractMembers?: string[];
 }
 
 export type UnresolvedReason =

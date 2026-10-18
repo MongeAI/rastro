@@ -76,6 +76,97 @@ export class GraphIndex {
     return this.childrenOf.get(id) ?? [];
   }
 
+  /** O nó é um construtor de classe (`Classe.constructor`)? */
+  private isConstructor(id: string): boolean {
+    const node = this.nodes.get(id);
+    return node?.kind === 'method' && node.meta?.memberKind === 'constructor';
+  }
+
+  /**
+   * Onde um construtor roda por `new`: as chamadas `new` comprovadas da própria classe e das
+   * subclasses (por herança comprovada) que não declaram construtor — `new Filhote()`, sem
+   * construtor próprio, executa o de `Cachorro`. O analisador liga o `new` à classe; a ligação
+   * com o construtor é derivada aqui, só de relações resolvidas.
+   */
+  constructionSites(ctorId: string): GraphEdge[] {
+    if (!this.isConstructor(ctorId)) return [];
+    const owner = this.nodes.get(ctorId)!.parent;
+    if (!owner) return [];
+    const sites: GraphEdge[] = [];
+    const seen = new Set<string>();
+    const queue = [owner];
+    while (queue.length) {
+      const cls = queue.shift()!;
+      if (seen.has(cls)) continue;
+      seen.add(cls);
+      for (const e of this.in.get(cls) ?? []) {
+        if (e.resolution !== 'resolved') continue;
+        if (e.kind === 'calls' && e.meta?.callKind === 'new') sites.push(e);
+        else if (
+          e.kind === 'extends' &&
+          !this.children(e.source).some((c) => c.meta?.memberKind === 'constructor')
+        )
+          queue.push(e.source);
+      }
+    }
+    return sites;
+  }
+
+  /**
+   * Métodos que este método sobrescreve: o de mesmo nome nas classes ancestrais (por herança
+   * comprovada), do mais próximo ao mais distante. Construtores e estáticos não entram.
+   */
+  overriddenMethods(methodId: string): GraphNode[] {
+    const method = this.nodes.get(methodId);
+    if (
+      method?.kind !== 'method' ||
+      method.meta?.static ||
+      method.meta?.memberKind === 'constructor' ||
+      !method.parent
+    )
+      return [];
+    const found: GraphNode[] = [];
+    const seen = new Set<string>([method.parent]);
+    let level = [method.parent];
+    while (level.length) {
+      const next: string[] = [];
+      for (const cls of level)
+        for (const e of this.out.get(cls) ?? []) {
+          if (e.kind !== 'extends' || e.resolution !== 'resolved' || seen.has(e.target)) continue;
+          seen.add(e.target);
+          next.push(e.target);
+          const base = this.children(e.target).find(
+            (c) =>
+              c.kind === 'method' &&
+              c.name === method.name &&
+              !c.meta?.static &&
+              c.meta?.memberKind === method.meta?.memberKind,
+          );
+          if (base) found.push(base);
+        }
+      level = next;
+    }
+    return found;
+  }
+
+  /**
+   * Chamadas comprovadas a um método que este sobrescreve: em execução, com um objeto da
+   * subclasse, elas caem neste método (despacho dinâmico). Só _possíveis_ para ele: o receptor
+   * pode ser de outra classe. `super.metodo()` não despacha e fica de fora, como o próprio método.
+   */
+  dispatchCalls(methodId: string): Array<{ edge: GraphEdge; base: GraphNode }> {
+    const result: Array<{ edge: GraphEdge; base: GraphNode }> = [];
+    for (const base of this.overriddenMethods(methodId))
+      for (const edge of this.in.get(base.id) ?? []) {
+        if (edge.kind !== 'calls' || edge.resolution !== 'resolved' || edge.source === methodId)
+          continue;
+        const viaSuper = (snippet = '') => snippet.includes(`super.${base.name}`);
+        if (edge.evidence.length && edge.evidence.every((ev) => viaSuper(ev.snippet))) continue;
+        result.push({ edge, base });
+      }
+    return result;
+  }
+
   /** Ancestrais (pai, avô...) de um nó, do mais próximo ao mais distante. */
   ancestors(id: string): GraphNode[] {
     const result: GraphNode[] = [];
@@ -189,7 +280,13 @@ export class GraphIndex {
       const nextOrigins: number[] = [];
       for (let i = 0; i < frontier.length; i++) {
         const origin = origins[i]!;
-        for (const edge of this.in.get(frontier[i]!) ?? []) {
+        const current = frontier[i]!;
+        const incoming = this.in.get(current) ?? [];
+        // um construtor também é afetado por quem faz `new` da classe (ou de subclasse sem construtor)
+        const edges = this.isConstructor(current)
+          ? [...incoming, ...this.constructionSites(current)]
+          : incoming;
+        for (const edge of edges) {
           if (edge.resolution !== 'resolved' || !kinds.has(edge.kind)) continue;
           let from = reached.get(edge.source);
           // já alcançado por esta origem, ou por `k` origens mais próximas (nenhuma

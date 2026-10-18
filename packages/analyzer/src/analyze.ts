@@ -210,17 +210,15 @@ async function runAnalysis(
   let syntaxErrors = 0;
   const routes = new RouteDetector(ctx);
   for (const [file, sf] of sourceFiles) {
-    // mesmas quebras de linha que o TypeScript usa para numerar linhas
-    ctx.lines.set(file.relative, sf.getFullText().split(/\r\n|[\r\n\u2028\u2029]/));
+    // as mesmas linhas de `lineAndColumn` (só `\n` quebra linha, como no git e nos editores)
+    ctx.lines.set(file.relative, sf.getFullText().split(/\r?\n/));
     addFileNode(ctx, file, sf);
     safely(ctx, file, 'entities', () => extractEntities(ctx, file, sf));
     routes.prepare(file, sf);
     for (const diag of program.getSyntacticDiagnostics(sf.compilerNode)) {
       if (syntaxErrors++ >= MAX_SYNTAX_DIAGNOSTICS) break;
       const line =
-        diag.start !== undefined
-          ? sf.compilerNode.getLineAndCharacterOfPosition(diag.start).line + 1
-          : undefined;
+        diag.start !== undefined ? lineAndColumn(sf.compilerNode, diag.start).line : undefined;
       const error = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
       ctx.diagnostics.push({
         level: 'warning',
@@ -668,17 +666,49 @@ function startOf(node: ts.Node): ts.Node {
     : node;
 }
 
+/** Início de cada linha (posição no texto), por arquivo: calculado uma vez, na primeira consulta. */
+const lineStartsCache = new WeakMap<ts.SourceFile, number[]>();
+
+function lineStarts(sf: ts.SourceFile): number[] {
+  let starts = lineStartsCache.get(sf);
+  if (!starts) {
+    starts = [0];
+    const text = sf.text;
+    for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) starts.push(i + 1);
+    lineStartsCache.set(sf, starts);
+  }
+  return starts;
+}
+
+/**
+ * Linha e coluna (a partir de 1) de uma posição. Só `\n` (e `\r\n`) quebra linha, como no git,
+ * nos editores e no visualizador de código: o mapa de linhas do TypeScript também quebra em
+ * U+2028/U+2029 (e `\r` sozinho), e toda evidência depois de um desses (num texto, por
+ * exemplo) apontava para a linha errada.
+ */
+export function lineAndColumn(sf: ts.SourceFile, pos: number): { line: number; column: number } {
+  const starts = lineStarts(sf);
+  let low = 0;
+  let high = starts.length - 1;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    if (starts[mid]! <= pos) low = mid;
+    else high = mid - 1;
+  }
+  return { line: low + 1, column: pos - starts[low]! + 1 };
+}
+
 export function rangeOf(file: string, node: Node | ts.Node): SourceRange {
   const compiler = node instanceof Node ? node.compilerNode : node;
   const sf = compiler.getSourceFile();
-  const start = sf.getLineAndCharacterOfPosition(startOf(compiler).getStart(sf));
-  const end = sf.getLineAndCharacterOfPosition(compiler.getEnd());
+  const start = lineAndColumn(sf, startOf(compiler).getStart(sf));
+  const end = lineAndColumn(sf, compiler.getEnd());
   return {
     file,
-    startLine: start.line + 1,
-    startColumn: start.character + 1,
-    endLine: end.line + 1,
-    endColumn: end.character + 1,
+    startLine: start.line,
+    startColumn: start.column,
+    endLine: end.line,
+    endColumn: end.column,
   };
 }
 
@@ -740,7 +770,7 @@ function addFileNode(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   // um arquivo que termina com quebra de linha não tem uma linha a mais
   const lines = all
     ? Math.max(1, all.length - (all.length > 1 && all[all.length - 1] === '' ? 1 : 0))
-    : sf.getEndLineNumber();
+    : lineAndColumn(sf.compilerNode, sf.getEnd()).line;
   ctx.builder.addNode({
     id: fileId,
     kind: 'file',
@@ -1025,6 +1055,8 @@ function extractMembers(
   cls: Node,
 ): void {
   if (!Node.isClassDeclaration(cls) && !Node.isClassExpression(cls)) return;
+  /** Métodos abstratos (sem corpo, não viram entidades): guardados como escritos na classe. */
+  const abstractMembers: string[] = [];
   for (const member of cls.getMembers()) {
     let name: string | undefined;
     let memberKind: NonNullable<GraphNode['meta']>['memberKind'];
@@ -1032,7 +1064,10 @@ function extractMembers(
     let isStatic = false;
     let isAsync = false;
     if (Node.isMethodDeclaration(member)) {
-      if (!member.hasBody()) continue;
+      if (!member.hasBody()) {
+        if (member.isAbstract()) abstractMembers.push(member.getName());
+        continue;
+      }
       name = member.getName();
       memberKind = 'method';
       isStatic = member.isStatic();
@@ -1076,6 +1111,10 @@ function extractMembers(
       classId,
       [member.compilerNode, ...extra],
     );
+  }
+  if (abstractMembers.length) {
+    const classNode = ctx.builder.getNode(classId)!;
+    classNode.meta = { ...classNode.meta, abstractMembers: [...new Set(abstractMembers)] };
   }
 }
 
@@ -1159,6 +1198,8 @@ export function addUnresolvedNode(
   at: Node | ts.Node,
   /** Implementações possíveis (chamadas por interface), já ordenadas. */
   candidates: string[] = [],
+  /** Chamada `obj.x()` sem o membro `x`: o arquivo que declara o tipo de `obj`. */
+  receiverFile?: string,
 ): string {
   const base = nodeId.unresolved(file, kind, reference);
   let id = base;
@@ -1182,7 +1223,12 @@ export function addUnresolvedNode(
       // não resolvidos de chamada/herança ficam dentro do arquivo; os de import ficam soltos
       ...(kind === 'import' ? {} : { parent: fileId }),
       location: rangeOf(file, at),
-      meta: { reason, reference, ...(candidates.length ? { candidates } : {}) },
+      meta: {
+        reason,
+        reference,
+        ...(candidates.length ? { candidates } : {}),
+        ...(receiverFile ? { receiverFile } : {}),
+      },
     });
     if (kind !== 'import') {
       ctx.builder.addEdge({
@@ -1989,6 +2035,37 @@ export function unresolvedReason(targets: SymbolTarget[]): UnresolvedReason {
   return 'symbol-not-found';
 }
 
+/**
+ * Arquivo do projeto (TypeScript) que declara o tipo de um receptor que comprovadamente não tem
+ * o membro `name`: classe, interface ou o próprio módulo (`import * as m`), sem assinatura de
+ * índice. Tipos sem símbolo único (uniões, `any`, parâmetros de tipo) não têm arquivo.
+ */
+function receiverFileOf(ctx: Ctx, receiver: ts.Node, name: string): string | undefined {
+  let symbol: ts.Symbol | undefined;
+  try {
+    const type = ctx.checker.getTypeAtLocation(receiver);
+    symbol = type.getSymbol();
+    const kinds = ts.SymbolFlags.Class | ts.SymbolFlags.Interface | ts.SymbolFlags.ValueModule;
+    if (
+      !symbol ||
+      !(symbol.flags & kinds) ||
+      type.getProperty(name) ||
+      ctx.checker.getIndexInfosOfType(type).length ||
+      // base desconhecida (import quebrado, `any`): o membro pode vir dela
+      (type.isClassOrInterface() &&
+        ctx.checker.getBaseTypes(type).some((base) => base.flags & ts.TypeFlags.Any))
+    )
+      return undefined;
+  } catch {
+    return undefined;
+  }
+  for (const decl of symbol.declarations ?? []) {
+    const known = ctx.filesByAbs.get(toPosix(decl.getSourceFile().fileName));
+    if (known && (known.language === 'ts' || known.language === 'tsx')) return known.relative;
+  }
+  return undefined;
+}
+
 /** Entidade mais próxima que envolve um nó (ou o próprio arquivo, para código no topo). */
 function enclosingEntity(ctx: Ctx, node: ts.Node, fileId: string): string {
   let current: ts.Node | undefined = node.parent;
@@ -2042,7 +2119,14 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
     const meta: EdgeMeta = { callKind: isNew ? 'new' : 'call' };
 
     if (!symbol) {
-      if (Node.isIdentifier(callee) || receiverIsThis) {
+      // `obj.x()` em TypeScript com `obj` de um tipo declarado no projeto que não tem `x`: é um
+      // erro de compilação (ex.: método renomeado), e o arquivo do tipo fica registrado
+      const receiverFile =
+        Node.isPropertyAccessExpression(callee) &&
+        (file.language === 'ts' || file.language === 'tsx')
+          ? receiverFileOf(ctx, callee.getExpression().compilerNode, callee.getName())
+          : undefined;
+      if (Node.isIdentifier(callee) || receiverIsThis || receiverFile) {
         const target = addUnresolvedNode(
           ctx,
           file.relative,
@@ -2050,6 +2134,8 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           reference,
           'symbol-not-found',
           call,
+          [],
+          receiverFile,
         );
         ctx.builder.addEdge({
           kind: 'calls',
