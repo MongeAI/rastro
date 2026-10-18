@@ -995,6 +995,7 @@ const PARTIAL_CODES = new Set([
   'file-too-large',
   'parse-failed',
   'unreadable-directory',
+  'unreadable-file',
   'analysis-failed',
   'next-routes-skipped',
 ]);
@@ -1009,7 +1010,7 @@ export function partialNote(snapshot: Snapshot): string | undefined {
     parts.push(
       `file limit reached (${graph.analyzer.options.maxFiles}): files beyond it were not analyzed`,
     );
-  const skipped = count('file-too-large') + count('parse-failed');
+  const skipped = count('file-too-large') + count('parse-failed') + count('unreadable-file');
   if (skipped) parts.push(`${plural(skipped, 'file')} skipped (too large or unreadable)`);
   if (count('unreadable-directory'))
     parts.push(`${plural(count('unreadable-directory'), 'folder')} could not be read`);

@@ -862,6 +862,50 @@ describe('diagnósticos com parâmetros (textos em outros idiomas)', () => {
     expect(node(g, 'fn:src/ok.ts#ok')).toBeDefined();
     expect(validateGraph(g).valid).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'arquivo importado sem permissão de leitura vira aviso, não derruba a análise',
+    async () => {
+      const root = makeProject({
+        'src/a.ts': "import { b } from '../gen/b';\nexport function a() {\n  return b();\n}\n",
+        'gen/b.ts': 'export function b() {\n  return 1;\n}\n',
+      });
+      fs.chmodSync(path.join(root, 'gen/b.ts'), 0o000);
+      try {
+        const g = await analyzeProject(root);
+        expect(g.diagnostics.find((d) => d.code === 'parse-failed')).toMatchObject({
+          file: 'gen/b.ts',
+          params: { reason: 'no-permission' },
+        });
+        expect(node(g, 'fn:src/a.ts#a')).toBeDefined();
+        expect(validateGraph(g).valid).toBe(true);
+      } finally {
+        fs.chmodSync(path.join(root, 'gen/b.ts'), 0o644);
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'linux')(
+    'nome de arquivo que não é UTF-8 válido vira aviso, não derruba a descoberta',
+    async () => {
+      const root = makeProject({ 'src/ok.ts': 'export function ok() {}\n' });
+      // "\xff.ts": o nome lido de volta não é o mesmo (vira U+FFFD) e o arquivo "some"
+      fs.writeFileSync(
+        Buffer.concat([
+          Buffer.from(path.join(root, 'src') + '/'),
+          Buffer.from([0xff, 0x2e, 0x74, 0x73]),
+        ]),
+        'export const x = 1;\n',
+      );
+      const g = await analyzeProject(root);
+      const d = g.diagnostics.find((x) => x.code === 'unreadable-file');
+      expect(d).toMatchObject({ level: 'warning', params: { error: 'ENOENT' } });
+      expect(diagnosticText(d!, 'en')).toBe('File skipped: it could not be read (ENOENT).');
+      expect(diagnosticText(d!, 'pt')).toBe(d!.message);
+      expect(node(g, 'fn:src/ok.ts#ok')).toBeDefined();
+      expect(validateGraph(g).valid).toBe(true);
+    },
+  );
 });
 
 describe('regressões da revisão do analisador: aliases de tsconfig referenciados', () => {

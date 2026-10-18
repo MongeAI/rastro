@@ -175,6 +175,7 @@ Semântica de cada tipo:
 | `file-too-large`       | arquivo maior que o limite                                                              | `limitKb`                                                             |
 | `max-files-reached`    | limite de arquivos atingido                                                             | `limit`                                                               |
 | `unreadable-directory` | pasta sem permissão de leitura                                                          | `error` (código do sistema, ex.: `EACCES`)                            |
+| `unreadable-file`      | arquivo que sumiu durante a descoberta ou com nome que não é UTF-8 válido               | `error` (código do sistema, ex.: `ENOENT`)                            |
 | `invalid-config`       | tsconfig/jsconfig inválido                                                              | `config`, `error`                                                     |
 | `syntax-error`         | erro de sintaxe (até 50 por análise)                                                    | `error` (texto do TypeScript)                                         |
 | `parse-failed`         | arquivo que não pôde ser lido ou interpretado (inclusive nomes com `\`)                 | `reason` (`too-deep`, `no-permission`, `backslash-name`) ou `error`   |

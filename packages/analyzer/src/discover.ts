@@ -149,7 +149,23 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
       const language = languageOf(entry.name);
       if (!language || IGNORED_FILE_PATTERNS.some((re) => re.test(entry.name))) continue;
       if (ig.ignores(rel)) continue;
-      const size = fs.statSync(abs).size;
+      let size: number;
+      try {
+        size = fs.statSync(abs).size;
+      } catch (err) {
+        // sumiu entre a listagem e a leitura, ou o nome não é UTF-8 válido (o nome lido de
+        // volta já não é o do disco)
+        const error = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+        diagnostics.push({
+          level: 'warning',
+          code: 'unreadable-file',
+          message: `Arquivo ignorado: não foi possível ler (${error}).`,
+          file: rel,
+          // só o código do erro (ex.: ENOENT): a mensagem do sistema traz o caminho absoluto
+          params: { error },
+        });
+        continue;
+      }
       if (size > maxSize) {
         diagnostics.push({
           level: 'warning',

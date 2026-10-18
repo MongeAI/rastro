@@ -81,6 +81,10 @@ export const DIAGNOSTIC_TEXTS: Record<string, Texts> = {
     pt: (p) => needs([text(p.error)], (e) => `Não foi possível ler o diretório: ${e}`),
     en: (p) => needs([text(p.error)], (e) => `Could not read the directory: ${e}`),
   },
+  'unreadable-file': {
+    pt: (p) => needs([text(p.error)], (e) => `Arquivo ignorado: não foi possível ler (${e}).`),
+    en: (p) => needs([text(p.error)], (e) => `File skipped: it could not be read (${e}).`),
+  },
   'syntax-error': {
     pt: (p) => needs([text(p.error)], (e) => `Erro de sintaxe: ${e}`),
     en: (p) => needs([text(p.error)], (e) => `Syntax error: ${e}`),

@@ -513,7 +513,7 @@ export class ModuleResolver {
     mode?: ts.ResolutionMode,
   ): ts.ResolvedModuleFull | undefined {
     const config = this.configFor(toPosix(containingFile));
-    return ts.resolveModuleName(
+    const resolved = ts.resolveModuleName(
       specifier,
       containingFile,
       config.options,
@@ -522,6 +522,27 @@ export class ModuleResolver {
       undefined,
       mode,
     ).resolvedModule;
+    // um arquivo sem permissão de leitura derrubaria a montagem do programa inteiro: o import
+    // fica sem destino para o compilador (o arquivo já vira um aviso `parse-failed`)
+    return resolved && !this.isReadable(resolved.resolvedFileName) ? undefined : resolved;
+  }
+
+  /** Arquivo → pode ser lido (cache da análise). */
+  private readonly readable = new Map<string, boolean>();
+
+  private isReadable(file: string): boolean {
+    let ok = this.readable.get(file);
+    if (ok === undefined) {
+      try {
+        fs.accessSync(file, fs.constants.R_OK);
+        ok = true;
+      } catch (err) {
+        // só falta de permissão: um arquivo que não existe é problema de outra parte
+        ok = (err as NodeJS.ErrnoException).code !== 'EACCES';
+      }
+      this.readable.set(file, ok);
+    }
+    return ok;
   }
 
   resolve(specifier: string, fromAbsolute: string): ResolvedTarget {
