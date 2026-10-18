@@ -11,10 +11,10 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
                                                                 │
                          ┌──────────────────────────────────────┴──────────┐
                          ▼                                                 ▼
-                 ┌──────────────┐   /api/graph, /api/source        ┌──────────────┐
-                 │  cli         │ ───────────────────────────────▶ │  web         │
-                 │  storage +   │   (127.0.0.1, somente leitura)   │  React +     │
-                 │  servidor    │                                  │  Cytoscape   │
+                 ┌──────────────┐   /api/graph, /api/source,       ┌──────────────┐
+                 │  cli         │   /api/events                    │  web         │
+                 │  storage +   │ ───────────────────────────────▶ │  React +     │
+                 │  servidor    │   (127.0.0.1, somente leitura)   │  Cytoscape   │
                  └──────────────┘                                  └──────────────┘
 ```
 
@@ -37,6 +37,10 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 3. **Passo 1, entidades**: arquivos (agrupados por pasta), funções (declarações, `const f = () => {}`, funções embrulhadas como `memo(...)`), classes e membros, exports CommonJS e rotas HTTP (`routes/`: uma regra por framework, ver abaixo).
 4. **Passo 2, relações**: imports (estáticos, reexportações, `require`, `import()`), exports (pelo verificador de tipos, incluindo `module.exports`), chamadas, uso de JSX e herança.
 5. **Fechamento** (`GraphBuilder.finalize`): deriva `depends_on` entre pastas, marca ciclos de importação, calcula estatísticas e ordena tudo.
+
+### Sessão de análise
+
+`analyzeProject` faz uma análise do zero. `AnalysisSession` (usada pela CLI) guarda o projeto do ts-morph entre análises: cada `analyze()` refaz a descoberta, compara data e tamanho de cada arquivo com os da leitura anterior e só relê os que mudaram; arquivos removidos ou excluídos saem do compilador. Se as opções do compilador (tsconfig) ou os manifestos de dependências (`package.json`, lockfiles) mudarem, o compilador é recriado. O grafo é sempre montado inteiro de novo, então o resultado é o mesmo de uma análise do zero.
 
 ### Rotas HTTP
 
@@ -65,6 +69,25 @@ Para `alvo()` ou `obj.alvo()`, o Rastro pede ao verificador de tipos o **símbol
 Os candidatos de uma chamada por interface vêm de `implementations.ts`: um índice (montado uma vez, a partir das classes do grafo) de tudo o que cada classe declara implementar ou estender, direta ou indiretamente. Para o tipo do receptor, cada classe que o implementa contribui com o membro de mesmo nome (próprio ou herdado), se ele for uma entidade do grafo. Os candidatos ficam no nó não resolvido e nunca viram relações (ver [formato dos dados](formato-dos-dados.md#candidatos-possíveis-chamadas-por-interface)).
 
 `obj.metodo()` sem tipo conhecido e `obj[nome]()` não viram nós: entram em `unknownReceiverCalls` e `computedCalls`, para não poluir o mapa com suposições.
+
+## Servidor local e modo ao vivo
+
+A CLI (`apps/cli/src/server.ts`) serve a interface compilada e três endpoints, todos atrás do token da execução (ver [segurança](seguranca.md)):
+
+| Endpoint      | O que entrega                                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/graph`  | O grafo atual em JSON, com a versão no cabeçalho `X-Rastro-Version`                                                                         |
+| `/api/source` | O conteúdo de um arquivo JS/TS do grafo, sob demanda                                                                                        |
+| `/api/events` | Server-Sent Events: `hello` ao conectar e `graph` a cada grafo novo, ambos com `{"version": n}`; um comentário a cada 25 s mantém a conexão |
+
+A versão começa em 1 e sobe a cada `update()` do servidor. Com `rastro <caminho> --watch`:
+
+1. `watch.ts` observa só as pastas que a descoberta percorreria (`discoverFiles(...).directories`: as mesmas exclusões, `.gitignore` e `--exclude`), com um `fs.watch` não recursivo por pasta. O modo recursivo do Node no Linux percorreria a árvore inteira (inclusive `node_modules` e `.git`) e estouraria o limite de observadores do inotify em projetos grandes. Pastas criadas disparam uma reanálise e passam a ser observadas; depois de cada reanálise o conjunto de pastas é atualizado.
+2. Salvamentos em rajada são juntados (300 ms) e só arquivos JS/TS ou de configuração (`package.json`, `tsconfig*.json`, `jsconfig.json`, `.gitignore`) contam.
+3. A `AnalysisSession` reanalisa (nunca duas ao mesmo tempo; mudanças durante uma análise disparam outra no fim), o JSON salvo é atualizado e o servidor troca o grafo e avisa os navegadores pelo `/api/events`.
+4. A interface busca `/api/graph` de novo e mantém a seleção, comparando a versão do evento com a do cabeçalho para ignorar respostas antigas.
+
+Se observar falhar (por exemplo `ENOSPC` ou `EMFILE`), a CLI avisa e passa a varrer o projeto a cada 1,5 s, comparando data e tamanho dos arquivos relevantes.
 
 ## Interface
 
