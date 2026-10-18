@@ -29,6 +29,16 @@ The map now answers **what matters**: what a change affects, how one part reache
 - The folders level opens a project that lives in a single folder (like `src/`) by itself.
 - Options that do not apply to a command are rejected instead of silently ignored.
 
+### Fixed (found by analyzing 8 open-source projects: Express, Fastify, Hono, NestJS, Vite, tRPC, Excalidraw and a Next.js app)
+
+- Evidence of calls in multi-line chains (`a.b({…})\n.c()`) now points at the line of the called method, not the start of the chain.
+- `module.exports = require('./lib/x')` re-exports are followed; `var app = module.exports = express()` is recognized as an app.
+- A framework imported through a relative path (its own examples) is recognized when the target is that package's entry point.
+- Unresolved chained calls get short, readable names (`pipeline.step(…).done`) instead of mangled kilobyte-long text.
+- `paths` aliases to non-code files (`@/styles/globals.css`) are no longer reported as npm packages.
+- Export evidence of decorated classes points at the `export` keyword; handlers declared inside functions no longer become false unresolved nodes.
+- `npm ci` works again after the version bump (internal packages pointed at a version that was never published).
+
 ### Security
 
 - `--changes`/`--since` run only read-only git commands with external diff, text conversion, hooks, pager and fsmonitor disabled, fixed diff prefixes, and refuse repositories whose local, worktree or command-line config defines commands (`--trust-git-config` to override).

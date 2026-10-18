@@ -398,6 +398,9 @@ O JSON exportado contém o caminho absoluto do projeto e trechos de código. Rev
 - Chamadas dinâmicas (callbacks, `obj[nome]()`, injeção de dependência, eventos) aparecem como não resolvidas ou só nos contadores. Chamadas por interface listam implementações _possíveis_, nunca comprovadas; métodos sobrescritos não entram como candidatos.
 - Em JavaScript sem tipos, `obj.metodo()` só é ligado quando o TypeScript consegue inferir o tipo de `obj`.
 - Funções declaradas dentro de outras funções não viram nós próprios.
+- Membros CommonJS atribuídos em tempo de execução (`app.init = function () {}`, `View.prototype.render = …`) não viram nós, então chamadas a eles ficam não resolvidas.
+- Quando um pacote traz tipos `.d.ts` escritos à mão ao lado do JavaScript (como o Fastify), as chamadas caem nas assinaturas de tipo e ficam não resolvidas como “não analisado”.
+- Globais de executores de teste (`describe`, `it`, `expect`) ficam não resolvidos, já que o Rastro nunca instala pacotes `@types`.
 - As rotas só são detectadas quando o framework é comprovado (importado do pacote dele, ou `next` declarado no `package.json`) e o caminho é um literal. Ainda não cobertos: roteadores ou apps passados como parâmetro de função (exceto plugins do Fastify), `fastify-plugin`/autoload e o middleware do Next.js.
 - "Possivelmente sem uso" é uma pista: código usado só por acesso dinâmico, reflexão ou por outros pacotes pode aparecer ali.
 - O `--watch` reanalisa o projeto inteiro a cada salvamento (o compilador é reaproveitado, as relações são recalculadas); um cache das relações por arquivo está nos planos.

@@ -398,6 +398,9 @@ The exported JSON contains the absolute path of the project and code snippets. R
 - Dynamic calls (callbacks, `obj[name]()`, dependency injection, events) show up as unresolved or only in the counters. Calls through interfaces list _possible_ implementations, never proven ones; overridden methods are not offered as candidates.
 - In untyped JavaScript, `obj.method()` is only linked when TypeScript can infer the type of `obj`.
 - Functions declared inside other functions do not become nodes of their own.
+- CommonJS members assigned at runtime (`app.init = function () {}`, `View.prototype.render = …`) do not become nodes, so calls to them stay unresolved.
+- When a package ships hand-written `.d.ts` types next to its JavaScript (like Fastify), calls land on the type signatures and stay unresolved as “not analyzed”.
+- Test-runner globals (`describe`, `it`, `expect`) stay unresolved, since Rastro never installs `@types` packages.
 - Routes are only detected when the framework is proven (imported from its package, or `next` declared in `package.json`) and the path is a literal. Not covered yet: routers or apps passed as function parameters (except Fastify plugins), `fastify-plugin`/autoload, and Next.js middleware.
 - "Possibly unused" is a hint: code used only through dynamic access, reflection or by other packages can show up there.
 - `--watch` re-analyzes the whole project on each save (the compiler is reused, the relationships are recomputed); a file-level cache of relationships is planned.
