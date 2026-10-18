@@ -1,5 +1,8 @@
 {
   "name": "express",
   "private": true,
-  "description": "Reprodução do repositório do próprio Express: os exemplos usam require('../..') em vez de require('express')."
+  "description": "Reprodução do repositório do próprio Express: os exemplos usam require('../..') em vez de require('express').",
+  "dependencies": {
+    "serve-static": "^2.2.0"
+  }
 }

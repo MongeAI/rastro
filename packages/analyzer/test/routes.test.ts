@@ -248,6 +248,21 @@ describe('NestJS (nest-api)', () => {
       mountedAt: ['/api'],
     });
   });
+
+  it('o export de uma classe com decorator aponta para a linha do export', () => {
+    const exported = edge(
+      g,
+      'exports',
+      'file:src/app.module.ts',
+      'class:src/app.module.ts#AppModule',
+    );
+    expect(exported?.evidence[0]).toMatchObject({
+      line: 7,
+      snippet: 'export class AppModule {}',
+    });
+    // a classe continua começando no decorator (mudar o decorator é mudar a classe)
+    expect(node(g, 'class:src/app.module.ts#AppModule')?.location?.startLine).toBe(6);
+  });
 });
 
 describe('Next.js (next-app)', () => {

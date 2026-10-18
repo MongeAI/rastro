@@ -1279,7 +1279,7 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       const evidence =
         (!sameFile && exportStatementEvidence(ctx, file, sf, name)) ||
         (decl && toPosix(decl.getSourceFile().fileName) === file.absolute
-          ? evidenceAt(ctx, file.relative, decl)
+          ? evidenceAt(ctx, file.relative, exportKeywordOf(decl) ?? decl)
           : undefined);
       ctx.builder.addEdge({
         kind: 'exports',
@@ -1292,6 +1292,16 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       });
     }
   }
+}
+
+/**
+ * A palavra `export` de uma declaração. Numa classe com decorators (`@Module({...})` em várias
+ * linhas antes de `export class AppModule`), a declaração começa no decorator, numa linha que
+ * não contém o export.
+ */
+function exportKeywordOf(decl: ts.Node): ts.Node | undefined {
+  if (!ts.canHaveModifiers(decl)) return undefined;
+  return ts.getModifiers(decl)?.find((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
 
 /** Evidência do `export ... from` que reexporta um nome. */
@@ -1426,10 +1436,10 @@ export function resolveSymbolTargets(
       );
       continue;
     }
-    const reexported = commonJsReexport(ctx, decl);
+    const reexported = commonJsReexport(ctx, decl, depth);
     if (reexported) {
       // `module.exports = require('./lib/app')`: o valor exportado é o do módulo exigido
-      targets.push(...resolveSymbolTargets(ctx, reexported, depth + 1));
+      targets.push(...reexported);
       continue;
     }
     if (isLocalFunction(decl)) {
@@ -1478,22 +1488,23 @@ function isConstDeclaration(decl: ts.VariableDeclaration): boolean {
 }
 
 /**
- * Reexportação CommonJS (`module.exports = require('./lib/app')`, padrão do index.js de muitos
- * pacotes): devolve o `module.exports` do módulo exigido. Só com especificador literal; o
- * verificador de tipos já sabe qual arquivo é (ou que ele não existe).
+ * Reexportação CommonJS: `module.exports = require('./lib/app')` (padrão do index.js de muitos
+ * pacotes) e `exports.static = require('serve-static')`. O valor é o `module.exports` do módulo
+ * exigido; um pacote sem tipos instalados é externo. Só com especificador literal.
  */
-function commonJsReexport(ctx: Ctx, decl: ts.Node): ts.Symbol | undefined {
-  if (!ts.isBinaryExpression(decl) || decl.operatorToken.kind !== ts.SyntaxKind.EqualsToken)
-    return undefined;
-  const left = decl.left;
-  if (
-    !ts.isPropertyAccessExpression(left) ||
-    !ts.isIdentifier(left.expression) ||
-    left.expression.text !== 'module' ||
-    left.name.text !== 'exports'
+function commonJsReexport(ctx: Ctx, decl: ts.Node, depth: number): SymbolTarget[] | undefined {
+  let assignment: ts.BinaryExpression | undefined;
+  if (ts.isBinaryExpression(decl) && isModuleExports(decl.left)) assignment = decl;
+  else if (
+    ts.isPropertyAccessExpression(decl) &&
+    ts.isBinaryExpression(decl.parent) &&
+    decl.parent.left === decl &&
+    (isModuleExports(decl.expression) ||
+      (ts.isIdentifier(decl.expression) && decl.expression.text === 'exports'))
   )
-    return undefined;
-  const right = unwrapExpression(decl.right);
+    assignment = decl.parent;
+  if (!assignment || assignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return undefined;
+  const right = unwrapExpression(assignment.right);
   if (
     !ts.isCallExpression(right) ||
     !ts.isIdentifier(right.expression) ||
@@ -1502,8 +1513,23 @@ function commonJsReexport(ctx: Ctx, decl: ts.Node): ts.Symbol | undefined {
     !ts.isStringLiteralLike(right.arguments[0]!)
   )
     return undefined;
-  const moduleSymbol = ctx.checker.getSymbolAtLocation(right.arguments[0]!);
-  return moduleSymbol?.exports?.get(ts.InternalSymbolName.ExportEquals);
+  const specifier = right.arguments[0]!;
+  const exported = ctx.checker
+    .getSymbolAtLocation(specifier)
+    ?.exports?.get(ts.InternalSymbolName.ExportEquals);
+  if (exported) return resolveSymbolTargets(ctx, exported, depth + 1);
+  const target = ctx.resolver.resolve(specifier.text, toPosix(decl.getSourceFile().fileName));
+  return target.kind === 'package' ? [{ kind: 'external' }] : undefined;
+}
+
+/** `module.exports` */
+function isModuleExports(node: ts.Node): boolean {
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'module' &&
+    node.name.text === 'exports'
+  );
 }
 
 /** Propriedade de um objeto literal atribuído a `const` ou a `module.exports`. */

@@ -9,3 +9,5 @@ function createApplication() {
 exports.Router = function Router() {
   return { get() {} };
 };
+
+exports.static = require('serve-static');

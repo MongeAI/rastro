@@ -415,15 +415,20 @@ describe("reexportação CommonJS: module.exports = require('./lib/x')", () => {
     expect(g.nodes.some((n) => n.id === 'unresolved:examples/hello/index.js#call:express')).toBe(
       false,
     );
+    // `exports.static = require('serve-static')`: pacote declarado, a chamada é externa
+    expect(g.nodes.some((n) => n.name === 'express.static')).toBe(false);
+    expect(g.stats.externalCallsSkipped).toBeGreaterThan(0);
   });
 
   it('reexportação de pacote externo continua externa, sem inventar destino', async () => {
     const root = makeProject({
       'package.json': '{"dependencies":{"left-pad":"1"}}',
-      'index.js': "module.exports = require('left-pad');",
-      'use.js': "const pad = require('./index');\npad('x', 3);",
+      'index.js': "module.exports = require('left-pad');\nexports.extra = require('./missing');",
+      'use.js': "const pad = require('./index');\npad('x', 3);\npad.extra();",
     });
     const g = await analyzeProject(root);
+    expectValid(g);
     expect(g.edges.filter((e) => e.kind === 'calls' && e.resolution === 'resolved')).toEqual([]);
+    expect(g.nodes.some((n) => n.kind === 'unresolved' && n.name === 'pad')).toBe(false);
   });
 });

@@ -16,3 +16,5 @@ app
   .post(function (req, res) {
     res.send('salvo');
   });
+
+app.use(express.static('public'));
