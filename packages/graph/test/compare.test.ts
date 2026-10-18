@@ -172,6 +172,36 @@ describe('compareGraphs', () => {
     expect(diff.edges.added).toEqual([]);
   });
 
+  it('rota cujo endereço (caminho completo ou montagem) mudou, com o mesmo id', () => {
+    const a = graph({ generatedAt: '', files: ['s.js'], functions: [], imports: [] });
+    a.nodes.push({
+      id: 'route:s.js#r GET /x',
+      kind: 'route',
+      name: 'GET /api/x',
+      parent: 'file:s.js',
+      meta: { httpMethod: 'GET', routePath: '/x', fullPath: '/api/x', mountedAt: ['/api'] },
+    });
+    const b = structuredClone(a);
+    const route = b.nodes[b.nodes.length - 1]!;
+    route.name = 'GET /v2/x';
+    route.meta = { ...route.meta, fullPath: '/v2/x', mountedAt: ['/v2'] };
+    const diff = compareGraphs(a, b);
+    expect(diff.identical).toBe(false);
+    expect(diff.nodes.changed).toEqual([
+      {
+        id: 'route:s.js#r GET /x',
+        kind: 'route',
+        name: 'GET /v2/x',
+        before: { fullPath: '/api/x', mountedAt: ['/api'] },
+        after: { fullPath: '/v2/x', mountedAt: ['/v2'] },
+      },
+    ]);
+    // caminho completo que deixou de ser comprovado também é mudança
+    delete route.meta!.fullPath;
+    expect(compareGraphs(a, b).nodes.changed[0]?.after).toEqual({ mountedAt: ['/v2'] });
+    expect(compareGraphs(a, structuredClone(a)).nodes.changed).toEqual([]);
+  });
+
   it('duas análises iguais não têm diferenças', () => {
     const diff = compareGraphs(before, structuredClone(before));
     expect(diff.identical).toBe(true);

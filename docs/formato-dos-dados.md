@@ -195,7 +195,7 @@ Caminhos dentro de `error` são relativos à raiz analisada (a pasta do usuário
 - `mermaid` e `dot`: diagramas para leitura, com ids próprios do formato (o id original fica no `tooltip` do DOT).
 - `html`: a interface completa num arquivo só, com o grafo em `<script id="rastro-graph" type="application/json">` (com `<`, `>` e `&` escapados como `\u003c`...).
 
-`rastro compare a.json b.json --json` produz a diferença entre duas análises (`compareGraphs` em `@rastro/graph`): `nodes.added`/`nodes.removed`, `edges.added`/`edges.removed`/`edges.resolutionChanged` (sem as relações `contains`, que só repetem os nós), `cycles.added`/`cycles.removed` e `stats` (`before`, `after`, `delta` de arquivos, funções, classes, métodos, rotas, pacotes, relações não resolvidas, ciclos, nós e relações). Tudo é comparado pelo `id`.
+`rastro compare a.json b.json --json` produz a diferença entre duas análises (`compareGraphs` em `@rastro/graph`): `nodes.added`/`nodes.removed`, `nodes.changed` (rotas com o mesmo `id`, que usa o caminho local, cujo endereço mudou: `before`/`after` com `fullPath` e `mountedAt`), `edges.added`/`edges.removed`/`edges.resolutionChanged` (sem as relações `contains`, que só repetem os nós), `cycles.added`/`cycles.removed` e `stats` (`before`, `after`, `delta` de arquivos, funções, classes, métodos, rotas, pacotes, relações não resolvidas, ciclos, nós e relações). Tudo é comparado pelo `id`; `identical` é `true` só sem nenhuma dessas diferenças.
 
 ## Exemplo
 

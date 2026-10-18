@@ -224,6 +224,29 @@ describe('formatDiff nos dois idiomas', () => {
       'No node, relationship or cycle changed between the two analyses.',
     );
   });
+
+  it('rota com endereço novo aparece como alterada', () => {
+    const a = structuredClone(before);
+    a.nodes.push({
+      id: 'route:src/server.js#r GET /x',
+      kind: 'route',
+      name: 'GET /api/x',
+      meta: { httpMethod: 'GET', routePath: '/x', fullPath: '/api/x', mountedAt: ['/api'] },
+    });
+    const b = structuredClone(a);
+    b.nodes[b.nodes.length - 1]!.meta = {
+      httpMethod: 'GET',
+      routePath: '/x',
+      fullPath: '/v2/x',
+      mountedAt: ['/v2'],
+    };
+    const diff = compareGraphs(a, b);
+    expect(diff.identical).toBe(false);
+    const en = formatDiff(diff, 'en');
+    expect(en).toContain('Routes with a new address (1)');
+    expect(en).toContain('~ src/server.js#r GET /x: /api/x → /v2/x');
+    expect(formatDiff(diff, 'pt')).toContain('Rotas com outro endereço (1)');
+  });
 });
 
 const bin = path.join(repo, 'apps', 'cli', 'bin', 'rastro.js');

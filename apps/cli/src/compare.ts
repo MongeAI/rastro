@@ -1,5 +1,5 @@
 import { kindLabels, type Lang } from '@rastro/core';
-import type { ComparedStat, DiffEdge, DiffNode, GraphDiff } from '@rastro/graph';
+import type { ComparedStat, DiffEdge, DiffNode, GraphDiff, RouteAddress } from '@rastro/graph';
 import { getLang, MESSAGES, type Messages } from './i18n.js';
 import { bold, cyan, dim, green, red, safeText, yellow } from './term.js';
 
@@ -90,6 +90,22 @@ export function formatDiff(diff: GraphDiff, lang: Lang = getLang()): string {
 
   nodeSection(m.added, diff.nodes.added, green('+'));
   nodeSection(m.removed, diff.nodes.removed, red('-'));
+  // rotas com o mesmo id e outro endereço (caminho completo ou montagem)
+  const moved = diff.nodes.changed ?? [];
+  if (moved.length) {
+    out.push('', bold(`${m.changed} (${moved.length})`));
+    const address = (a: RouteAddress) =>
+      safeText(
+        a.fullPath ?? (a.mountedAt?.length ? m.mountedAt(a.mountedAt.join(', ')) : m.unknownPath),
+      );
+    capped(
+      moved,
+      (c) =>
+        `    ${yellow('~')} ${shortId(c.id)}: ${address(c.before)} ${dim('→')} ${address(c.after)}`,
+      out,
+      m,
+    );
+  }
   edgeSection(m.edgesAdded, diff.edges.added, green('+'));
   edgeSection(m.edgesRemoved, diff.edges.removed, red('-'));
 

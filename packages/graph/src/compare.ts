@@ -24,6 +24,22 @@ export interface DiffNode {
   file?: string;
 }
 
+/** Endereço de uma rota: o caminho completo (quando comprovado) e onde foi montada. */
+export interface RouteAddress {
+  fullPath?: string;
+  mountedAt?: string[];
+}
+
+/**
+ * Rota com o mesmo id nas duas análises (o id usa o caminho local) cujo endereço mudou: o
+ * caminho completo (`meta.fullPath`, inclusive deixar de ser comprovado) ou os prefixos de
+ * montagem (`meta.mountedAt`). `name` é o da análise nova.
+ */
+export interface NodeChange extends DiffNode {
+  before: RouteAddress;
+  after: RouteAddress;
+}
+
 export interface DiffEdge {
   id: string;
   kind: EdgeKind;
@@ -68,12 +84,12 @@ export interface GraphDiffSide {
 export interface GraphDiff {
   before: GraphDiffSide;
   after: GraphDiffSide;
-  nodes: { added: DiffNode[]; removed: DiffNode[] };
+  nodes: { added: DiffNode[]; removed: DiffNode[]; changed: NodeChange[] };
   edges: { added: DiffEdge[]; removed: DiffEdge[]; resolutionChanged: ResolutionChange[] };
   /** Ciclos de importação que surgiram ou deixaram de existir (listas de ids de arquivo). */
   cycles: { added: string[][]; removed: string[][] };
   stats: Record<ComparedStat, StatDelta>;
-  /** Nenhum nó, relação ou ciclo entrou, saiu ou mudou. */
+  /** Nenhum nó, relação ou ciclo entrou, saiu ou mudou (inclusive o endereço de uma rota). */
   identical: boolean;
 }
 
@@ -98,6 +114,14 @@ function diffNode(node: GraphNode): DiffNode {
     name: node.name,
     ...(node.qualifiedName ? { qualifiedName: node.qualifiedName } : {}),
     ...(file ? { file } : {}),
+  };
+}
+
+function routeAddress(node: GraphNode): RouteAddress {
+  const { fullPath, mountedAt } = node.meta ?? {};
+  return {
+    ...(fullPath !== undefined ? { fullPath } : {}),
+    ...(mountedAt?.length ? { mountedAt: [...mountedAt].sort(compareStrings) } : {}),
   };
 }
 
@@ -145,6 +169,15 @@ export function compareGraphs(
   const afterNodes = new Map(after.nodes.map((n) => [n.id, n]));
   const nodesAdded = after.nodes.filter((n) => !beforeNodes.has(n.id)).map(diffNode);
   const nodesRemoved = before.nodes.filter((n) => !afterNodes.has(n.id)).map(diffNode);
+  const nodesChanged: NodeChange[] = [];
+  for (const node of after.nodes) {
+    const old = beforeNodes.get(node.id);
+    if (node.kind !== 'route' || !old) continue;
+    const was = routeAddress(old);
+    const now = routeAddress(node);
+    if (JSON.stringify(was) !== JSON.stringify(now))
+      nodesChanged.push({ ...diffNode(node), before: was, after: now });
+  }
 
   const counts = (e: GraphEdge) => options.includeContains || e.kind !== 'contains';
   const beforeEdges = new Map(before.edges.filter(counts).map((e) => [e.id, e]));
@@ -189,7 +222,11 @@ export function compareGraphs(
   return {
     before: side(before),
     after: side(after),
-    nodes: { added: nodesAdded.sort(byId), removed: nodesRemoved.sort(byId) },
+    nodes: {
+      added: nodesAdded.sort(byId),
+      removed: nodesRemoved.sort(byId),
+      changed: nodesChanged.sort(byId),
+    },
     edges: {
       added: edgesAdded.sort(byId),
       removed: edgesRemoved.sort(byId),
@@ -200,6 +237,7 @@ export function compareGraphs(
     identical:
       !nodesAdded.length &&
       !nodesRemoved.length &&
+      !nodesChanged.length &&
       !edgesAdded.length &&
       !edgesRemoved.length &&
       !resolutionChanged.length &&
