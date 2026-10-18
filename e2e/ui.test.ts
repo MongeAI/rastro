@@ -268,6 +268,8 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
       'src/a.ts': 'export function alpha() {\n  return 1;\n}\n',
       'src/b.ts':
         "import { alpha } from './a';\n\nexport function useAlpha() {\n  return alpha();\n}\n",
+      'test/a.test.ts':
+        "import { alpha } from '../src/a';\n\nexport function check() {\n  return alpha() > 0;\n}\n",
     });
     fs.writeFileSync(path.join(root, 'src/a.ts'), 'export function alpha() {\n  return 2;\n}\n');
     const run = await startRastro([root, '--changes', '-o', path.join(graphOut, 'changes.json')]);
@@ -277,6 +279,10 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
       const names = await texts(page, '.details .rel-name');
       expect(names).toContain('alpha');
       expect(names).toContain('useAlpha');
+      // os testes afetados podem ser copiados para o executor de testes
+      expect(names).toContain('test/a.test.ts');
+      const copy = await page.$$('xpath/.//button[contains(., "Copiar caminhos")]');
+      expect(copy.length).toBe(1);
       expect(problems).toEqual([]);
       await page.close();
     } finally {
