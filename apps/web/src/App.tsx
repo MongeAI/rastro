@@ -54,6 +54,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    // Relatório HTML offline (`rastro export --format html`): o grafo vem embutido na própria
+    // página e não há servidor. Sem servidor, o código-fonte fica indisponível (fromServer=false).
+    const embedded = document.getElementById('rastro-graph');
+    if (embedded) {
+      try {
+        openGraph(JSON.parse(embedded.textContent ?? ''), false);
+      } catch (err) {
+        setLoad({
+          status: 'error',
+          message: `O grafo embutido neste relatório está corrompido: ${(err as Error).message}`,
+          canPickFile: true,
+        });
+      }
+      return;
+    }
     fetch('/api/graph')
       .then(async (res) => {
         if (res.status === 401) {
