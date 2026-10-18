@@ -1,6 +1,6 @@
 {
   "name": "@rastro/graph",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Construção, normalização e consultas sobre o grafo do Rastro (sem dependências de Node).",
   "license": "MIT",
   "type": "module",

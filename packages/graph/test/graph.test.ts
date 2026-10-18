@@ -277,6 +277,25 @@ describe('computeView (expansão progressiva)', () => {
     );
   });
 
+  it('relação de um símbolo visível sobe até o arquivo fechado do outro lado', () => {
+    // b.ts aberto: Svc.go chama run, que está em a.ts (fechado) → a linha vai até a.ts
+    const open = computeView(index, {
+      nodeKinds: allKinds,
+      edgeKinds,
+      expandedFiles: new Set(['file:src/b.ts']),
+    });
+    const lifted = open.edges.find((e) => e.kind === 'calls');
+    expect(lifted).toMatchObject({
+      source: 'method:src/b.ts#Svc.go',
+      target: 'file:src/a.ts',
+      aggregated: true,
+      members: ['calls:method:src/b.ts#Svc.go->fn:src/a.ts#run'],
+    });
+    // os dois arquivos fechados: chamadas entre símbolos escondidos não viram linha
+    const closed = computeView(index, { nodeKinds: allKinds, edgeKinds, expandedFiles: new Set() });
+    expect(closed.edges.some((e) => e.kind === 'calls')).toBe(false);
+  });
+
   it('respeita filtros de tipo de nó e relação', () => {
     const view = computeView(index, {
       nodeKinds: new Set<NodeKind>(['file']),

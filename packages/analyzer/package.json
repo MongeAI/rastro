@@ -1,6 +1,6 @@
 {
   "name": "@rastro/analyzer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Analisador estático de projetos JavaScript/TypeScript do Rastro (ts-morph).",
   "license": "MIT",
   "type": "module",

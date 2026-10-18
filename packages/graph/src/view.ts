@@ -196,6 +196,20 @@ export function computeView(index: GraphIndex, options: ViewOptions): GraphView 
     return visible.has(id) ? id : undefined;
   };
 
+  /**
+   * Para relações com um lado visível e o outro escondido (ex.: uma rota de um arquivo aberto
+   * chamando uma função de um arquivo fechado): o grupo visível mais próximo que contém o lado
+   * escondido. Com os dois lados escondidos a relação não aparece, para o nível de arquivos não
+   * se encher de chamadas que repetem os imports.
+   */
+  const liftHidden = (id: string): string | undefined => {
+    for (const ancestor of index.ancestors(id)) {
+      const rep = repFor(ancestor.id) ?? (visible.has(ancestor.id) ? ancestor.id : undefined);
+      if (rep) return rep;
+    }
+    return undefined;
+  };
+
   /** `a` é ancestral de `b` no mapa (a relação desenhada seria um laço no próprio grupo). */
   const isViewAncestor = (a: string, b: string) => {
     for (let cur = parentOf.get(b); cur; cur = parentOf.get(cur)) if (cur === a) return true;
@@ -205,8 +219,10 @@ export function computeView(index: GraphIndex, options: ViewOptions): GraphView 
   const byKey = new Map<string, ViewEdge>();
   for (const edge of index.edges.values()) {
     if (edge.kind === 'contains' || !options.edgeKinds.has(edge.kind)) continue;
-    const source = repFor(edge.source);
-    const target = repFor(edge.target);
+    let source = repFor(edge.source);
+    let target = repFor(edge.target);
+    if (!source && target && repOf.has(edge.target)) source = liftHidden(edge.source);
+    else if (source && !target && repOf.has(edge.source)) target = liftHidden(edge.target);
     if (!source || !target || source === target) continue;
     if (isViewAncestor(source, target) || isViewAncestor(target, source)) continue;
     const aggregated = source !== edge.source || target !== edge.target;

@@ -1,6 +1,6 @@
 {
   "name": "@mongeai/rastro",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Follow the trail of your code: a local-first, explorable map of JavaScript/TypeScript projects where every relationship links to the line that proves it.",
   "license": "MIT",
   "author": "MongeAI",

@@ -1,6 +1,6 @@
 {
   "name": "@rastro/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Modelo de dados do Rastro: nós, relações, evidências e validação do grafo.",
   "license": "MIT",
   "type": "module",

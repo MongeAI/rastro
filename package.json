@@ -1,6 +1,6 @@
 {
   "name": "rastro-monorepo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Rastro — transforma repositórios JavaScript/TypeScript em mapas navegáveis de código.",
   "license": "MIT",
