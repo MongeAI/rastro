@@ -94,6 +94,40 @@ Para usar esse build como comando global: `npm link -w apps/cli` (para desfazer,
 
 ## Novidades da 0.2
 
+### O Rastro em cada pull request
+
+Acrescente um passo ao seu workflow e cada pull request ganha um comentário com **o que ele muda, o que pode quebrar, as rotas HTTP envolvidas e os testes para rodar**, cada linha com link para o código, além do mapa interativo offline como artefato. O comentário é atualizado a cada push.
+
+```yaml
+# .github/workflows/rastro.yml
+name: Rastro
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # o histórico é necessário para achar onde a branch começou
+      - uses: MongeAI/rastro@v0.2.0
+        with:
+          lang: pt
+```
+
+O mesmo relatório está disponível em qualquer lugar com `rastro impact`:
+
+```bash
+rastro impact . --since main                      # no terminal
+rastro impact . --since main --format markdown    # para um comentário ou uma página de wiki
+rastro impact . --since main --format json        # para scripts e CI
+npx vitest run $(rastro impact . --since main --tests)   # roda só os testes afetados
+```
+
+Rodar só os testes afetados é ótimo para um retorno rápido, mas mantenha a suíte completa no CI: código alcançado só por referências não resolvidas (callbacks, chamadas dinâmicas) não é seguido. Mais opções em [GitHub Action](#github-action).
+
 ### O que este pull request afeta?
 
 `rastro . --since main` (ou `--changes` para o que ainda não foi commitado) lê o `git diff` e marca as **funções, métodos e arquivos** cujas linhas mudaram. A aba **Mudanças** mostra o que mudou, **quem depende disso** (por distância, por chamadas, imports e herança comprovados), as **rotas HTTP** envolvidas e os **arquivos de teste para rodar**. O mapa destaca o alcance do impacto.
@@ -224,6 +258,7 @@ rastro serve <grafo.json>        # abre o mapa de um JSON salvo antes
 rastro validate <grafo.json>     # confere se um JSON é um grafo válido
 rastro export <caminho|grafo.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # o que entrou, saiu ou mudou entre duas análises
+rastro impact <caminho|grafo.json>  # o impacto das mudanças do git (texto, markdown ou json)
 ```
 
 | Opção                  | Para que serve                                                                                                                      |
@@ -268,6 +303,48 @@ rastro export . --format html --since main                   # um relatório off
 - **HTML** é um **arquivo único e offline** com o mapa interativo completo: JavaScript, estilos, fontes e o grafo vão embutidos, ele abre direto do disco (sem servidor, sem internet) e uma Content Security Policy bloqueia qualquer acesso à rede. Com `--changes` ou `--since`, inclui a aba **Mudanças**. O código-fonte não vai junto, e a pasta pessoal no caminho do projeto vira `~`. Ótimo para mandar ao time ou anexar a um PR.
 
 `rastro compare antes.json depois.json` lista as entidades que entraram e saíram, as relações adicionadas, removidas ou com resolução diferente, os ciclos de importação novos ou resolvidos e a diferença nos números (arquivos, funções, referências não resolvidas, ciclos…). Use `--json` para um diff legível por máquina (no CI, por exemplo).
+
+### Relatório de impacto
+
+`rastro impact` analisa a pasta (ou lê um grafo salvo com `--changes`/`--since`) e mostra o que mudou, o que pode ser afetado (com a distância e a relação que leva até lá), as rotas HTTP envolvidas, os arquivos de teste para rodar e os arquivos alterados que estão fora do mapa.
+
+| Opção                 | Para que serve                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------- |
+| `--since <ref>`       | Compara com o ponto em que a branch saiu de `<ref>` (padrão: o que ainda não foi commitado)       |
+| `-f, --format <f>`    | `text` (padrão), `markdown` ou `json`                                                             |
+| `--tests`             | Mostra só os arquivos de teste afetados, um por linha, relativos à pasta atual                    |
+| `--link <url>`        | Transforma `arquivo:linha` em links no Markdown, ex.: `https://github.com/org/repo/blob/<commit>` |
+| `-o, --out <arquivo>` | Grava num arquivo em vez da saída padrão                                                          |
+
+Tudo o que vem do projeto analisado (nomes, caminhos) entra no Markdown como código, então um nome de arquivo não consegue injetar links, imagens, menções ou HTML num comentário de pull request.
+
+### GitHub Action
+
+`uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário só, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`.
+
+| Entrada   | Padrão                 | Para que serve                                             |
+| --------- | ---------------------- | ---------------------------------------------------------- |
+| `path`    | `.`                    | Pasta do projeto a analisar                                |
+| `base`    | a base do pull request | Branch para comparar                                       |
+| `exclude` |                        | Caminhos a ignorar, um por linha (sintaxe do `.gitignore`) |
+| `comment` | `true`                 | Comenta no pull request                                    |
+| `report`  | `true`                 | Envia o relatório HTML offline                             |
+| `lang`    | `en`                   | `en` ou `pt`                                               |
+| `version` | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                        |
+
+Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
+
+```yaml
+- id: rastro
+  uses: MongeAI/rastro@v0.2.0
+- name: Testes afetados primeiro
+  if: steps.rastro.outputs.tests != ''
+  env:
+    TESTS: ${{ steps.rastro.outputs.tests }}
+  run: printf '%s\n' "$TESTS" | xargs -d '\n' npx vitest run
+```
+
+Pull requests de forks recebem um token só de leitura, então o comentário é pulado com um aviso; o resumo do job continua com o relatório completo. A action nunca executa código do pull request: o Rastro só lê arquivos e roda o git em modo leitura.
 
 ### Atalhos de teclado
 

@@ -96,6 +96,38 @@ To use this build as a global command: `npm link -w apps/cli` (undo with `npm un
 
 ## What's new in 0.2
 
+### Rastro in every pull request
+
+Add one step to your workflow and every pull request gets a comment with **what it changes, what could break, the HTTP routes involved and the tests to run**, each line linked to the code, plus the offline interactive map as an artifact. The comment is updated on every push.
+
+```yaml
+# .github/workflows/rastro.yml
+name: Rastro
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the history is needed to find where the branch started
+      - uses: MongeAI/rastro@v0.2.0
+```
+
+The same report is available anywhere with `rastro impact`:
+
+```bash
+rastro impact . --since main                      # in the terminal
+rastro impact . --since main --format markdown    # for a comment or a wiki page
+rastro impact . --since main --format json        # for scripts and CI
+npx vitest run $(rastro impact . --since main --tests)   # run only the affected tests
+```
+
+Running only the affected tests is great for fast feedback, but keep the full suite in CI: code reached only through unresolved references (callbacks, dynamic calls) is not followed. More options in [GitHub Action](#github-action).
+
 ### What does this pull request affect?
 
 `rastro . --since main` (or `--changes` for uncommitted work) reads `git diff` and marks the **functions, methods and files** whose lines changed. The **Changes** tab shows what changed, **who depends on it** (by distance, through proven calls, imports and inheritance), the **HTTP routes** involved and the **test files to run**. The map highlights the blast radius.
@@ -226,6 +258,7 @@ rastro serve <graph.json>        # open the map of a previously saved JSON
 rastro validate <graph.json>     # check that a JSON file is a valid graph
 rastro export <path|graph.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # what was added, removed or changed between two analyses
+rastro impact <path|graph.json>  # the impact of the git changes (text, markdown or json)
 ```
 
 | Option                 | Purpose                                                                                                            |
@@ -270,6 +303,48 @@ rastro export . --format html --since main                   # an offline report
 - **HTML** is a **single offline file** with the full interactive map: JavaScript, styles, fonts and the graph are embedded, it opens straight from disk (no server, no internet) and a Content Security Policy blocks any network access. With `--changes` or `--since`, it includes the **Changes** tab. Source code is not included, and your home folder in the project path is shortened to `~`. Handy to send to the team or attach to a PR.
 
 `rastro compare before.json after.json` lists the entities added and removed, relationships added, removed or whose resolution changed, new or resolved import cycles and the difference in the numbers (files, functions, unresolved references, cycles…). Use `--json` for a machine-readable diff (for CI, for example).
+
+### Impact report
+
+`rastro impact` analyzes the folder (or reads a graph saved with `--changes`/`--since`) and reports what changed, what could be affected (with the distance and the relationship that leads there), the HTTP routes involved, the test files to run and the changed files that are outside the map.
+
+| Option             | Purpose                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| `--since <ref>`    | Compare with the point where the branch forked from `<ref>` (default: uncommitted changes) |
+| `-f, --format <f>` | `text` (default), `markdown` or `json`                                                     |
+| `--tests`          | Print only the affected test files, one per line, relative to the current folder           |
+| `--link <url>`     | Turn `file:line` into links in Markdown, e.g. `https://github.com/org/repo/blob/<commit>`  |
+| `-o, --out <file>` | Write to a file instead of the standard output                                             |
+
+Everything that comes from the analyzed project (names, paths) goes into Markdown as inline code, so a file name cannot inject links, images, mentions or HTML into a pull request comment.
+
+### GitHub Action
+
+`uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact.
+
+| Input     | Default                 | Purpose                                             |
+| --------- | ----------------------- | --------------------------------------------------- |
+| `path`    | `.`                     | Project folder to analyze                           |
+| `base`    | the pull request's base | Branch to compare against                           |
+| `exclude` |                         | Paths to ignore, one per line (`.gitignore` syntax) |
+| `comment` | `true`                  | Comment on the pull request                         |
+| `report`  | `true`                  | Upload the offline HTML report                      |
+| `lang`    | `en`                    | `en` or `pt`                                        |
+| `version` | `0.2.0`                 | Version of `@mongeai/rastro` to run                 |
+
+Outputs: `tests` (affected test files, one per line), `changed`, `impacted`, `markdown` and `json` (paths of the reports). To run only the affected tests in a later step, pass the output through an environment variable (never straight into `run:`):
+
+```yaml
+- id: rastro
+  uses: MongeAI/rastro@v0.2.0
+- name: Affected tests first
+  if: steps.rastro.outputs.tests != ''
+  env:
+    TESTS: ${{ steps.rastro.outputs.tests }}
+  run: printf '%s\n' "$TESTS" | xargs -d '\n' npx vitest run
+```
+
+Pull requests from forks get a read-only token, so the comment is skipped with a warning; the job summary still has the full report. The action never runs code from the pull request: Rastro only reads files and runs git in read-only mode.
 
 ### Keyboard shortcuts
 

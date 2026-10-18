@@ -33,12 +33,19 @@ Uso:
                                   exporta o mapa: mermaid, dot, graphml, json ou html
                                   (html = relatório navegável num arquivo só, offline)
   rastro compare <a.json> <b.json>  o que entrou, saiu e mudou entre duas análises
+  rastro impact <caminho|grafo.json>
+                                  o impacto das mudanças do git: o que mudou, quem pode ser
+                                  afetado, rotas e testes (texto, markdown ou json)
 
 Opções:
   -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário); no export,
                             o arquivo gerado (padrão: saída padrão; html: <projeto>.rastro.html)
       --stdout              (analyze) escreve o JSON na saída padrão
   -f, --format <formato>    (export) mermaid, dot, graphml, json ou html
+                            (impact) text (padrão), markdown ou json
+      --tests               (impact) só os arquivos de teste afetados, um por linha
+      --link <url>          (impact) base dos links arquivo:linha no markdown, ex.:
+                            https://github.com/org/repo/blob/<commit>
       --level <nível>       (export) modules, files (padrão) ou symbols
       --folder <pasta>      (export) só esta pasta, ex.: src/services
       --edges <tipos>       (export) relações, ex.: imports,calls (padrão: imports,calls,extends)
@@ -112,6 +119,41 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     routes: (count: number) => n(count, 'rota', 'rotas'),
     tests: (count: number) => n(count, 'arquivo de teste', 'arquivos de teste'),
     skipped: (reason: string) => `mudanças do git não incluídas: ${reason}`,
+  },
+  impact: {
+    title: 'Impacto das mudanças',
+    noChanges: 'nenhuma mudança encontrada',
+    files: (count: number) => n(count, 'arquivo alterado', 'arquivos alterados'),
+    changedCount: (count: number) => n(count, 'entidade alterada', 'entidades alteradas'),
+    impactedCount: (count: number) =>
+      count === 1 ? '1 pode ser afetada' : `${count} podem ser afetadas`,
+    routesCount: (count: number) => n(count, 'rota HTTP', 'rotas HTTP'),
+    testsCount: (count: number) => n(count, 'arquivo de teste', 'arquivos de teste'),
+    changed: 'O que mudou',
+    impacted: 'Pode ser afetado',
+    nothingDepends: 'Nada conhecido depende do que mudou.',
+    routes: 'Rotas HTTP envolvidas',
+    tests: 'Testes para rodar',
+    outside: 'Fora do mapa',
+    status: { added: 'novo', modified: 'alterado', deleted: 'removido', renamed: 'renomeado' },
+    entity: 'Entidade',
+    kind: 'Tipo',
+    where: 'Onde',
+    distance: 'Distância',
+    via: 'Por meio de',
+    viaText: (kind: string, target: string) =>
+      `${kind === 'imports' ? 'importa' : kind === 'extends' ? 'estende' : 'chama'} ${target}`,
+    more: (count: number) => `… e mais ${count}`,
+    howToRead: 'Como ler este relatório',
+    footnote:
+      'Só relações comprovadas (chamadas, imports e herança resolvidos, com arquivo e linha) entram no impacto. Referências não resolvidas (callbacks, chamadas dinâmicas) não são seguidas, então algo pode depender do que mudou sem aparecer aqui. A distância conta quantas relações separam a entidade do que mudou.',
+    generatedBy: (version: string) =>
+      `Gerado pelo <a href="https://github.com/MongeAI/rastro">Rastro</a> ${version} · análise estática, nenhum código executado`,
+    badFormat: (value: string) =>
+      `formato desconhecido para impact: "${value}". Use text, markdown ou json.`,
+    needsChanges:
+      'este grafo não tem mudanças do git. Gere com "rastro analyze <pasta> --changes" (ou --since <ref>), ou rode "rastro impact <pasta>".',
+    gitFailed: (reason: string) => `não foi possível ler as mudanças do git: ${reason}`,
   },
   serve: {
     webNotBuilt:
@@ -275,12 +317,19 @@ Usage:
                                   export the map: mermaid, dot, graphml, json or html
                                   (html = a single-file, offline, explorable report)
   rastro compare <a.json> <b.json>  what was added, removed or changed between two analyses
+  rastro impact <path|graph.json>
+                                  the impact of the git changes: what changed, what could be
+                                  affected, routes and tests (text, markdown or json)
 
 Options:
   -o, --out <file>          where to save the JSON (default: user cache); with export,
                             the output file (default: standard output; html: <project>.rastro.html)
       --stdout              (analyze) write the JSON to standard output
   -f, --format <format>     (export) mermaid, dot, graphml, json or html
+                            (impact) text (default), markdown or json
+      --tests               (impact) only the affected test files, one per line
+      --link <url>          (impact) base for file:line links in markdown, e.g.
+                            https://github.com/org/repo/blob/<commit>
       --level <level>       (export) modules, files (default) or symbols
       --folder <path>       (export) only this folder, e.g. src/services
       --edges <kinds>       (export) relationships, e.g. imports,calls (default: imports,calls,extends)
@@ -368,6 +417,39 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     routes: (count) => n(count, 'route', 'routes'),
     tests: (count) => n(count, 'test file', 'test files'),
     skipped: (reason) => `git changes not included: ${reason}`,
+  },
+  impact: {
+    title: 'Impact of the changes',
+    noChanges: 'no changes found',
+    files: (count) => n(count, 'changed file', 'changed files'),
+    changedCount: (count) => n(count, 'changed entity', 'changed entities'),
+    impactedCount: (count) => `${count} could be affected`,
+    routesCount: (count) => n(count, 'HTTP route', 'HTTP routes'),
+    testsCount: (count) => n(count, 'test file', 'test files'),
+    changed: 'What changed',
+    impacted: 'Could be affected',
+    nothingDepends: 'Nothing known depends on what changed.',
+    routes: 'HTTP routes involved',
+    tests: 'Tests to run',
+    outside: 'Outside the map',
+    status: { added: 'new', modified: 'modified', deleted: 'deleted', renamed: 'renamed' },
+    entity: 'Entity',
+    kind: 'Kind',
+    where: 'Where',
+    distance: 'Distance',
+    via: 'Through',
+    viaText: (kind, target) =>
+      `${kind === 'imports' ? 'imports' : kind === 'extends' ? 'extends' : 'calls'} ${target}`,
+    more: (count) => `… and ${count} more`,
+    howToRead: 'How to read this report',
+    footnote:
+      'Only proven relationships (resolved calls, imports and inheritance, with file and line) count toward the impact. Unresolved references (callbacks, dynamic calls) are not followed, so something may depend on what changed without showing up here. The distance counts how many relationships separate the entity from what changed.',
+    generatedBy: (version) =>
+      `Generated by <a href="https://github.com/MongeAI/rastro">Rastro</a> ${version} · static analysis, no code executed`,
+    badFormat: (value) => `unknown format for impact: "${value}". Use text, markdown or json.`,
+    needsChanges:
+      'this graph has no git changes. Create it with "rastro analyze <folder> --changes" (or --since <ref>), or run "rastro impact <folder>".',
+    gitFailed: (reason) => `could not read the git changes: ${reason}`,
   },
   serve: {
     webNotBuilt:

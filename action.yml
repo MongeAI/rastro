@@ -1,0 +1,87 @@
+name: Rastro impact
+description: >-
+  Comments on every pull request what the change affects (proven calls, imports, routes and tests to run)
+  and attaches an offline interactive map. Static analysis only: no code from the repository is executed.
+author: MongeAI
+branding:
+  icon: git-pull-request
+  color: gray-dark
+
+inputs:
+  path:
+    description: Project folder to analyze, relative to the repository root.
+    default: .
+  base:
+    description: Branch to compare against. Default is the pull request's base branch.
+    default: ''
+  exclude:
+    description: Paths to ignore, one per line (.gitignore syntax).
+    default: ''
+  comment:
+    description: Post the impact as a pull request comment (updated on every push).
+    default: 'true'
+  report:
+    description: Upload the offline interactive HTML report as a workflow artifact.
+    default: 'true'
+  lang:
+    description: Language of the comment and report (en or pt).
+    default: en
+  version:
+    description: Version of @mongeai/rastro to run.
+    default: 0.2.0
+  github-token:
+    description: Token used to comment on the pull request.
+    default: ${{ github.token }}
+
+outputs:
+  tests:
+    description: Test files that changed or depend on what changed, one per line (relative to the workspace).
+    value: ${{ steps.impact.outputs.tests }}
+  impacted:
+    description: How many entities could be affected.
+    value: ${{ steps.impact.outputs.impacted }}
+  changed:
+    description: How many entities changed.
+    value: ${{ steps.impact.outputs.changed }}
+  markdown:
+    description: Path of the Markdown report.
+    value: ${{ steps.impact.outputs.markdown }}
+  json:
+    description: Path of the JSON report.
+    value: ${{ steps.impact.outputs.json }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+
+    - id: impact
+      shell: bash
+      env:
+        RASTRO_PATH: ${{ inputs.path }}
+        RASTRO_BASE: ${{ inputs.base }}
+        RASTRO_EXCLUDE: ${{ inputs.exclude }}
+        RASTRO_LANG: ${{ inputs.lang }}
+        RASTRO_VERSION: ${{ inputs.version }}
+        RASTRO_REPORT: ${{ inputs.report }}
+        RASTRO_LINK: https://github.com/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha || github.sha }}/${{ inputs.path != '.' && inputs.path || '' }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/action/impact.sh"
+
+    - id: upload
+      if: inputs.report == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: rastro-report
+        path: ${{ steps.impact.outputs.dir }}/rastro-report.html
+        retention-days: 14
+
+    - if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        RASTRO_MARKDOWN: ${{ steps.impact.outputs.markdown }}
+        RASTRO_REPORT_URL: ${{ steps.upload.outputs.artifact-url }}
+        RASTRO_LANG: ${{ inputs.lang }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/action/comment.sh"

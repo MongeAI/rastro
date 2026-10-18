@@ -8,6 +8,8 @@ The map now answers **what matters**: what a change affects, how one part reache
 
 ### Added
 
+- **Rastro in every pull request.** A GitHub Action (`uses: MongeAI/rastro@v0.2.0`) comments on each pull request what it changes, what could be affected, the HTTP routes involved and the tests to run (one comment, updated on every push), writes the job summary and uploads the offline HTML map. Pull requests from forks still get the job summary.
+- **`rastro impact`.** The impact of the git changes in the terminal, as Markdown (with `file:line` links) or JSON; `--tests` prints only the affected test files, ready for `vitest run $(…)`. Names from the analyzed project are escaped so they cannot inject links, images, mentions or HTML into a comment.
 - **Git changes and impact.** `--changes` (since the last commit, including untracked files) and `--since <ref>` (since the branch forked from `<ref>`) mark the changed functions, methods and files by their changed lines. The new **Changes** tab lists what changed, who depends on it by distance, the HTTP routes involved and the test files to run, and the map highlights the blast radius. Also available in `rastro export`, so an offline HTML report can carry a pull request's impact.
 - **Paths: “how does A reach B?”** Shortest chains of proven calls, imports and inheritance (up to 3 alternatives), each step with its evidence, shown in a map view with only the path.
 - **Insights tab.** Most called functions, orchestrators, central files, largest files, most coupled folders and possibly unused code (internal vs. exported), computed only from proven relationships.

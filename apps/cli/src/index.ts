@@ -20,6 +20,13 @@ import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
 import { formatDiff } from './compare.js';
 import {
+  buildImpactReport,
+  IMPACT_FORMATS,
+  renderImpact,
+  testPathsFrom,
+  type ImpactFormat,
+} from './impact.js';
+import {
   defaultReportPath,
   parseExportRequest,
   renderExport,
@@ -150,6 +157,8 @@ async function main(argv: string[]): Promise<void> {
         external: { type: 'boolean' },
         'no-unresolved': { type: 'boolean' },
         json: { type: 'boolean' },
+        tests: { type: 'boolean' },
+        link: { type: 'string' },
         lang: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -163,7 +172,7 @@ async function main(argv: string[]): Promise<void> {
   if (values.help || positionals.length === 0)
     return void process.stdout.write(t().help(RASTRO_VERSION));
 
-  const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare'];
+  const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare', 'impact'];
   const [first, ...rest] = positionals;
   // "rastro analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho
   const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
@@ -177,14 +186,25 @@ async function main(argv: string[]): Promise<void> {
   const port = values.port !== undefined ? Number(values.port) : 4321;
   if (port > 65535) fail(u.portRange);
   if (values.stdout && command !== 'analyze') fail(u.onlyWith('--stdout', 'analyze'));
-  if (values.out && command !== 'analyze' && command !== 'open' && command !== 'export')
+  if (
+    values.out &&
+    command !== 'analyze' &&
+    command !== 'open' &&
+    command !== 'export' &&
+    command !== 'impact'
+  )
     fail(u.notApplicable('--out', command));
   if (values.json && command !== 'compare') fail(u.onlyWith('--json', 'compare'));
   if (command !== 'export') {
+    // --format também vale para o impact (text, markdown ou json)
     const exportOnly = (
       ['format', 'level', 'folder', 'edges', 'external', 'no-unresolved'] as const
-    ).find((k) => values[k] !== undefined);
+    ).find((k) => values[k] !== undefined && !(k === 'format' && command === 'impact'));
     if (exportOnly) fail(u.onlyWith(`--${exportOnly}`, 'export'));
+  }
+  if (command !== 'impact') {
+    const impactOnly = (['tests', 'link'] as const).find((k) => values[k] !== undefined);
+    if (impactOnly) fail(u.onlyWith(`--${impactOnly}`, 'impact'));
   }
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1)) fail(u.maxFiles);
@@ -317,6 +337,60 @@ async function main(argv: string[]): Promise<void> {
     }
     process.stderr.write(`${t().export.saved(request.format)} ${cyan(tildify(written))}\n`);
     if (request.format === 'html') process.stderr.write(dim(`  ${t().export.htmlHint}\n`));
+    return;
+  }
+
+  if (command === 'impact') {
+    const format = (values.format ?? 'text') as ImpactFormat;
+    if (!IMPACT_FORMATS.includes(format)) fail(t().impact.badFormat(values.format!));
+    const source = path.resolve(target);
+    if (!fs.existsSync(source)) fail(u.pathNotFound(source));
+    const fromFolder = fs.statSync(source).isDirectory();
+    if (!fromFolder && analysisFlag) fail(u.needsFolder(analysisFlag, command));
+    let graph: RastroGraph;
+    if (fromFolder) {
+      // só o texto mostra o progresso: markdown, json e --tests costumam ir para arquivos e CI
+      const progress = format === 'text' && !values.tests;
+      graph = await analyzeProject(source, {
+        ...discover,
+        ...(progress ? { onProgress: showProgress } : {}),
+      });
+      try {
+        // sem --changes nem --since: o que ainda não foi commitado
+        graph.changes = collectChanges(source, {
+          ...(values.since ? { since: values.since } : {}),
+          trustConfig: !!values['trust-git-config'],
+        });
+      } catch (err) {
+        fail(t().impact.gitFailed((err as Error).message));
+      }
+    } else {
+      try {
+        graph = loadGraph(source);
+      } catch (err) {
+        fail((err as Error).message);
+      }
+      if (!graph.changes) fail(t().impact.needsChanges);
+    }
+    const report = buildImpactReport(graph);
+    if (values.tests) {
+      const files = testPathsFrom(report, graph.project.root);
+      process.stdout.write(files.length ? `${files.join('\n')}\n` : '');
+      return;
+    }
+    const content = renderImpact(report, format, {
+      ...(values.link !== undefined ? { link: values.link } : {}),
+    });
+    if (values.out) {
+      try {
+        const written = writeExport(values.out, content);
+        process.stderr.write(`${t().export.saved(format)} ${cyan(tildify(written))}\n`);
+      } catch (err) {
+        fail((err as Error).message);
+      }
+      return;
+    }
+    process.stdout.write(content);
     return;
   }
 
