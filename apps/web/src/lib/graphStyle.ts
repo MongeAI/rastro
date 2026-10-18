@@ -14,14 +14,39 @@ export function displayLabel(n: ViewNode): string {
 }
 
 /** Largura estimada pelo tamanho do rótulo (o layout ELK usa o tamanho real do nó). */
-const nodeWidth = (n: NodeSingular) => {
-  const label = String(n.data('display') ?? '');
-  const kind = n.data('kind');
-  const charWidth = kind === 'method' ? 6.4 : n.data('collapsed') ? 7.4 : 7;
-  return Math.max(40, Math.min(360, label.length * charWidth + 28));
-};
+/**
+ * Largura estimada pelo tamanho do rótulo. Calculada uma vez ao criar o nó (vai em `data.w`):
+ * uma função no estilo seria reavaliada a cada recálculo, caro com milhares de nós.
+ */
+export function estimateNodeWidth(display: string, kind: string, collapsed: boolean): number {
+  const charWidth = kind === 'method' ? 6.4 : collapsed ? 7.4 : 7;
+  return Math.max(40, Math.min(360, display.length * charWidth + 28));
+}
 
-export function buildStyle(p: Palette): StylesheetJson {
+/**
+ * Tamanho do rótulo de um grupo: cresce quando o zoom diminui (o mapa continua legível de
+ * longe), mas nunca fica mais largo que a própria caixa, para não invadir os vizinhos.
+ */
+function groupFontSize(scale: () => number, groupWidth: (id: string) => number | undefined) {
+  return (n: NodeSingular) => {
+    const label = String(n.data('display') ?? '');
+    const factor = scale();
+    if (factor <= 1) return 11;
+    // largura do grupo medida depois do layout; medir aqui seria caro
+    const width = groupWidth(n.id()) ?? label.length * 6.8;
+    const byBox = (width + 2 * GROUP_PADDING) / Math.max(1, label.length * 0.62);
+    return Math.max(11, Math.min(11 * factor, byBox));
+  };
+}
+
+/** `labelScale` informa o fator atual de ampliação dos rótulos dos grupos (1 = sem ampliação). */
+export function buildStyle(
+  p: Palette,
+  labelScale: () => number = () => 1,
+  groupWidth: (id: string) => number | undefined = () => undefined,
+): StylesheetJson {
+  const groupFont = groupFontSize(labelScale, groupWidth);
+  const groupMargin = (n: NodeSingular) => -4 * (groupFont(n) / 11);
   const kinds = Object.keys(p.node) as Array<keyof Palette['node']>;
   return [
     {
@@ -35,7 +60,7 @@ export function buildStyle(p: Palette): StylesheetJson {
         'text-valign': 'center',
         'text-halign': 'center',
         'min-zoomed-font-size': 4,
-        width: nodeWidth,
+        width: 'data(w)',
         height: 28,
         shape: 'round-rectangle',
         'corner-radius': '6',
@@ -93,8 +118,8 @@ export function buildStyle(p: Palette): StylesheetJson {
       style: {
         'text-valign': 'top',
         'text-halign': 'center',
-        'text-margin-y': -4,
-        'font-size': 11,
+        'text-margin-y': groupMargin,
+        'font-size': groupFont,
         color: p.muted,
         padding: `${GROUP_PADDING}px`,
         'background-opacity': 0.035,
@@ -108,7 +133,7 @@ export function buildStyle(p: Palette): StylesheetJson {
         'border-style': 'dashed',
         'border-color': p.border,
         'font-family': MONO,
-        'font-size': 11,
+        'font-size': groupFont,
       },
     },
     {

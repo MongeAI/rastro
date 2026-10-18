@@ -23,6 +23,8 @@ interface Props {
   focusId: string | null;
   focusDepth: number;
   expanded: boolean;
+  /** Nível "Símbolos": todos os arquivos já estão expandidos (não há o que alternar). */
+  allSymbols: boolean;
   /** Para pastas: está recolhida no mapa. */
   moduleCollapsed: boolean;
   onNavigate(id: string): void;
@@ -162,7 +164,7 @@ export function DetailsPanel(p: Props) {
           >
             <IconExpand /> Expandir conexões
           </button>
-          {node.kind === 'file' && children.length > 0 && (
+          {node.kind === 'file' && children.length > 0 && !p.allSymbols && (
             <button
               type="button"
               className="button ghost"

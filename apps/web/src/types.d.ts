@@ -11,3 +11,8 @@ declare module 'cytoscape-layout-utilities' {
   const layoutUtilities: Ext;
   export default layoutUtilities;
 }
+
+declare module '*?url' {
+  const url: string;
+  export default url;
+}

@@ -135,6 +135,7 @@ export function App() {
 function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boolean }) {
   const index = useMemo(() => new GraphIndex(graph), [graph]);
   const groupable = useMemo(() => groupableModules(index), [index]);
+  const groupableSet = useMemo(() => new Set(groupable), [groupable]);
   const canvas = useRef<GraphCanvasHandle>(null);
 
   const [theme, setTheme] = useState<ThemeName>(() =>
@@ -248,8 +249,15 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
         const hood = index.neighborhood(focus.id, focus.depth, [...edgeKinds]);
         if (!hood.has(id)) setFocus({ id, depth: focus.depth });
       }
+      // pasta sem arquivos diretos (ex.: packages/) não aparece no mapa: centraliza na primeira
+      // subpasta que aparece
+      let centerOn = id;
+      if (node.kind === 'module' && !groupableSet.has(id)) {
+        const sub = index.descendants(id).find((d) => groupableSet.has(d.id));
+        if (sub) centerOn = sub.id;
+      }
       // abre as pastas recolhidas que escondem o nó
-      for (const ancestor of index.ancestors(id))
+      for (const ancestor of index.ancestors(centerOn))
         if (collapsedModules.has(ancestor.id)) setModuleOpen(ancestor.id, true);
       const file = index.fileOf(id);
       if (file && file.id !== id)
@@ -259,19 +267,33 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
       if (remember && prev && prev !== id) setHistory((h) => [...h.slice(-30), prev]);
       setSelectedId(id);
       setSelectedEdgeId(null);
-      if (center) setCenterRequest((r) => ({ id, seq: (r?.seq ?? 0) + 1 }));
+      if (center) setCenterRequest((r) => ({ id: centerOn, seq: (r?.seq ?? 0) + 1 }));
     },
-    [index, focus, edgeKinds, nodeKinds, collapsedModules, setModuleOpen],
+    [index, focus, edgeKinds, nodeKinds, collapsedModules, setModuleOpen, groupableSet],
   );
 
-  // link direto: #n=<id> na URL seleciona a entidade ao abrir
-  const initialHash = useRef(true);
+  // a versão mais recente de navigate, para efeitos que não devem depender dela
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  // link direto: #n=<id> na URL seleciona a entidade (ao abrir e quando a URL muda)
   useEffect(() => {
-    if (!initialHash.current) return;
-    initialHash.current = false;
-    const id = new URLSearchParams(window.location.hash.slice(1)).get('n');
-    if (id && index.node(id)) navigate(id, false);
-  }, [index, navigate]);
+    const fromHash = () => {
+      const id = new URLSearchParams(window.location.hash.slice(1)).get('n');
+      if (id && index.node(id) && id !== selectedRef.current) navigateRef.current(id, false);
+    };
+    fromHash();
+    window.addEventListener('hashchange', fromHash);
+    return () => window.removeEventListener('hashchange', fromHash);
+  }, [index]);
+
+  // ao trocar de nível, a seleção é levada para onde ela aparece no novo nível
+  const previousLevel = useRef(level);
+  useEffect(() => {
+    if (previousLevel.current === level) return;
+    previousLevel.current = level;
+    if (selectedRef.current) navigateRef.current(selectedRef.current, false);
+  }, [level]);
   useEffect(() => {
     try {
       const url = selectedId
@@ -362,7 +384,11 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
     downloadText(`${slug(graph.project.name)}.rastro.json`, `${JSON.stringify(graph, null, 2)}\n`);
   const exportPng = () => {
     const blob = canvas.current?.png(PALETTES[theme].bg);
-    if (blob) downloadBlob(`${slug(graph.project.name)}.rastro.png`, blob);
+    if (blob && blob.size > 0) downloadBlob(`${slug(graph.project.name)}.rastro.png`, blob);
+    else
+      alert(
+        'Não foi possível gerar a imagem deste mapa (grande demais para o navegador). Tente um nível menos detalhado ou use o foco.',
+      );
   };
 
   // o mesmo botão abre a gaveta (telas estreitas) ou recolhe o painel (telas largas)
@@ -381,6 +407,16 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
   const fitKey = `${focus?.id ?? ''}|${focus?.depth ?? ''}|${level}`;
   const focusNode = focus ? index.node(focus.id) : undefined;
   const selectedEdge = selectedEdgeId ? view.edges.find((e) => e.id === selectedEdgeId) : undefined;
+  // se a linha selecionada sumir (outro nível, pasta recolhida), segue para a linha que agora
+  // representa as mesmas relações; se nenhuma representar, limpa a seleção
+  const selectedEdgeMembers = useRef<string[]>([]);
+  if (selectedEdge) selectedEdgeMembers.current = selectedEdge.members;
+  useEffect(() => {
+    if (!selectedEdgeId || view.edges.some((e) => e.id === selectedEdgeId)) return;
+    const members = new Set(selectedEdgeMembers.current);
+    const replacement = view.edges.find((e) => e.members.some((m) => members.has(m)));
+    setSelectedEdgeId(replacement ? replacement.id : null);
+  }, [view, selectedEdgeId]);
   const panelMode = selectedEdge
     ? 'edge'
     : selectedId && index.node(selectedId)
@@ -627,6 +663,7 @@ function Explorer({ graph, fromServer }: { graph: RastroGraph; fromServer: boole
             focusId={focus?.id ?? null}
             focusDepth={focus?.depth ?? 1}
             expanded={level === 'symbols' || expandedFiles.has(selectedId)}
+            allSymbols={level === 'symbols'}
             moduleCollapsed={collapsedModules.has(selectedId)}
             onNavigate={(id) => navigate(id)}
             onFocus={(id) => setFocus(id ? { id, depth: focus?.depth ?? 1 } : null)}

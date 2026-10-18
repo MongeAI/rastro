@@ -121,8 +121,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         if (!safeEqual(given, token))
           return send(401, 'Token inválido. Use o endereço exibido no terminal.');
         url.searchParams.delete('token');
+        // caminho sempre relativo à própria origem ("//evil.com" viraria outro site)
         return send(302, '', undefined, {
-          Location: url.pathname + url.search,
+          Location: `/${url.pathname.replace(/^[/\\]+/, '')}${url.search}`,
           'Set-Cookie': `${cookieName()}=${token}; HttpOnly; SameSite=Strict; Path=/`,
         });
       }

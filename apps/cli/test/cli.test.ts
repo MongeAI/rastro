@@ -86,6 +86,13 @@ describe('servidor local', () => {
     cookie = setCookie.split(';')[0]!;
   });
 
+  it('o redirecionamento do token nunca aponta para outro site', async () => {
+    for (const p of ['/.//evil.com', '/a/..//evil.com', '//evil.com']) {
+      const res = await get(server.port, `${p}?token=${server.token}`);
+      expect(res.headers.location, p).toMatch(/^\/(?!\/)/);
+    }
+  });
+
   it('entrega o grafo e a interface', async () => {
     const res = await get(server.port, '/api/graph');
     expect(res.status).toBe(200);

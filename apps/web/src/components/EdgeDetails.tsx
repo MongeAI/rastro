@@ -85,8 +85,9 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
 
       {edge.aggregated && (
         <p className="muted small details-section">
-          Esta linha soma relações entre itens que estão dentro de pastas recolhidas. Abra a pasta
-          (duplo clique) para ver cada uma separadamente.
+          Esta linha reúne várias relações do mesmo tipo entre os mesmos blocos do mapa (por
+          exemplo, arquivos dentro de pastas recolhidas). Abra as pastas (duplo clique) para ver
+          cada uma separadamente.
         </p>
       )}
 

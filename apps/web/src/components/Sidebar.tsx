@@ -84,9 +84,9 @@ export function Sidebar(p: Props) {
               onClick={() => {
                 if (
                   id === 'symbols' &&
-                  p.symbolCount > 1500 &&
+                  p.symbolCount > 1000 &&
                   !confirm(
-                    `Mostrar ${p.symbolCount} símbolos de uma vez pode deixar o mapa ilegível e lento. Continuar?`,
+                    `Mostrar ${p.symbolCount} símbolos de uma vez pode levar vários segundos e deixar o mapa difícil de ler. Dica: use a busca ou dê dois cliques nos arquivos que interessam. Continuar mesmo assim?`,
                   )
                 )
                   return;

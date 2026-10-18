@@ -4,8 +4,8 @@ import fcose from 'cytoscape-fcose';
 import layoutUtilities from 'cytoscape-layout-utilities';
 import { EDGE_KIND_LABELS, NODE_KIND_LABELS, type EdgeKind, type NodeKind } from '@rastro/core';
 import type { GraphView, ViewNode } from '@rastro/graph';
-import { computeElkPositions } from '../lib/elkLayout';
-import { buildStyle, displayLabel } from '../lib/graphStyle';
+import { computeElkPositions, LayoutCancelled } from '../lib/elkLayout';
+import { buildStyle, displayLabel, estimateNodeWidth } from '../lib/graphStyle';
 import type { Palette } from '../lib/theme';
 
 cytoscape.use(fcose);
@@ -48,6 +48,13 @@ interface Tooltip {
 
 const MAX_FIT_ZOOM = 1.25;
 
+/** As classes do elemento já são exatamente estas? (evita reaplicar estilo à toa) */
+function sameClasses(el: cytoscape.SingularElementReturnValue, classes: string): boolean {
+  const wanted = classes.split(' ').filter(Boolean);
+  const current = el.classes();
+  return current.length === wanted.length && wanted.every((c) => el.hasClass(c));
+}
+
 function depthOf(n: ViewNode, byId: Map<string, ViewNode>): number {
   let d = 0;
   for (let cur = n.parent ? byId.get(n.parent) : undefined; cur && d < 50; d++) {
@@ -66,6 +73,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   handlers.current = props;
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Fator de ampliação dos rótulos dos grupos (lido pelo estilo, sem criar regras novas). */
+  const labelScale = useRef(1);
+  const groupWidths = useRef(new Map<string, number>());
+  const currentLayout = useRef<cytoscape.Layouts | null>(null);
+  const layoutActive = useRef(false);
+  const pendingCenter = useRef<string | null>(null);
 
   /** Enquadra tudo, sem aproximar demais quando há poucos nós. */
   const fitAll = (animate: boolean) => {
@@ -86,19 +99,50 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     cy.animate(target, { duration: 320, easing: 'ease-out-cubic' });
   };
 
+  /** Centraliza o nó pedido (se ainda estiver no mapa). */
+  const centerPending = () => {
+    const cy = cyRef.current;
+    const id = pendingCenter.current;
+    pendingCenter.current = null;
+    if (!cy || !id) return;
+    const node = cy.getElementById(id);
+    if (node.empty()) return;
+    cy.animate(
+      { center: { eles: node }, zoom: Math.max(cy.zoom(), 1) },
+      { duration: 350, easing: 'ease-out-cubic' },
+    );
+  };
+
+  /** Fim de um layout: enquadra (se pedido), libera o indicador e atende a centralização pendente. */
+  const finishLayout = (run: number, fit: boolean, animate: boolean) => {
+    if (run !== layoutRun.current) return;
+    layoutActive.current = false;
+    setBusy(false);
+    // guarda a largura de cada grupo para o estilo dos rótulos (fora do Cytoscape: gravar em
+    // data() dispararia recálculo de estilo de todos os descendentes)
+    groupWidths.current.clear();
+    cyRef.current?.nodes(':parent').forEach((n) => void groupWidths.current.set(n.id(), n.width()));
+    if (fit) fitAll(animate);
+    if (pendingCenter.current) setTimeout(centerPending, fit && animate ? 340 : 0);
+  };
+
   const runLayout = (fit: boolean) => {
     const cy = cyRef.current;
     if (!cy || cy.nodes().empty()) return;
     const run = ++layoutRun.current;
     const animate = !firstLayout.current && cy.nodes().length < 500;
     firstLayout.current = false;
+    // um layout novo substitui o anterior (animações em andamento param aqui)
+    currentLayout.current?.stop();
+    layoutActive.current = true;
+    setTooltip(null);
 
-    if (handlers.current.layout === 'organic') {
+    const runOrganic = (organicFit: boolean, organicAnimate: boolean) => {
       const layout = cy.layout({
         name: 'fcose',
         quality: cy.nodes().length > 400 ? 'draft' : 'default',
-        randomize: !animate,
-        animate,
+        randomize: !organicAnimate,
+        animate: organicAnimate,
         animationDuration: 380,
         fit: false,
         nodeDimensionsIncludeLabels: true,
@@ -110,8 +154,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
         gravityCompound: 1.2,
         tile: true,
       } as cytoscape.LayoutOptions);
-      layout.one('layoutstop', () => run === layoutRun.current && fit && fitAll(true));
+      currentLayout.current = layout;
+      layout.one('layoutstop', () => finishLayout(run, organicFit, organicAnimate));
       layout.run();
+    };
+
+    if (handlers.current.layout === 'organic') {
+      setBusy(false);
+      runOrganic(fit, animate);
       return;
     }
 
@@ -134,31 +184,28 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
           animationEasing: 'ease-in-out-cubic',
           fit: false,
         } as cytoscape.LayoutOptions);
-        layout.one('layoutstop', () => {
-          if (run !== layoutRun.current) return;
-          if (fit) fitAll(animate);
-        });
+        currentLayout.current = layout;
+        layout.one('layoutstop', () => finishLayout(run, fit, animate));
         layout.run();
       })
       .catch((err: unknown) => {
+        if (err instanceof LayoutCancelled || run !== layoutRun.current || cyRef.current !== cy)
+          return;
         // se o ELK falhar (grafo patológico), cai para o layout orgânico
         console.warn('Layout hierárquico falhou, usando o orgânico.', err);
-        cy.layout({
-          name: 'fcose',
-          animate: false,
-          packComponents: true,
-          fit: true,
-          padding: 40,
-        } as cytoscape.LayoutOptions).run();
-      })
-      .finally(() => run === layoutRun.current && setBusy(false));
+        runOrganic(true, false);
+      });
   };
 
   // criação do Cytoscape
   useEffect(() => {
     const cy = cytoscape({
       container: containerRef.current,
-      style: buildStyle(handlers.current.palette),
+      style: buildStyle(
+        handlers.current.palette,
+        () => labelScale.current,
+        (id) => groupWidths.current.get(id),
+      ),
       minZoom: 0.04,
       maxZoom: 4,
       boxSelectionEnabled: false,
@@ -219,19 +266,21 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     });
     cy.on('viewport', () => setTooltip(null));
 
-    // rótulos dos grupos crescem quando o zoom diminui, para o mapa continuar legível de longe
-    let lastScale = 0;
-    const scaleGroupLabels = () => {
-      const scale = Math.min(4, Math.max(1, 0.9 / cy.zoom()));
-      if (Math.abs(scale - lastScale) < 0.08) return;
-      lastScale = scale;
-      cy.style()
-        .selector(':parent')
-        .style({ 'font-size': 11 * scale, 'text-margin-y': -4 * scale })
-        .update();
-    };
-    cy.on('zoom', scaleGroupLabels);
-    cy.on('style', () => (lastScale = 0));
+    // rótulos dos grupos crescem quando o zoom diminui, para o mapa continuar legível de longe;
+    // o estilo lê a escala de uma referência, então só recalculamos (nenhuma regra nova é criada)
+    // o recálculo espera o zoom parar (uma animação muda o zoom a cada quadro) e só toca nos
+    // grupos, que são os únicos afetados
+    let zoomTimer: ReturnType<typeof setTimeout> | undefined;
+    cy.on('zoom', () => {
+      clearTimeout(zoomTimer);
+      zoomTimer = setTimeout(() => {
+        const scale = Math.min(4, Math.max(1, 0.9 / cy.zoom()));
+        if (Math.abs(scale - labelScale.current) < 0.08) return;
+        labelScale.current = scale;
+        // updateStyle existe no Cytoscape, mas não está na tipagem oficial
+        (cy.nodes(':parent') as unknown as { updateStyle(): void }).updateStyle();
+      }, 120);
+    });
 
     // quando o espaço do mapa muda (painel recolhido, janela redimensionada), mantém o centro
     let size = { w: cy.width(), h: cy.height() };
@@ -252,7 +301,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   }, []);
 
   useEffect(() => {
-    cyRef.current?.style(buildStyle(props.palette));
+    cyRef.current?.style(
+      buildStyle(
+        props.palette,
+        () => labelScale.current,
+        (id) => groupWidths.current.get(id),
+      ),
+    );
   }, [props.palette]);
 
   // sincroniza os elementos com a visão calculada (diferencial, preservando posições)
@@ -272,7 +327,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     }
 
     cy.batch(() => {
-      const sorted = [...view.nodes].sort((a, b) => depthOf(a, byId) - depthOf(b, byId));
+      const depth = new Map(view.nodes.map((n) => [n.id, depthOf(n, byId)]));
+      const sorted = [...view.nodes].sort((a, b) => depth.get(a.id)! - depth.get(b.id)!);
+      const ext = cy.extent();
+      const viewportCenter = { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 };
       // 1. adiciona nós novos (pais antes dos filhos), perto do pai ou de um vizinho
       for (const n of sorted) {
         const display = displayLabel(n);
@@ -286,14 +344,23 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
           .join(' ');
         const existing = cy.getElementById(n.id);
         if (existing.nonempty()) {
-          if (existing.data('display') !== display) structural = true; // tamanho mudou
-          existing.data({
-            display,
-            expandable: n.expandable,
-            expanded: n.expanded,
-            collapsed: n.collapsed,
-          });
-          existing.classes(classes);
+          // só escreve o que mudou: cada alteração de estilo em um grupo invalida o cache de
+          // todos os descendentes dele (caríssimo com milhares de nós)
+          if (existing.data('display') !== display) {
+            structural = true; // tamanho mudou
+            existing.data({ display, w: estimateNodeWidth(display, n.kind, n.collapsed) });
+          }
+          if (
+            existing.data('expandable') !== n.expandable ||
+            existing.data('expanded') !== n.expanded ||
+            existing.data('collapsed') !== n.collapsed
+          )
+            existing.data({
+              expandable: n.expandable,
+              expanded: n.expanded,
+              collapsed: n.collapsed,
+            });
+          if (!sameClasses(existing, classes)) existing.classes(classes);
           continue;
         }
         structural = true;
@@ -305,14 +372,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
             .map((id) => cy.getElementById(id))
             .find((x) => x.nonempty())
             ?.position();
-        const ext = cy.extent();
-        const base = anchor ?? { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 };
+        const base = anchor ?? viewportCenter;
         cy.add({
           group: 'nodes',
           data: {
             id: n.id,
             kind: n.kind,
             display,
+            w: estimateNodeWidth(display, n.kind, n.collapsed),
             full: n.kind === 'module' ? `${n.label}/` : n.label,
             expandable: n.expandable,
             expanded: n.expanded,
@@ -352,8 +419,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
           .join(' ');
         const existing = cy.getElementById(e.id);
         if (existing.nonempty()) {
-          existing.data({ count: e.count, resolution: e.resolution });
-          existing.classes(classes);
+          if (existing.data('count') !== e.count || existing.data('resolution') !== e.resolution)
+            existing.data({ count: e.count, resolution: e.resolution });
+          if (!sameClasses(existing, classes)) existing.classes(classes);
           continue;
         }
         structural = true;
@@ -418,20 +486,12 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     });
   }, [props.selectedId, props.selectedEdgeId, props.highlightNeighbors, props.view]);
 
-  // centraliza quando pedido (depois que o layout termina)
+  // centraliza quando pedido: se um layout estiver em andamento, espera ele terminar
   useEffect(() => {
-    const cy = cyRef.current;
     const req = props.centerRequest;
-    if (!cy || !req) return;
-    const t = setTimeout(() => {
-      const node = cy.getElementById(req.id);
-      if (node.empty()) return;
-      cy.animate(
-        { center: { eles: node }, zoom: Math.max(cy.zoom(), 1) },
-        { duration: 350, easing: 'ease-out-cubic' },
-      );
-    }, 520);
-    return () => clearTimeout(t);
+    if (!req) return;
+    pendingCenter.current = req.id;
+    if (!layoutActive.current) centerPending();
   }, [props.centerRequest]);
 
   useImperativeHandle(ref, () => ({
@@ -457,8 +517,15 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
         cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) }, { duration: 350 });
     },
     png: (background) =>
-      cyRef.current?.png({ output: 'blob', full: true, scale: 2, bg: background }) as
-        Blob | undefined,
+      cyRef.current?.png({
+        output: 'blob',
+        full: true,
+        scale: 2,
+        bg: background,
+        // mapas enormes geram imagens vazias (limite do canvas); limitamos o tamanho
+        maxWidth: 8000,
+        maxHeight: 8000,
+      }) as Blob | undefined,
   }));
 
   return (

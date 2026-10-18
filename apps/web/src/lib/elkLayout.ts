@@ -1,14 +1,30 @@
-import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk.bundled.js';
-import type { Core, NodeSingular } from 'cytoscape';
-
-const elk = new ELK();
+import ElkConstructor, { type ELK, type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk-api.js';
+import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url';
+import type { Core } from 'cytoscape';
 
 /** Espaço reservado acima de cada grupo para o rótulo (desenhado fora da caixa do Cytoscape). */
 export const GROUP_LABEL_SPACE = 20;
 /** Mesmo valor do `padding` dos grupos no estilo do Cytoscape. */
 export const GROUP_PADDING = 14;
+/** Largura aproximada de um caractere do rótulo dos grupos (fonte mono, 11px). */
+export const GROUP_LABEL_CHAR = 6.8;
 
 export type Positions = Record<string, { x: number; y: number }>;
+
+/**
+ * O ELK roda em um Web Worker: em projetos grandes o cálculo leva segundos e não pode
+ * congelar a interface. Um pedido novo cancela o anterior (o worker é encerrado e recriado).
+ */
+let elk: ELK | null = null;
+let running = false;
+
+function getElk(): ELK {
+  if (!elk)
+    elk = new ElkConstructor({ workerUrl: elkWorkerUrl, workerFactory: (url) => new Worker(url!) });
+  return elk;
+}
+
+export class LayoutCancelled extends Error {}
 
 /**
  * Layout hierárquico em camadas (ELK "layered"), feito de dentro para fora:
@@ -18,7 +34,38 @@ export type Positions = Record<string, { x: number; y: number }>;
  * empacotados em grade, respeitando a proporção da tela.
  */
 export async function computeElkPositions(cy: Core, aspectRatio: number): Promise<Positions> {
-  const nodes = cy.nodes();
+  if (running && elk) {
+    // um layout anterior ainda está calculando: descartamos o trabalho dele
+    elk.terminateWorker();
+    elk = null;
+  }
+  const root = buildGraph(cy, aspectRatio);
+  running = true;
+  const instance = getElk();
+  try {
+    const result = await instance.layout(root);
+    const positions: Positions = {};
+    const walk = (node: ElkNode, offsetX: number, offsetY: number) => {
+      for (const child of node.children ?? []) {
+        const x = offsetX + (child.x ?? 0);
+        const y = offsetY + (child.y ?? 0);
+        if (child.children?.length) walk(child, x, y);
+        else
+          positions[child.id] = { x: x + (child.width ?? 0) / 2, y: y + (child.height ?? 0) / 2 };
+      }
+    };
+    walk(result, 0, 0);
+    return positions;
+  } catch (err) {
+    // worker encerrado por um pedido mais novo
+    if (instance !== elk) throw new LayoutCancelled();
+    throw err;
+  } finally {
+    if (instance === elk) running = false;
+  }
+}
+
+function buildGraph(cy: Core, aspectRatio: number): ElkNode {
   const containers = new Map<string, ElkNode>();
   const root: ElkNode = { id: '__root__', children: [], edges: [] };
   containers.set(root.id, root);
@@ -39,35 +86,71 @@ export async function computeElkPositions(cy: Core, aspectRatio: number): Promis
   });
   root.layoutOptions = layoutOptions(Math.max(0.6, Math.min(aspectRatio, 3)), true);
 
+  // Lê o Cytoscape uma única vez e trabalha com ids e mapas simples: chamar ancestors()
+  // repetidamente cria coleções novas e, com milhares de nós, travava a interface.
+  interface Item {
+    id: string;
+    parent?: string;
+    isParent: boolean;
+    width: number;
+    height: number;
+    label: string;
+  }
+  const items = new Map<string, Item>();
+  cy.nodes().forEach((node) => {
+    const parent = node.data('parent') as string | undefined;
+    const isParent = node.isParent();
+    items.set(node.id(), {
+      id: node.id(),
+      ...(parent ? { parent } : {}),
+      isParent,
+      width: isParent ? 0 : node.outerWidth(),
+      height: isParent ? 0 : node.outerHeight(),
+      label: String(node.data('display') ?? ''),
+    });
+  });
+  const chainCache = new Map<string, string[]>();
+  const chain = (id: string): string[] => {
+    let cached = chainCache.get(id);
+    if (cached) return cached;
+    const parent = items.get(id)?.parent;
+    cached = parent && items.has(parent) ? [id, ...chain(parent)] : [id];
+    chainCache.set(id, cached);
+    return cached;
+  };
+
   // ordem determinística: pais antes dos filhos, depois por id
-  const sorted = nodes
-    .toArray()
-    .sort((a, b) => depth(a) - depth(b) || a.id().localeCompare(b.id())) as NodeSingular[];
-  for (const node of sorted) {
-    const parentId = node.isChild() ? node.parent().first().id() : root.id;
-    const container = containers.get(parentId) ?? root;
-    const elkNode: ElkNode = { id: node.id() };
-    if (node.isParent()) {
+  const sorted = [...items.values()].sort(
+    (a, b) => chain(a.id).length - chain(b.id).length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  for (const item of sorted) {
+    const container = (item.parent && containers.get(item.parent)) || root;
+    const elkNode: ElkNode = { id: item.id };
+    if (item.isParent) {
+      // o grupo precisa ser pelo menos tão largo quanto o próprio rótulo
+      const minWidth = Math.ceil(item.label.length * GROUP_LABEL_CHAR + 16);
       elkNode.children = [];
       elkNode.edges = [];
       elkNode.layoutOptions = {
         ...layoutOptions(1.6, false),
         'elk.padding': `[top=${GROUP_PADDING + GROUP_LABEL_SPACE},left=${GROUP_PADDING},bottom=${GROUP_PADDING},right=${GROUP_PADDING}]`,
+        'elk.nodeSize.constraints': 'MINIMUM_SIZE',
+        'elk.nodeSize.minimum': `(${minWidth}, 20)`,
+        'elk.contentAlignment': 'H_CENTER V_TOP',
       };
-      containers.set(node.id(), elkNode);
+      containers.set(item.id, elkNode);
     } else {
-      elkNode.width = node.outerWidth();
-      elkNode.height = node.outerHeight();
+      elkNode.width = item.width;
+      elkNode.height = item.height;
     }
     container.children!.push(elkNode);
   }
 
   // eleva cada relação até o grupo em comum mais próximo
-  const chain = (n: NodeSingular) => [n.id(), ...n.ancestors().map((a) => a.id())];
   const lifted = new Set<string>();
   cy.edges().forEach((edge) => {
-    const a = chain(edge.source());
-    const b = chain(edge.target());
+    const a = chain(edge.data('source') as string);
+    const b = chain(edge.data('target') as string);
     const bSet = new Set(b);
     const common = a.find((id) => bSet.has(id));
     const containerId = common ?? root.id;
@@ -85,22 +168,5 @@ export async function computeElkPositions(cy: Core, aspectRatio: number): Promis
       targets: [childB],
     } as ElkExtendedEdge);
   });
-
-  const result = await elk.layout(root);
-
-  const positions: Positions = {};
-  const walk = (node: ElkNode, offsetX: number, offsetY: number) => {
-    for (const child of node.children ?? []) {
-      const x = offsetX + (child.x ?? 0);
-      const y = offsetY + (child.y ?? 0);
-      if (child.children?.length) walk(child, x, y);
-      else positions[child.id] = { x: x + (child.width ?? 0) / 2, y: y + (child.height ?? 0) / 2 };
-    }
-  };
-  walk(result, 0, 0);
-  return positions;
-}
-
-function depth(n: NodeSingular): number {
-  return n.ancestors().length;
+  return root;
 }

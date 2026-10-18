@@ -36,9 +36,10 @@ export function defaultGraphPath(graph: RastroGraph): string {
 export function saveGraph(graph: RastroGraph, file: string): string {
   const target = path.resolve(file);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = `${target}.${process.pid}.tmp`;
+  // nome imprevisível e criação exclusiva ("wx"): não segue um link plantado com o mesmo nome
+  const tmp = `${target}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   try {
-    fs.writeFileSync(tmp, `${JSON.stringify(graph, null, 2)}\n`, { mode: 0o600 });
+    fs.writeFileSync(tmp, `${JSON.stringify(graph, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
     fs.renameSync(tmp, target);
   } catch (err) {
     fs.rmSync(tmp, { force: true });
