@@ -50,7 +50,8 @@
   --e-depends_on: #f472b6;
   --t-kw: #c084fc;
   --t-str: #86efac;
-  --t-com: #6b6b75;
+  /* cores do código: contraste de pelo menos 4,5:1 (WCAG AA) também na linha destacada */
+  --t-com: #85858f;
   --t-num: #fbbf24;
   --t-fn: #7dd3fc;
 }
@@ -64,7 +65,8 @@
   --border-strong: #d4d4d8;
   --text: #09090b;
   --text-2: #3f3f46;
-  --muted: #71717a;
+  /* 4,5:1 ou mais sobre --surface-2 (ex.: botões não escolhidos do nível) */
+  --muted: #6b6b73;
   --accent: #09090b;
   --accent-text: #ffffff;
   --warn: #dc2626;
@@ -88,9 +90,9 @@
   --e-exports: #d4d4d8;
   --e-depends_on: #db2777;
   --t-kw: #7e22ce;
-  --t-str: #15803d;
-  --t-com: #a1a1aa;
-  --t-num: #b45309;
+  --t-str: #157a3a;
+  --t-com: #6b6b73;
+  --t-num: #a34b08;
   --t-fn: #0369a1;
 }
 
@@ -959,7 +961,6 @@ kbd {
   padding-right: 1.1em;
   text-align: right;
   color: var(--muted);
-  opacity: 0.6;
   user-select: none;
   white-space: pre;
 }
