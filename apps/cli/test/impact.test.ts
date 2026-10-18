@@ -463,6 +463,8 @@ describe('possivelmente quebrado pela mudança', () => {
         'src/ns.ts': "export * as utils from './utils/str';\n",
         'src/page.ts':
           "import { slug } from './utils';\nimport { slug as s2 } from './all';\nimport { utils } from './ns';\nexport const y = slug('a') + s2('b') + utils.keep;\n",
+        // um nome que o barril nunca exportou não tem nada a ver com a mudança
+        'src/old.ts': "import { nunca } from './utils';\nexport const z = nunca;\n",
       },
       ({ write }) => write('src/utils/str.ts', str.replace('slug', 'slugify')),
     );

@@ -395,6 +395,10 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
       if (!importer) continue;
       for (const name of edge.meta?.names ?? []) {
         if (name === '*' || exported.has(name) || (commonjs && name === 'default')) continue;
+        // pelo barril, só o nome que a mudança tirou do arquivo alterado (está numa linha
+        // removida dele): o barril junta exports de muitos arquivos, e um nome que já faltava
+        // antes não tem nada a ver com esta mudança
+        if (origin !== file && !changedByPath.get(origin)?.removedNames?.includes(name)) continue;
         const evidence = evidenceFor(edge, name);
         found.push({
           from: importer,
