@@ -25,6 +25,8 @@ export interface RunningServer {
   baseUrl: string;
   port: number;
   token: string | null;
+  /** Troca o grafo servido e avisa os navegadores abertos (modo --watch). */
+  update(graph: RastroGraph): void;
   close(): Promise<void>;
 }
 
@@ -62,18 +64,23 @@ const SECURITY_HEADERS = {
  * - O endpoint de código-fonte só entrega arquivos JS/TS que fazem parte do grafo.
  */
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
-  const { graph } = options;
+  let { graph } = options;
   const webRoot = path.resolve(options.webRoot);
-  const graphJson = JSON.stringify(graph);
+  let graphJson = JSON.stringify(graph);
+  let version = 1;
+  /** Navegadores conectados em /api/events (Server-Sent Events). */
+  const listeners = new Set<http.ServerResponse>();
   const token =
     options.token === false
       ? null
       : (options.token ?? crypto.randomBytes(24).toString('base64url'));
-  const analyzedFiles = new Set(
-    graph.nodes
-      .filter((n) => n.kind === 'file' && n.meta?.analyzed !== false)
-      .map((n) => n.qualifiedName ?? n.name),
-  );
+  const filesOf = (g: RastroGraph) =>
+    new Set(
+      g.nodes
+        .filter((n) => n.kind === 'file' && n.meta?.analyzed !== false)
+        .map((n) => n.qualifiedName ?? n.name),
+    );
+  let analyzedFiles = filesOf(graph);
   let port = 0;
   const cookieName = () => `rastro_${port}`;
 
@@ -136,6 +143,19 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         }
         if (url.pathname === '/api/health') return json(200, { ok: true });
         if (url.pathname === '/api/graph') return send(200, graphJson, MIME['.json']);
+        if (url.pathname === '/api/events') {
+          // canal de avisos: o navegador é avisado quando o grafo muda (modo --watch)
+          res.writeHead(200, {
+            ...SECURITY_HEADERS,
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-store',
+            Connection: 'keep-alive',
+          });
+          res.write(`event: hello\ndata: {"version":${version}}\n\n`);
+          listeners.add(res);
+          req.on('close', () => listeners.delete(res));
+          return;
+        }
         if (url.pathname === '/api/source') {
           const result = readSource(
             graph.project.root,
@@ -189,6 +209,12 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
   });
 
+  // mantém conexões de eventos vivas atrás de proxies e detecta abas fechadas
+  const heartbeat = setInterval(() => {
+    for (const res of listeners) res.write(': ping\n\n');
+  }, 25_000);
+  heartbeat.unref();
+
   port = await listen(server, options.port ?? 4321);
   const baseUrl = `http://127.0.0.1:${port}/`;
   return {
@@ -196,7 +222,20 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     baseUrl,
     port,
     token,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    update(next) {
+      graph = next;
+      graphJson = JSON.stringify(next);
+      analyzedFiles = filesOf(next);
+      version++;
+      for (const res of listeners) res.write(`event: graph\ndata: {"version":${version}}\n\n`);
+    },
+    close: () =>
+      new Promise<void>((resolve) => {
+        clearInterval(heartbeat);
+        for (const res of listeners) res.end();
+        listeners.clear();
+        server.close(() => resolve());
+      }),
   };
 }
 

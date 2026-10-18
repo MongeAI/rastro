@@ -1407,3 +1407,12 @@ kbd {
   font-size: 10.5px;
   line-height: 16px;
 }
+.live-dot::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 4px 1px 6px;
+  border-radius: 999px;
+  background: var(--changed);
+}

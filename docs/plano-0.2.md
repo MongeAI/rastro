@@ -36,7 +36,8 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 ### 5. Ao vivo: modo `--watch`
 
-- ⬜ Reanálise incremental ao salvar arquivos (cache por arquivo), com o mapa atualizado na hora pelo servidor local (SSE), sem perder a posição nem a seleção.
+- ✅ `rastro --watch`: reanálise ao salvar arquivos, com o mapa atualizado na hora pelo servidor local (SSE), sem perder a posição nem a seleção.
+- ⬜ Cache por arquivo (reanálise incremental) para projetos grandes.
 
 ### 6. Mais frameworks de rotas
 

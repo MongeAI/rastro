@@ -17,6 +17,11 @@ type State =
 
 const cache = new Map<string, Promise<string[]>>();
 
+/** Esquece o código já carregado (o projeto mudou: modo --watch). */
+export function clearSourceCache(): void {
+  cache.clear();
+}
+
 function fetchSource(file: string): Promise<string[]> {
   let p = cache.get(file);
   if (!p) {

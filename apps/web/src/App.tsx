@@ -35,6 +35,7 @@ import { Insights } from './components/Insights';
 import { Overview } from './components/Overview';
 import { PathPanel } from './components/PathPanel';
 import { Search } from './components/Search';
+import { clearSourceCache } from './components/SourceView';
 import { NODE_KIND_ORDER, Sidebar } from './components/Sidebar';
 import { downloadBlob, downloadText, slug } from './lib/download';
 import { EDITORS, readPref, writePref, type EditorId } from './lib/editor';
@@ -45,7 +46,7 @@ import { PALETTES, type ThemeName } from './lib/theme';
 
 type Load =
   | { status: 'loading' }
-  | { status: 'ready'; graph: RastroGraph; fromServer: boolean }
+  | { status: 'ready'; graph: RastroGraph; fromServer: boolean; updatedAt?: number }
   | { status: 'error'; message: (t: Messages) => string; canPickFile: boolean };
 
 const DEFAULT_EDGES: EdgeKind[] = ['imports', 'calls', 'extends'];
@@ -109,6 +110,29 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
       );
   }, [openGraph]);
 
+  // modo ao vivo (--watch): o servidor avisa quando o grafo muda; trocamos sem recarregar a página
+  const live = load.status === 'ready' && load.fromServer;
+  useEffect(() => {
+    if (!live || typeof EventSource === 'undefined') return;
+    const events = new EventSource('/api/events');
+    events.addEventListener('graph', () => {
+      fetch('/api/graph')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: unknown) => {
+          if (!data || !validateGraph(data).valid) return;
+          clearSourceCache();
+          setLoad({
+            status: 'ready',
+            graph: data as RastroGraph,
+            fromServer: true,
+            updatedAt: Date.now(),
+          });
+        })
+        .catch(() => {});
+    });
+    return () => events.close();
+  }, [live]);
+
   const readFile = (file: File) => {
     file
       .text()
@@ -162,9 +186,10 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
   }
   return (
     <Explorer
-      key={load.graph.generatedAt}
+      key={load.graph.project.root}
       graph={load.graph}
       fromServer={load.fromServer}
+      updatedAt={load.updatedAt}
       onLang={onLang}
     />
   );
@@ -173,13 +198,16 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
 function Explorer({
   graph,
   fromServer,
+  updatedAt,
   onLang,
 }: {
   graph: RastroGraph;
   fromServer: boolean;
+  /** Quando o grafo foi atualizado ao vivo (modo --watch). */
+  updatedAt?: number;
   onLang(lang: Lang): void;
 }) {
-  const { t, lang } = useI18n();
+  const { t, lang, locale } = useI18n();
   const index = useMemo(() => new GraphIndex(graph), [graph]);
   const groupable = useMemo(() => groupableModules(index), [index]);
   const groupableSet = useMemo(() => new Set(groupable), [groupable]);
@@ -728,6 +756,11 @@ function Explorer({
           {t.stage.status(view.nodes.length, view.edges.length)}
           {view.hiddenCount > 0 && (
             <span className="muted">{t.stage.hidden(view.hiddenCount)}</span>
+          )}
+          {updatedAt && (
+            <span className="live-dot">
+              {t.stage.live(new Date(updatedAt).toLocaleTimeString(locale))}
+            </span>
           )}
         </div>
 

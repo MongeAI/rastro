@@ -8,7 +8,8 @@ import { analyzeProject } from '@rastro/analyzer';
 import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
 import { computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
-import { startServer } from './server.js';
+import { startServer, type RunningServer } from './server.js';
+import { watchProject } from './watch.js';
 import { collectChanges, GitError } from './git.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
 
@@ -33,6 +34,7 @@ Opções:
       --changes             marca o que mudou desde o último commit (git) e o impacto
       --since <ref>         marca o que mudou desde que a branch saiu de <ref> (ex.: main)
       --trust-git-config    permite rodar o git mesmo com comandos no .git/config
+  -w, --watch               reanalisa ao salvar arquivos e atualiza o mapa ao vivo
   -h, --help                mostra esta ajuda
   -v, --version             mostra a versão
 
@@ -133,7 +135,7 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
   out();
 }
 
-async function serve(graph: RastroGraph, port: number, open: boolean): Promise<void> {
+async function serve(graph: RastroGraph, port: number, open: boolean): Promise<RunningServer> {
   const root = webRoot();
   if (!fs.existsSync(path.join(root, 'index.html'))) {
     fail(
@@ -153,6 +155,7 @@ async function serve(graph: RastroGraph, port: number, open: boolean): Promise<v
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  return server;
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -172,6 +175,7 @@ async function main(argv: string[]): Promise<void> {
         changes: { type: 'boolean' },
         since: { type: 'string' },
         'trust-git-config': { type: 'boolean' },
+        watch: { type: 'boolean', short: 'w' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -242,31 +246,40 @@ async function main(argv: string[]): Promise<void> {
         `${yellow('aviso:')} a pasta analisada (${graph.project.root}) não existe nesta máquina; o código-fonte não poderá ser exibido.\n`,
       );
     }
-    return serve(graph, port, !values['no-open']);
+    await serve(graph, port, !values['no-open']);
+    return;
   }
 
   const root = path.resolve(target);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory())
     fail(`diretório não encontrado: ${root}`);
   const quiet = command === 'analyze' && values.stdout;
-  const graph = await analyzeProject(root, {
-    ...(values.exclude ? { exclude: values.exclude } : {}),
-    respectGitignore: !values['no-gitignore'],
-    ...(maxFiles ? { maxFiles } : {}),
-    onProgress: quiet ? undefined : (msg) => process.stderr.write(dim(`  ${msg}\n`)),
-  });
+  if (values.watch && command !== 'open')
+    fail('--watch só funciona ao abrir o mapa (rastro <caminho>).');
 
-  if (values.changes || values.since) {
-    try {
-      graph.changes = collectChanges(root, {
-        ...(values.since ? { since: values.since } : {}),
-        trustConfig: !!values['trust-git-config'],
-      });
-    } catch (err) {
-      const reason = err instanceof GitError ? err.message : (err as Error).message;
-      process.stderr.write(`${yellow('aviso:')} mudanças do git não incluídas: ${reason}\n`);
+  /** Analisa o projeto (e as mudanças do git, se pedidas). Reutilizado pelo modo --watch. */
+  const runAnalysis = async (progress: boolean) => {
+    const result = await analyzeProject(root, {
+      ...(values.exclude ? { exclude: values.exclude } : {}),
+      respectGitignore: !values['no-gitignore'],
+      ...(maxFiles ? { maxFiles } : {}),
+      onProgress: progress ? (msg) => process.stderr.write(dim(`  ${msg}\n`)) : undefined,
+    });
+    if (values.changes || values.since) {
+      try {
+        result.changes = collectChanges(root, {
+          ...(values.since ? { since: values.since } : {}),
+          trustConfig: !!values['trust-git-config'],
+        });
+      } catch (err) {
+        const reason = err instanceof GitError ? err.message : (err as Error).message;
+        if (progress)
+          process.stderr.write(`${yellow('aviso:')} mudanças do git não incluídas: ${reason}\n`);
+      }
     }
-  }
+    return result;
+  };
+  const graph = await runAnalysis(!quiet);
 
   if (quiet) {
     process.stdout.write(`${JSON.stringify(graph, null, 2)}\n`);
@@ -276,7 +289,51 @@ async function main(argv: string[]): Promise<void> {
   printSummary(graph, savedTo);
   if (graph.changes) printChanges(graph);
   if (command === 'analyze') return;
-  return serve(graph, port, !values['no-open']);
+  const server = await serve(graph, port, !values['no-open']);
+  if (values.watch) startWatch(root, server, runAnalysis, values.out ?? defaultGraphPath(graph));
+}
+
+/**
+ * Modo ao vivo: reanalisa quando arquivos do projeto mudam e avisa os navegadores abertos.
+ * Nunca roda duas análises ao mesmo tempo; mudanças durante uma análise disparam outra no fim.
+ */
+function startWatch(
+  root: string,
+  server: RunningServer,
+  runAnalysis: (progress: boolean) => Promise<RastroGraph>,
+  savePath: string,
+): void {
+  let running = false;
+  let again: string[] | null = null;
+  const rerun = async (files: string[]) => {
+    if (running) {
+      again = [...(again ?? []), ...files];
+      return;
+    }
+    running = true;
+    const started = Date.now();
+    try {
+      const next = await runAnalysis(false);
+      server.update(next);
+      saveGraph(next, savePath);
+      const shown =
+        files.slice(0, 3).join(', ') + (files.length > 3 ? ` +${files.length - 3}` : '');
+      process.stderr.write(
+        `${cyan('↻')} ${shown} ${dim(`· reanalisado em ${Date.now() - started} ms · ${next.stats.files} arquivos`)}\n`,
+      );
+    } catch (err) {
+      process.stderr.write(`${yellow('aviso:')} a reanálise falhou: ${(err as Error).message}\n`);
+    } finally {
+      running = false;
+      if (again) {
+        const queued = again;
+        again = null;
+        void rerun(queued);
+      }
+    }
+  };
+  watchProject(root, (files) => void rerun(files));
+  process.stderr.write(dim('  Modo ao vivo: o mapa se atualiza quando você salva um arquivo.\n'));
 }
 
 main(process.argv.slice(2)).catch((err: unknown) =>
