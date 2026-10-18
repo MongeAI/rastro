@@ -7,11 +7,16 @@ import { toPosix } from './discover.js';
 
 const BUILTINS = new Set(builtinModules.filter((m) => !m.startsWith('_')));
 
-/** Opções de um tsconfig referenciado, válidas só para os arquivos que ele inclui. */
+/**
+ * Opções de um tsconfig referenciado, válidas só para os arquivos que ele inclui. Com `dir`, é
+ * o escopo de pasta: vale para os arquivos dessa pasta (absoluta, com `/`) que nenhum tsconfig
+ * referenciado inclui, com os aliases das referências que ficam nela ou acima dela.
+ */
 export interface ConfigScope {
   name: string;
   files: Set<string>;
   options: ts.CompilerOptions;
+  dir?: string;
 }
 
 /**
@@ -142,13 +147,15 @@ function parseConfigFile(
   const options: ts.CompilerOptions = { ...parsed.options };
   // tsconfig "solução" (padrão do Vite): `files: []` + `references` para tsconfig.app.json etc.
   // As opções de resolução (paths, baseUrl, jsx) ficam nos arquivos referenciados.
-  // Cada referência resolve os imports dos próprios arquivos (escopo). Nas opções gerais (para
-  // arquivos fora de todas as referências), só juntamos o que não conflita: dois apps com "@/*"
-  // apontando para pastas diferentes não podem ser misturados, ou o grafo inventaria ligações.
+  // Cada referência resolve os imports dos próprios arquivos (escopo). Arquivos fora de todas as
+  // referências (ex.: vite.config.ts fora do "include") só recebem os aliases das referências
+  // cuja pasta os contém, e só o que não conflita: dois apps com "@/*" apontando para pastas
+  // diferentes não podem ser misturados, nem um alias de `packages/web` vale em `scripts/`, ou o
+  // grafo inventaria ligações. Os destinos viram caminhos absolutos: cada alias é resolvido a
+  // partir da pasta do próprio tsconfig (ou do baseUrl dele), nunca da raiz
   const referenced: string[] = [];
   const scopes: ConfigScope[] = [];
-  const mergedPaths: Record<string, { targets: string; base: string | undefined }> = {};
-  const conflicts = new Set<string>();
+  const refAliases: Array<{ dir: string; paths: Record<string, string[]> }> = [];
   const settings = {
     jsx: new Set<unknown>(),
     moduleResolution: new Set<unknown>(),
@@ -175,15 +182,13 @@ function parseConfigFile(
       files: new Set(refParsed.fileNames.map((f) => toPosix(path.resolve(f)))),
       options: withModernResolution({ ...DEFAULT_OPTIONS, ...refOptions, ...ENFORCED_OPTIONS }),
     });
-    for (const [key, targets] of Object.entries(refOptions.paths ?? {})) {
-      const entry = {
-        targets: JSON.stringify(targets),
-        base: refOptions.pathsBasePath ?? refOptions.baseUrl,
-      };
-      const previous = mergedPaths[key];
-      if (previous && (previous.targets !== entry.targets || previous.base !== entry.base))
-        conflicts.add(key);
-      else mergedPaths[key] = entry;
+    // como o TypeScript: destinos relativos ao baseUrl, ou à pasta do tsconfig que declara paths
+    const base = refOptions.baseUrl ?? refOptions.pathsBasePath;
+    if (refOptions.paths && base) {
+      const paths: Record<string, string[]> = {};
+      for (const [key, targets] of Object.entries(refOptions.paths))
+        paths[key] = targets.map((t) => toPosix(path.resolve(base, t)));
+      refAliases.push({ dir: toPosix(path.dirname(path.resolve(refFile))), paths });
     }
     settings.jsx.add(refOptions.jsx);
     settings.moduleResolution.add(refOptions.moduleResolution);
@@ -191,24 +196,45 @@ function parseConfigFile(
     referenced.push(toPosix(path.relative(root, refFile)));
   }
   if (scopes.length) {
-    const paths: ts.MapLike<string[]> = { ...options.paths };
-    let base: string | undefined;
-    for (const [key, entry] of Object.entries(mergedPaths)) {
-      if (conflicts.has(key) || paths[key]) continue;
-      if (base !== undefined && entry.base !== base) continue;
-      base = entry.base;
-      paths[key] = JSON.parse(entry.targets) as string[];
-    }
-    if (Object.keys(paths).length) {
-      options.paths = paths;
-      if (base) (options as { pathsBasePath?: string }).pathsBasePath ??= base;
-    }
     // configurações de módulo só valem para todos quando as referências concordam
     const single = <T>(values: Set<unknown>) =>
       values.size === 1 ? ([...values][0] as T | undefined) : undefined;
     options.jsx ??= single<ts.JsxEmit>(settings.jsx);
     options.moduleResolution ??= single<ts.ModuleResolutionKind>(settings.moduleResolution);
     options.module ??= single<ts.ModuleKind>(settings.module);
+  }
+  const ownBase = (options as { pathsBasePath?: string }).pathsBasePath ?? path.dirname(file);
+  for (const dir of [...new Set(refAliases.map((r) => r.dir))]) {
+    const inside = (r: { dir: string }) => dir === r.dir || dir.startsWith(`${r.dir}/`);
+    const merged: Record<string, string> = {};
+    const conflicts = new Set<string>();
+    for (const r of refAliases.filter(inside)) {
+      for (const [key, targets] of Object.entries(r.paths)) {
+        const value = JSON.stringify(targets);
+        if (merged[key] !== undefined && merged[key] !== value) conflicts.add(key);
+        else merged[key] = value;
+      }
+    }
+    // os paths do próprio tsconfig valem antes dos das referências
+    const paths: ts.MapLike<string[]> = { ...options.paths };
+    let added = false;
+    for (const [key, value] of Object.entries(merged)) {
+      if (conflicts.has(key) || paths[key]) continue;
+      paths[key] = JSON.parse(value) as string[];
+      added = true;
+    }
+    if (!added) continue;
+    const folderOptions: ts.CompilerOptions & { pathsBasePath?: string } = {
+      ...options,
+      paths,
+      pathsBasePath: ownBase,
+    };
+    scopes.push({
+      name: `${toPosix(path.relative(root, dir)) || '.'}/`,
+      files: new Set(),
+      dir,
+      options: withModernResolution({ ...DEFAULT_OPTIONS, ...folderOptions, ...ENFORCED_OPTIONS }),
+    });
   }
   // projetos sem moduleResolution moderna resolvem pior extensões e index; usamos Bundler
   withModernResolution(options);
@@ -217,6 +243,19 @@ function parseConfigFile(
     scopes,
     referenced,
   };
+}
+
+/**
+ * Arquivo fora de todos os tsconfig referenciados: o escopo da pasta mais funda que o contém
+ * (aliases das referências dessa pasta), senão as opções do próprio tsconfig.
+ */
+function folderScope(config: DirConfig, fromAbsolute: string): ResolutionConfig {
+  let best: (ConfigScope & ResolutionConfig) | undefined;
+  for (const scope of config.scopes) {
+    if (scope.dir === undefined || !fromAbsolute.startsWith(`${scope.dir}/`)) continue;
+    if (!best || scope.dir.length > best.dir!.length) best = scope;
+  }
+  return best ?? config;
 }
 
 /** Projetos sem moduleResolution moderna resolvem pior extensões e index; usamos Bundler. */
@@ -328,7 +367,7 @@ export class ModuleResolver {
     const rootScope = this.base.scopes.find((s) => s.files.has(fromAbsolute));
     if (rootScope) return rootScope;
     const dir = this.nearestConfig(path.posix.dirname(fromAbsolute));
-    return dir.scopes.find((s) => s.files.has(fromAbsolute)) ?? dir;
+    return dir.scopes.find((s) => s.files.has(fromAbsolute)) ?? folderScope(dir, fromAbsolute);
   }
 
   private nearestConfig(dir: string): DirConfig {

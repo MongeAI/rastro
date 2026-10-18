@@ -4,7 +4,6 @@ import { descendantsOfKind, unwrapExpression } from '../analyze.js';
 import {
   addRoute,
   frameworkExport,
-  hasOpaqueProperties,
   isHandlerLike,
   linkHandlers,
   normalizePrefix,
@@ -74,8 +73,10 @@ function registrationPrefix(options: ts.Expression | undefined): string | undefi
   if (!options) return '';
   const obj = unwrapExpression(options);
   if (!ts.isObjectLiteralExpression(obj)) return undefined;
+  // `{ prefix: '/v1', ...opts }`: o espalhamento depois pode trocar o prefixo (vale o último)
   const prop = objectProperty(obj, 'prefix');
-  if (!prop) return hasOpaqueProperties(obj) ? undefined : '';
+  if (prop === null) return undefined;
+  if (!prop) return '';
   if (!ts.isPropertyAssignment(prop)) return undefined;
   const value = stringLiteral(prop.initializer);
   return value === undefined ? undefined : normalizePrefix(value);
@@ -120,7 +121,10 @@ export function fastifyOwner(
 /** `{ handler }` / `{ handler: fn }` em um objeto de opções. */
 function handlerOption(obj: Node): Node | undefined {
   if (!Node.isObjectLiteralExpression(obj)) return undefined;
-  const prop = obj.getProperty('handler');
+  // a última chave `handler` vale; com espalhamento depois dela o handler não é conhecido
+  const found = objectProperty(obj.compilerNode, 'handler');
+  if (!found) return undefined;
+  const prop = obj.getProperties().find((p) => p.compilerNode === found);
   if (Node.isPropertyAssignment(prop)) return prop.getInitializer();
   if (Node.isShorthandPropertyAssignment(prop)) return prop.getNameNode();
   if (Node.isMethodDeclaration(prop)) return prop; // { handler(req, reply) { ... } }
@@ -163,7 +167,9 @@ export function detectFastifyRoutes(state: RouteState, file: DiscoveredFile, sf:
       if (!options || !Node.isObjectLiteralExpression(options)) continue;
       const obj = options.compilerNode;
       const methodProp = objectProperty(obj, 'method');
-      const urlProp = objectProperty(obj, 'url') ?? objectProperty(obj, 'path');
+      // `path` é sinônimo de `url`, usado só sem `url` (`null`: escondido por um espalhamento)
+      const url = objectProperty(obj, 'url');
+      const urlProp = url === undefined ? objectProperty(obj, 'path') : url;
       if (!methodProp || !urlProp) continue;
       if (!ts.isPropertyAssignment(methodProp) || !ts.isPropertyAssignment(urlProp)) continue;
       const declared = stringLiterals(methodProp.initializer);

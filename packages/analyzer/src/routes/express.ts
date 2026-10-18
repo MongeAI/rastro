@@ -103,6 +103,20 @@ export function detectExpressRoutes(state: RouteState, file: DiscoveredFile, sf:
   }
 }
 
+/**
+ * O valor é comprovadamente uma função: todo o tipo dele tem assinatura de chamada (ex.: o
+ * middleware devolvido por `cors()`). `any` (JS sem tipos) e uniões com texto não contam.
+ */
+function isFunctionValue(state: RouteState, expr: ts.Expression): boolean {
+  try {
+    const type = state.ctx.checker.getTypeAtLocation(expr);
+    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return false;
+    return type.getCallSignatures().length > 0 && !(type.flags & ts.TypeFlags.StringLike);
+  } catch {
+    return false;
+  }
+}
+
 /** `x.route('/p')` seguido de `.get(...)`, `.post(...)`: devolve o receptor e o caminho. */
 function routeChain(expr: ts.Expression): { receiver: ts.Identifier; path: string } | undefined {
   let current = expr;
@@ -140,8 +154,10 @@ function detectMount(state: RouteState, call: ts.CallExpression): void {
   if (literal) {
     prefixes = literal.map(normalizePrefix);
     candidates = rest;
-  } else if (first && expressOwner(state, first) !== undefined) {
-    prefixes = ['']; // sem caminho: montado na raiz do receptor
+  } else if (first && (expressOwner(state, first) !== undefined || isFunctionValue(state, first))) {
+    // sem caminho: montado na raiz do receptor. O Express só lê o primeiro argumento como
+    // caminho quando ele não é uma função (`app.use(cors(), router)` monta na raiz)
+    prefixes = [''];
     candidates = call.arguments;
   } else {
     prefixes = [undefined]; // caminho não literal: a montagem existe, mas o prefixo é desconhecido

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ts, type SourceFile } from 'ts-morph';
 import { toPosix, type DiscoveredFile } from '../discover.js';
 import { unwrapExpression } from '../analyze.js';
-import { addRoute, linkHandlerSymbol, type RouteState } from './common.js';
+import { addRoute, linkHandlerSymbol, objectProperty, type RouteState } from './common.js';
 
 const HTTP_METHODS = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'];
 /** `pageExtensions` padrão do Next.js. */
@@ -52,6 +52,8 @@ function staticPageExtensions(file: string, text: string): string[] | null | und
   if (mentions > 1) return null;
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
   let found: string[] | null = null;
+  // a árvore é lida sem `parent`: o objeto que contém a propriedade vem pela visita
+  let owner: ts.Node | undefined;
   const visit = (node: ts.Node): void => {
     if (
       ts.isPropertyAssignment(node) &&
@@ -59,13 +61,21 @@ function staticPageExtensions(file: string, text: string): string[] | null | und
       node.name.text === 'pageExtensions'
     ) {
       const value = unwrapExpression(node.initializer);
-      if (ts.isArrayLiteralExpression(value) && value.elements.length) {
+      // `{ pageExtensions: [...], ...base }`: o espalhamento depois pode trocar o valor
+      const last =
+        owner && ts.isObjectLiteralExpression(owner)
+          ? objectProperty(owner, 'pageExtensions')
+          : node;
+      if (last === node && ts.isArrayLiteralExpression(value) && value.elements.length) {
         const items = value.elements.map((e) => (ts.isStringLiteralLike(e) ? e.text : undefined));
         if (items.every((t): t is string => !!t && /^[\w.-]+$/.test(t))) found = items;
       }
       return;
     }
+    const previous = owner;
+    owner = node;
     ts.forEachChild(node, visit);
+    owner = previous;
   };
   visit(sf);
   return found;
@@ -159,7 +169,9 @@ function appRoutePath(folders: string[]): string | undefined {
     if (folder.startsWith('_') || folder.startsWith('@')) return undefined;
     if (/^\(\.{1,3}\)/.test(folder)) return undefined;
     if (/^\(.+\)$/.test(folder)) continue;
-    parts.push(routeSegment(folder));
+    // `%5F` (sublinhado codificado) cria segmentos que começam com `_`: o Next troca todo `%5F`
+    // por `_` no caminho do App Router (UnderscoreNormalizer)
+    parts.push(routeSegment(folder.replace(/%5F/g, '_')));
   }
   return `/${parts.join('/')}`;
 }

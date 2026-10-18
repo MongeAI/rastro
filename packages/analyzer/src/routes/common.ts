@@ -4,7 +4,10 @@ import { toPosix, type DiscoveredFile } from '../discover.js';
 import {
   addUnresolvedNode,
   evidenceAt,
+  hasAmbiguousReceiver,
+  interfaceCandidates,
   moduleSpecifierOfAlias,
+  possibleTargets,
   rangeOf,
   referenceText,
   resolveSymbolTargets,
@@ -416,14 +419,27 @@ export function stringLiterals(n: ts.Node | undefined): string[] | undefined {
   return single === undefined ? undefined : [single];
 }
 
-/** Propriedade `name` de um objeto literal (atribuição ou forma curta). */
+/**
+ * Propriedade `name` de um objeto literal. Em JS vale a última: a busca é de trás para frente,
+ * e um espalhamento (`...opts`) ou uma chave calculada depois dela pode trocar o valor, então
+ * o resultado é `null` (desconhecido). `undefined`: o objeto comprovadamente não tem `name`
+ * (sem nada opaco nele).
+ */
 export function objectProperty(
   obj: ts.ObjectLiteralExpression,
   name: string,
-): ts.PropertyAssignment | ts.ShorthandPropertyAssignment | undefined {
-  for (const prop of obj.properties) {
-    if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) continue;
+): ts.ObjectLiteralElementLike | null | undefined {
+  for (let i = obj.properties.length - 1; i >= 0; i--) {
+    const prop = obj.properties[i]!;
+    if (ts.isSpreadAssignment(prop)) return null;
     const key = prop.name;
+    if (!key) continue;
+    if (ts.isComputedPropertyName(key)) {
+      const literal = stringLiteral(key.expression);
+      if (literal === undefined) return null;
+      if (literal === name) return prop;
+      continue;
+    }
     if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && key.text === name) return prop;
   }
   return undefined;
@@ -451,20 +467,51 @@ export function joinPath(prefix: string, routePath: string): string {
 
 const MAX_PREFIXES = 32;
 
-/** Todos os prefixos completos de um dono, compondo montagens aninhadas. */
+/**
+ * Todos os prefixos completos de um dono, compondo montagens aninhadas. `memo` guarda o
+ * resultado de cada dono durante uma composição (`finishRoutes`): roteadores montados em dois
+ * caminhos por nível, com muitos níveis, faziam a recursão crescer exponencialmente.
+ */
 export function prefixesOf(
   state: RouteState,
   key: OwnerKey,
-  visiting: ReadonlySet<OwnerKey> = new Set(),
+  memo: Map<OwnerKey, PrefixSet> = new Map(),
 ): PrefixSet {
+  return composePrefixes(state, key, new Map(), memo).prefixes;
+}
+
+/**
+ * `path`: donos em composição agora → profundidade. `reached`: a menor profundidade de um dono
+ * em composição que foi encontrado de novo (um ciclo de montagens). O resultado de um dono só
+ * entra no `memo` quando não depende de quem estava em composição antes dele.
+ */
+function composePrefixes(
+  state: RouteState,
+  key: OwnerKey,
+  path: Map<OwnerKey, number>,
+  memo: Map<OwnerKey, PrefixSet>,
+): { prefixes: PrefixSet; reached: number } {
+  const cached = memo.get(key);
+  if (cached) return { prefixes: cached, reached: Infinity };
   const owner = state.owners.get(key);
-  if (!owner || visiting.has(key)) return { known: [], unknown: true };
-  if (!owner.mounts.length) return owner.base ?? { known: [], unknown: true };
-  const next = new Set(visiting).add(key);
+  const cycle = path.get(key);
+  if (!owner || cycle !== undefined)
+    return { prefixes: { known: [], unknown: true }, reached: cycle ?? Infinity };
+  if (!owner.mounts.length)
+    return { prefixes: owner.base ?? { known: [], unknown: true }, reached: Infinity };
+  const depth = path.size;
+  path.set(key, depth);
   const known = new Set<string>();
   let unknown = false;
+  let reached = Infinity;
   for (const mount of owner.mounts) {
-    const parent = prefixesOf(state, mount.parent, next);
+    // prefixos demais: o resto não é composto (e o conjunto já não é completo)
+    if (known.size >= MAX_PREFIXES) {
+      unknown = true;
+      break;
+    }
+    const { prefixes: parent, reached: hit } = composePrefixes(state, mount.parent, path, memo);
+    reached = Math.min(reached, hit);
     unknown ||= parent.unknown || mount.prefix === undefined;
     if (mount.prefix === undefined) continue;
     for (const p of parent.known) {
@@ -475,7 +522,10 @@ export function prefixesOf(
       known.add(normalizePrefix(joinPath(p, mount.prefix)));
     }
   }
-  return { known: [...known].sort(compareStrings), unknown };
+  path.delete(key);
+  const prefixes = { known: [...known].sort(compareStrings), unknown };
+  if (reached >= depth) memo.set(key, prefixes);
+  return { prefixes, reached };
 }
 
 // ---------------------------------------------------------------------------
@@ -547,13 +597,14 @@ export function addRoute(state: RouteState, input: RouteInput): string {
 
 /** Fecha as rotas: caminho completo (`fullPath`) e prefixos de montagem (`mountedAt`). */
 export function finishRoutes(state: RouteState): void {
+  const memo = new Map<OwnerKey, PrefixSet>();
   for (const route of state.routes) {
     const node = state.ctx.builder.getNode(route.id);
     if (!node) continue;
     let fullPath: string | undefined;
     let mountedAt: string[] | undefined;
     if (route.owner !== undefined) {
-      const outer = prefixesOf(state, route.owner);
+      const outer = prefixesOf(state, route.owner, memo);
       const inner = route.innerPrefix;
       // prefixo interno desconhecido: nem o caminho completo nem as montagens são comprovados
       const prefixes: PrefixSet =
@@ -619,7 +670,38 @@ export function inlineHandler(n: Node): Node | undefined {
 }
 
 export const isHandlerLike = (n: Node) =>
-  !!inlineHandler(n) || Node.isIdentifier(n) || Node.isPropertyAccessExpression(n);
+  !!inlineHandler(n) ||
+  Node.isIdentifier(n) ||
+  Node.isPropertyAccessExpression(n) ||
+  !!boundReference(n);
+
+/**
+ * `ctrl.list.bind(ctrl)`: a referência ligada (`ctrl.list`). Só a forma; se o `bind` é mesmo o
+ * nativo de Function quem confere é `nativeBind`, com o verificador de tipos.
+ */
+function boundReference(n: Node): Node | undefined {
+  if (!Node.isCallExpression(n)) return undefined;
+  const callee = n.getExpression();
+  if (!Node.isPropertyAccessExpression(callee) || callee.getName() !== 'bind') return undefined;
+  const target = callee.getExpression();
+  return Node.isIdentifier(target) || Node.isPropertyAccessExpression(target) ? target : undefined;
+}
+
+/** O `bind` chamado é o de `Function` da biblioteca padrão (e não um método do projeto)? */
+function nativeBind(ctx: AnalyzerContext, call: ts.CallExpression): boolean {
+  const callee = call.expression;
+  if (!ts.isPropertyAccessExpression(callee)) return false;
+  const decls = ctx.checker.getSymbolAtLocation(callee.name)?.declarations ?? [];
+  return (
+    decls.length > 0 &&
+    decls.every(
+      (d) =>
+        ts.isInterfaceDeclaration(d.parent) &&
+        /^(Callable|Newable)?Function$/.test(d.parent.name.text) &&
+        ctx.program.isSourceFileDefaultLibrary(d.getSourceFile()),
+    )
+  );
+}
 
 /**
  * Liga a rota aos seus handlers. Funções inline passam a ter as chamadas atribuídas à rota;
@@ -632,7 +714,11 @@ export function linkHandlers(
   handlers: Node[],
 ): void {
   const { ctx } = state;
-  for (const handler of handlers) {
+  for (const item of handlers) {
+    // `ctrl.list.bind(ctrl)` atende a rota com `ctrl.list`
+    const bound = boundReference(item);
+    if (bound && !nativeBind(ctx, item.compilerNode as ts.CallExpression)) continue;
+    const handler = bound ?? item;
     const inline = inlineHandler(handler);
     if (inline) {
       // chamadas feitas dentro do handler inline (ou embrulhado) passam a ser atribuídas à rota
@@ -652,18 +738,26 @@ export function linkHandlers(
         ? handler
         : undefined;
     if (!nameNode) continue;
+    // `{ handler }` nas opções: o valor é o da variável, não o da propriedade do objeto
+    const shorthand = nameNode.compilerNode.parent;
     linkHandlerSymbol(
       ctx,
       file,
       routeId,
-      ctx.checker.getSymbolAtLocation(nameNode.compilerNode),
+      shorthand && ts.isShorthandPropertyAssignment(shorthand)
+        ? ctx.checker.getShorthandAssignmentValueSymbol(shorthand)
+        : ctx.checker.getSymbolAtLocation(nameNode.compilerNode),
       handler.compilerNode,
       handler.getText(),
     );
   }
 }
 
-/** Liga a rota às entidades de um símbolo; sem prova, cria um nó não resolvido. */
+/**
+ * Liga a rota às entidades de um símbolo; sem prova, cria um nó não resolvido. Como nas
+ * chamadas, `ctrl.list` com `ctrl` de tipo união (`cond ? new Mock() : new Real()`) ou um
+ * alvo indireto (`module.exports` atribuído duas vezes) fica não resolvido, com os candidatos.
+ */
 export function linkHandlerSymbol(
   ctx: AnalyzerContext,
   file: DiscoveredFile,
@@ -680,7 +774,21 @@ export function linkHandlerSymbol(
       targets.flatMap((t) => (t.kind === 'entity' ? [t.id] : [])).filter((id) => id !== routeId),
     ),
   ];
-  if (entities.length) {
+  const nameNode = ts.isPropertyAccessExpression(at) ? at.name : at;
+  const implementations =
+    symbol && targets.some((t) => t.kind === 'indirect')
+      ? interfaceCandidates(ctx, nameNode, symbol)
+      : undefined;
+  const ambiguous =
+    !!symbol &&
+    ts.isPropertyAccessExpression(at) &&
+    hasAmbiguousReceiver(
+      ctx,
+      at,
+      symbol,
+      entities.map((id) => ({ id })),
+    );
+  if (entities.length && !ambiguous) {
     for (const target of entities) {
       ctx.builder.addEdge({
         kind: 'calls',
@@ -693,19 +801,18 @@ export function linkHandlerSymbol(
       });
     }
   } else if (
-    unresolvedAllowed &&
-    !targets.some((t) => t.kind === 'external') &&
-    // função declarada dentro de outra (sem nó próprio, como nas chamadas): existe, não é "sem declaração"
-    !targets.every((t) => t.kind === 'local')
+    ambiguous ||
+    (unresolvedAllowed &&
+      !targets.some((t) => t.kind === 'external') &&
+      // função declarada dentro de outra (sem nó próprio, como nas chamadas): existe, não é "sem declaração"
+      !targets.every((t) => t.kind === 'local'))
   ) {
-    const target = addUnresolvedNode(
-      ctx,
-      file.relative,
-      'call',
-      reference,
-      unresolvedReason(targets),
-      at,
-    );
+    const reason = ambiguous ? 'indirect-call' : unresolvedReason(targets);
+    const candidates =
+      reason === 'indirect-call'
+        ? possibleTargets(targets, implementations).filter((id) => id !== routeId)
+        : [];
+    const target = addUnresolvedNode(ctx, file.relative, 'call', reference, reason, at, candidates);
     ctx.builder.addEdge({
       kind: 'calls',
       source: routeId,

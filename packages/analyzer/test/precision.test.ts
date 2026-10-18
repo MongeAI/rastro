@@ -543,3 +543,188 @@ describe("reexportação CommonJS: module.exports = require('./lib/x')", () => {
     ]);
   });
 });
+
+describe('regressões da revisão do analisador: alvos que não são comprovados', () => {
+  const callsFrom = (g: RastroGraph, from: string) =>
+    g.edges
+      .filter((e) => e.kind === 'calls' && e.source === from)
+      .map((e) => [e.target, e.resolution]);
+
+  it('união com uma parte externa ou de objeto literal: não resolvida, com o método do projeto como candidato', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"u","dependencies":{"ext":"1"}}',
+      'node_modules/ext/package.json': '{"name":"ext","types":"index.d.ts"}',
+      'node_modules/ext/index.d.ts': 'export declare class ExtRepo { save(): void }',
+      'a.ts': [
+        "import { ExtRepo } from 'ext';",
+        'export class MyRepo { save() {} }',
+        "const memory = { save: () => { console.log('mem'); } };",
+        'export function ext(r: MyRepo | ExtRepo) { r.save(); }',
+        'export function literal(r: MyRepo | typeof memory) { r.save(); }',
+        'export function generic<T extends MyRepo | ExtRepo>(r: T) { r.save(); }',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    for (const fn of ['ext', 'literal', 'generic']) {
+      const calls = callsFrom(g, `fn:a.ts#${fn}`);
+      expect(calls).toEqual([
+        [expect.stringMatching(/^unresolved:a\.ts#call:r\.save/), 'unresolved'],
+      ]);
+      expect(node(g, calls[0]![0]!)?.meta).toMatchObject({
+        reason: 'indirect-call',
+        candidates: ['method:a.ts#MyRepo.save'],
+      });
+    }
+  });
+
+  it('interseção: só as partes que implementam o membro contam', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"i","dependencies":{"ext":"1"}}',
+      'node_modules/ext/package.json': '{"name":"ext","types":"index.d.ts"}',
+      'node_modules/ext/index.d.ts': 'export declare class ExtRepo { save(): void }',
+      'a.ts': [
+        "import { ExtRepo } from 'ext';",
+        'export class Repo { save() {} }',
+        'export class Other { save() {} }',
+        // a parte extra não declara save: continua sendo Repo.save
+        'export function tagged(r: Repo & { tag: string }) { r.save(); }',
+        'export function nullable(r: (Repo & { tag: string }) | undefined) { r?.save(); }',
+        // duas implementações (do projeto e externa) no mesmo objeto: nenhuma é comprovada
+        'export function both(r: Repo & Other) { r.save(); }',
+        'export function mixed(r: Repo & ExtRepo) { r.save(); }',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    for (const fn of ['tagged', 'nullable'])
+      expect(callsFrom(g, `fn:a.ts#${fn}`)).toEqual([['method:a.ts#Repo.save', 'resolved']]);
+    for (const fn of ['both', 'mixed']) {
+      const calls = callsFrom(g, `fn:a.ts#${fn}`);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]![1]).toBe('unresolved');
+    }
+  });
+
+  it('objeto em let (forma curta ou longa): o valor inicial é só candidato', async () => {
+    const root = makeProject({
+      'a.ts': [
+        'export function list() {}',
+        'export function other() {}',
+        'let api = { list };',
+        'api = { list: other };',
+        'export function useShorthand() { api.list(); }',
+        'let api2 = { list: list };',
+        'api2 = { list: other };',
+        'export function useLong() { api2.list(); }',
+        // const continua comprovado, também com `as const` e `satisfies`
+        'const fixed = { list } as const;',
+        'export function useConst() { fixed.list(); }',
+        'const checked = { list: list } satisfies Record<string, () => void>;',
+        'export function useSatisfies() { checked.list(); }',
+        // objeto novo devolvido a cada chamada: também comprovado
+        'function make() { return { list }; }',
+        'const makeArrow = () => ({ list: list });',
+        'export function useFactory() { make().list(); makeArrow().list(); }',
+        // passado como argumento: quem recebe decide o que devolver
+        'function wrap<T>(x: T): T { return x; }',
+        'export function useWrapped() { wrap({ list }).list(); }',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    expect(callsFrom(g, 'fn:a.ts#useShorthand')).toEqual([
+      ['unresolved:a.ts#call:api.list', 'unresolved'],
+    ]);
+    expect(node(g, 'unresolved:a.ts#call:api.list')?.meta).toEqual({
+      reason: 'indirect-call',
+      reference: 'api.list',
+      candidates: ['fn:a.ts#list'],
+    });
+    expect(callsFrom(g, 'fn:a.ts#useLong')).toEqual([
+      ['unresolved:a.ts#call:api2.list', 'unresolved'],
+    ]);
+    expect(callsFrom(g, 'fn:a.ts#useConst')).toEqual([['fn:a.ts#list', 'resolved']]);
+    expect(callsFrom(g, 'fn:a.ts#useSatisfies')).toEqual([['fn:a.ts#list', 'resolved']]);
+    expect(callsFrom(g, 'fn:a.ts#useFactory').sort()).toEqual([
+      ['fn:a.ts#list', 'resolved'],
+      ['fn:a.ts#make', 'resolved'],
+      ['fn:a.ts#makeArrow', 'resolved'],
+    ]);
+    expect(callsFrom(g, 'fn:a.ts#useWrapped')).toContainEqual([
+      expect.stringMatching(/^unresolved:a\.ts#call:wrap\(.*\)\.list$/),
+      'unresolved',
+    ]);
+  });
+
+  it('objeto atribuído a this.h (ou a outra variável) não é comprovado; module.exports = {...} é', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"bin"}',
+      'a.js': [
+        'export function foo() {}',
+        'export function bar() {}',
+        'export class S {',
+        '  constructor() { this.h = { run: foo }; }',
+        '  swap() { this.h = { run: bar }; }',
+        '  go() { this.h.run(); }',
+        '}',
+      ].join('\n'),
+      'lib.js': 'function start() {}\nmodule.exports = { start: start };',
+      'main.js': "const lib = require('./lib');\nlib.start();",
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    const calls = callsFrom(g, 'method:a.js#S.go');
+    expect(calls).toEqual([['unresolved:a.js#call:this.h.run', 'unresolved']]);
+    expect(node(g, 'unresolved:a.js#call:this.h.run')?.meta?.reason).toBe('indirect-call');
+    expect(callsFrom(g, 'file:main.js')).toEqual([['fn:lib.js#start', 'resolved']]);
+  });
+
+  it('propriedade de objeto const reatribuída depois (mesmo arquivo ou importada): os dois valores são candidatos', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"mut"}',
+      'a.js': [
+        'export function foo() {}',
+        'export function bar() {}',
+        'const api = { run: foo };',
+        'if (process.env.X) api.run = bar;',
+        'export function use() { api.run(); }',
+      ].join('\n'),
+      'b.ts': [
+        'export function foo2() {}',
+        'export function bar2() {}',
+        'export const api = { run: foo2, keep: foo2 };',
+        'export function use2() { api.run(); api.keep(); }',
+      ].join('\n'),
+      'c.ts': "import { api, bar2 } from './b';\nif (Math.random()) api['run'] = bar2;",
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    expect(callsFrom(g, 'fn:a.js#use')).toEqual([['unresolved:a.js#call:api.run', 'unresolved']]);
+    expect(node(g, 'unresolved:a.js#call:api.run')?.meta?.candidates).toEqual([
+      'fn:a.js#bar',
+      'fn:a.js#foo',
+    ]);
+    // `keep` nunca é reatribuída: continua comprovada
+    expect(callsFrom(g, 'fn:b.ts#use2').sort()).toEqual([
+      ['fn:b.ts#foo2', 'resolved'],
+      ['unresolved:b.ts#call:api.run', 'unresolved'],
+    ]);
+    expect(node(g, 'unresolved:b.ts#call:api.run')?.meta?.candidates).toEqual([
+      'fn:b.ts#bar2',
+      'fn:b.ts#foo2',
+    ]);
+  });
+
+  it('evidência de reexportação: nome explícito antes de export *, e só de quem exporta o nome', async () => {
+    const root = makeProject({
+      'a.ts': 'export function shared() {}\nexport function onlyA() {}',
+      'b.ts': 'export function shared() {}\nexport function onlyB() {}',
+      'index.ts': "export * from './a';\nexport * from './b';\nexport { shared } from './b';",
+    });
+    const g = await analyzeProject(root);
+    expect(edge(g, 'exports', 'file:index.ts', 'fn:b.ts#shared')?.evidence[0]?.line).toBe(3);
+    expect(edge(g, 'exports', 'file:index.ts', 'fn:a.ts#onlyA')?.evidence[0]?.line).toBe(1);
+    expect(edge(g, 'exports', 'file:index.ts', 'fn:b.ts#onlyB')?.evidence[0]?.line).toBe(2);
+  });
+});

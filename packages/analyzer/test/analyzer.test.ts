@@ -863,3 +863,55 @@ describe('diagnósticos com parâmetros (textos em outros idiomas)', () => {
     expect(validateGraph(g).valid).toBe(true);
   });
 });
+
+describe('regressões da revisão do analisador: aliases de tsconfig referenciados', () => {
+  const files = (rootPaths: boolean) => ({
+    'tsconfig.json': JSON.stringify({
+      ...(rootPaths ? { compilerOptions: { paths: { '~root/*': ['./*'] } } } : {}),
+      files: [],
+      references: [{ path: './packages/web' }],
+    }),
+    'packages/web/tsconfig.json':
+      '{ "compilerOptions": { "composite": true, "paths": { "@/*": ["./src/*"] } }, "include": ["src"] }',
+    'packages/web/src/util.ts': 'export function util() { return 1; }',
+    'packages/web/src/main.ts': 'import { util } from "@/util";\nexport const w = util();',
+    'packages/web/tools/gen.ts': 'import { util } from "@/util";\nutil();',
+    // homônimo na raiz: o alias do subpacote nunca pode apontar para cá
+    'src/util.ts': 'export function util() { return 2; }',
+    'scripts/build.ts':
+      'import { util } from "@/util";\nimport { util as u } from "~root/src/util";\nutil();\nu();',
+  });
+
+  for (const rootPaths of [true, false]) {
+    it(`alias de referência resolve a partir da pasta dela e não vale fora dela (raiz ${rootPaths ? 'com' : 'sem'} paths)`, async () => {
+      const g = await analyzeProject(makeProject(files(rootPaths)));
+      const web = 'packages/web/src';
+      expect(edge(g, 'imports', `file:${web}/main.ts`, `file:${web}/util.ts`)).toBeDefined();
+      expect(edge(g, 'calls', `file:${web}/main.ts`, `fn:${web}/util.ts#util`)?.resolution).toBe(
+        'resolved',
+      );
+      // fora do "include", mas dentro da pasta do subpacote: o alias dele ainda vale
+      expect(
+        edge(g, 'imports', 'file:packages/web/tools/gen.ts', `file:${web}/util.ts`),
+      ).toBeDefined();
+      // scripts/ está fora do subpacote: "@/util" não existe ali, e nunca é o src/util.ts da raiz
+      expect(
+        g.edges.some(
+          (e) =>
+            (e.target === 'fn:src/util.ts#util' || e.target === 'file:src/util.ts') &&
+            (e.kind === 'calls' || e.kind === 'imports') &&
+            e.source !== 'file:scripts/build.ts',
+        ),
+      ).toBe(false);
+      expect(
+        g.edges.some(
+          (e) => e.source === 'file:scripts/build.ts' && e.target === `file:${web}/util.ts`,
+        ),
+      ).toBe(false);
+      expect(node(g, 'unresolved:scripts/build.ts#import:@/util')).toBeDefined();
+      // o alias da própria raiz continua valendo para os arquivos dela
+      if (rootPaths)
+        expect(edge(g, 'imports', 'file:scripts/build.ts', 'file:src/util.ts')).toBeDefined();
+    });
+  }
+});

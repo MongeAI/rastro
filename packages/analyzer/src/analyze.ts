@@ -1361,6 +1361,9 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
   const names = [...new Set(exports.map(displayName))].sort();
   const fileNode = ctx.builder.getNode(fileId);
   if (fileNode && names.length) fileNode.meta = { ...fileNode.meta, exportNames: names };
+  // montado só na primeira reexportação: num barril com milhares de `export *`, procurar cada
+  // nome em todos os módulos era quadrático
+  let reexports: Map<string, Node> | undefined;
 
   for (const symbol of exports) {
     const name = displayName(symbol);
@@ -1377,8 +1380,9 @@ function extractExports(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           ...(isDefault ? { defaultExport: true } : {}),
         };
       }
+      const statement = !sameFile && (reexports ??= reexportStatements(ctx, sf)).get(name);
       const evidence =
-        (!sameFile && exportStatementEvidence(ctx, file, sf, name)) ||
+        (statement && evidenceAt(ctx, file.relative, statement)) ||
         (decl && toPosix(decl.getSourceFile().fileName) === file.absolute
           ? evidenceAt(ctx, file.relative, exportKeywordOf(decl) ?? decl)
           : undefined);
@@ -1422,33 +1426,33 @@ function exportKeywordOf(decl: ts.Node): ts.Node | undefined {
   return ts.getModifiers(decl)?.find((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
 
-/** Evidência do `export ... from` que reexporta um nome. */
-function exportStatementEvidence(
-  ctx: Ctx,
-  file: DiscoveredFile,
-  sf: SourceFile,
-  name: string,
-): Evidence | undefined {
+/**
+ * Nome reexportado → o `export ... from` que o reexporta (a evidência). Os nomes explícitos
+ * (`export { x as y } from`) valem antes de `export * from`, e um `export *` só conta para os
+ * nomes que o módulo de origem realmente exporta.
+ */
+function reexportStatements(ctx: Ctx, sf: SourceFile): Map<string, Node> {
+  const byName = new Map<string, Node>();
   const reexports = sf.getExportDeclarations().filter((d) => !!d.getModuleSpecifierValue());
-  // primeiro os nomes explícitos: `export { x as y } from`
   for (const decl of reexports) {
-    if (decl.getNamedExports().some((n) => (n.getAliasNode()?.getText() ?? n.getName()) === name))
-      return evidenceAt(ctx, file.relative, decl);
+    for (const named of decl.getNamedExports()) {
+      const name = named.getAliasNode()?.getText() ?? named.getName();
+      if (!byName.has(name)) byName.set(name, decl);
+    }
   }
-  // depois `export * from`: o módulo de origem precisa realmente exportar o nome
   for (const decl of reexports) {
     if (!decl.isNamespaceExport()) continue;
     const specifier = decl.getModuleSpecifier();
     const moduleSymbol = specifier && ctx.checker.getSymbolAtLocation(specifier.compilerNode);
     if (!moduleSymbol) continue;
     try {
-      if (ctx.checker.getExportsOfModule(moduleSymbol).some((s) => s.name === name))
-        return evidenceAt(ctx, file.relative, decl);
+      for (const symbol of ctx.checker.getExportsOfModule(moduleSymbol))
+        if (!byName.has(symbol.name)) byName.set(symbol.name, decl);
     } catch {
       // módulo sem exports conhecidos
     }
   }
-  return undefined;
+  return byName;
 }
 
 /** Encontra a entidade que corresponde exatamente a uma declaração. */
@@ -1565,18 +1569,26 @@ function declarationTargets(ctx: Ctx, decl: ts.Declaration, depth: number): Symb
     if (isInsideProject(ctx, declFile)) return [{ kind: 'not-analyzed' }];
     return [{ kind: 'external' }];
   }
-  if (ts.isShorthandPropertyAssignment(decl))
-    return resolveSymbolTargets(
-      ctx,
-      ctx.checker.getShorthandAssignmentValueSymbol(decl),
-      depth + 1,
-    );
   if (
-    ts.isPropertyAssignment(decl) &&
-    ts.isIdentifier(decl.initializer) &&
-    isConstObjectLiteralProperty(decl)
-  )
-    return resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(decl.initializer), depth + 1);
+    ts.isShorthandPropertyAssignment(decl) ||
+    (ts.isPropertyAssignment(decl) && ts.isIdentifier(decl.initializer))
+  ) {
+    // `{ list }` / `{ list: list }`: o valor da propriedade é o do identificador
+    const value = ts.isShorthandPropertyAssignment(decl)
+      ? ctx.checker.getShorthandAssignmentValueSymbol(decl)
+      : ctx.checker.getSymbolAtLocation(decl.initializer as ts.Identifier);
+    const targets = resolveSymbolTargets(ctx, value, depth + 1);
+    if (!isConstObjectLiteralProperty(decl)) {
+      // objeto em `let` (que pode ser trocado por outro), em `this.h = {...}` ou passado adiante:
+      // o valor inicial é só um dos possíveis
+      return [{ kind: 'indirect', candidates: possibleTargets(targets) }];
+    }
+    const written = propertyWrites(ctx, decl);
+    if (!written) return targets;
+    // `const api = { run: foo }` com `api.run = bar` em algum lugar: qualquer um dos dois
+    const later = written.flatMap((value) => valueTargets(ctx, value, depth + 1));
+    return [{ kind: 'indirect', candidates: possibleTargets([...targets, ...later]) }];
+  }
   if (
     ts.isVariableDeclaration(decl) &&
     decl.initializer &&
@@ -1671,13 +1683,160 @@ function isModuleExports(node: ts.Node): boolean {
   );
 }
 
-/** Propriedade de um objeto literal atribuído a `const` ou a `module.exports`. */
-function isConstObjectLiteralProperty(decl: ts.PropertyAssignment): boolean {
-  const literal = decl.parent;
-  const owner = literal?.parent;
+/**
+ * Propriedade de um objeto literal guardado onde não pode ser trocado por outro objeto: `const`,
+ * `module.exports`/`exports.x`, `export default`, ou devolvido por uma função (`return {...}`,
+ * `() => ({...})`, um objeto novo a cada chamada). Num lugar reatribuível (`let`, `this.h =
+ * {...}`, `cfg = {...}`) o tipo vem de um objeto, mas o valor pode ser outro; passado como
+ * argumento, quem o recebe decide o que devolver. Nesses casos o valor não é garantido.
+ */
+function isConstObjectLiteralProperty(
+  decl: ts.PropertyAssignment | ts.ShorthandPropertyAssignment,
+): boolean {
+  const owner = objectLiteralOwner(decl);
   if (!owner) return false;
   if (ts.isVariableDeclaration(owner)) return isConstDeclaration(owner);
-  return ts.isBinaryExpression(owner) || ts.isExportAssignment(owner);
+  if (ts.isBinaryExpression(owner)) return isExportsAssignment(owner);
+  return ts.isExportAssignment(owner) || ts.isReturnStatement(owner) || ts.isArrowFunction(owner);
+}
+
+/** Quem recebe o objeto literal da propriedade (atravessando parênteses, `as const`, `satisfies`). */
+function objectLiteralOwner(
+  decl: ts.PropertyAssignment | ts.ShorthandPropertyAssignment,
+): ts.Node | undefined {
+  let value: ts.Node = decl.parent;
+  while (
+    value.parent &&
+    (ts.isParenthesizedExpression(value.parent) ||
+      ts.isAsExpression(value.parent) ||
+      ts.isSatisfiesExpression(value.parent)) &&
+    value.parent.expression === value
+  )
+    value = value.parent;
+  const owner = value.parent;
+  if (!owner) return undefined;
+  if (ts.isVariableDeclaration(owner)) return owner.initializer === value ? owner : undefined;
+  if (ts.isBinaryExpression(owner)) return owner.right === value ? owner : undefined;
+  if (ts.isArrowFunction(owner)) return owner.body === value ? owner : undefined;
+  return ts.isExportAssignment(owner) || ts.isReturnStatement(owner) ? owner : undefined;
+}
+
+/** Atribuições a propriedades com receptor identificador (`api.run = x`), pelo nome atribuído. */
+interface PropertyWrite {
+  receiver: ts.Identifier;
+  /** valor atribuído com `=` (ausente em `delete`, `||=`, `Object.assign`...) */
+  value?: ts.Expression;
+}
+
+/** Nome usado quando qualquer propriedade pode ter sido trocada (`Object.assign(api, x)`, `api[k] = x`). */
+const ANY_PROPERTY = '*';
+const propertyWriteIndexes = new WeakMap<Ctx, Map<string, PropertyWrite[]>>();
+
+/**
+ * Índice (montado uma vez, na primeira consulta) das atribuições a propriedades de variáveis
+ * em todos os arquivos analisados: `api.run = x`, `api['run'] = x`, `api.run ??= x`,
+ * `delete api.run`, `Object.assign(api, ...)`.
+ */
+function propertyWriteIndex(ctx: Ctx): Map<string, PropertyWrite[]> {
+  const cached = propertyWriteIndexes.get(ctx);
+  if (cached) return cached;
+  const found = new Map<string, PropertyWrite[]>();
+  propertyWriteIndexes.set(ctx, found);
+  const add = (name: string, write: PropertyWrite) => {
+    let list = found.get(name);
+    if (!list) found.set(name, (list = []));
+    list.push(write);
+  };
+  const record = (target: ts.Expression, value: ts.Expression | undefined) => {
+    const t = unwrapExpression(target);
+    if (ts.isPropertyAccessExpression(t) && ts.isIdentifier(t.expression)) {
+      add(t.name.text, { receiver: t.expression, ...(value ? { value } : {}) });
+    } else if (ts.isElementAccessExpression(t) && ts.isIdentifier(t.expression)) {
+      const key = t.argumentExpression;
+      const name =
+        ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? key.text : ANY_PROPERTY;
+      add(name, { receiver: t.expression, ...(value ? { value } : {}) });
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    ) {
+      record(
+        node.left,
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken ? node.right : undefined,
+      );
+    } else if (ts.isDeleteExpression(node)) {
+      record(node.expression, undefined);
+    } else if (ts.isCallExpression(node) && node.arguments[0]) {
+      // Object.assign(api, {...}) / Object.defineProperty(api, 'run', {...})
+      const callee = node.expression;
+      const target = unwrapExpression(node.arguments[0]);
+      if (
+        ts.isIdentifier(target) &&
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === 'Object' &&
+        /^(assign|defineProperty|defineProperties)$/.test(callee.name.text)
+      )
+        add(ANY_PROPERTY, { receiver: target });
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const absolute of ctx.filesByAbs.keys()) {
+    const sf = ctx.program.getSourceFile(absolute);
+    if (sf) ts.forEachChild(sf, visit);
+  }
+  return found;
+}
+
+/**
+ * Valores atribuídos depois à propriedade de um objeto literal em `const` (`const api = { run:
+ * foo }` e `api.run = bar`), ou `undefined` se ela nunca é reatribuída. Só atribuições cujo
+ * receptor é a própria variável (também importada) são vistas; um alias (`const b = api`) não.
+ */
+function propertyWrites(
+  ctx: Ctx,
+  decl: ts.PropertyAssignment | ts.ShorthandPropertyAssignment,
+): ts.Expression[] | undefined {
+  const owner = objectLiteralOwner(decl);
+  if (!owner || !ts.isVariableDeclaration(owner) || !ts.isIdentifier(owner.name)) return undefined;
+  const key = decl.name;
+  const name =
+    ts.isIdentifier(key) || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key)
+      ? key.text
+      : undefined;
+  if (name === undefined) return undefined;
+  const index = propertyWriteIndex(ctx);
+  const writes = [...(index.get(name) ?? []), ...(index.get(ANY_PROPERTY) ?? [])].filter((w) =>
+    isSameVariable(ctx, w.receiver, owner),
+  );
+  if (!writes.length) return undefined;
+  return writes.flatMap((w) => (w.value ? [w.value] : []));
+}
+
+/** O identificador se refere à variável declarada em `decl` (seguindo imports)? */
+function isSameVariable(ctx: Ctx, id: ts.Identifier, decl: ts.VariableDeclaration): boolean {
+  let symbol: ts.Symbol | undefined;
+  try {
+    symbol = ctx.checker.getSymbolAtLocation(id);
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias)
+      symbol = ctx.checker.getAliasedSymbol(symbol);
+  } catch {
+    return false;
+  }
+  return !!symbol?.declarations?.includes(decl);
+}
+
+/** Alvos de um valor atribuído (`bar` em `api.run = bar`); outras expressões não têm alvo. */
+function valueTargets(ctx: Ctx, value: ts.Expression, depth: number): SymbolTarget[] {
+  const e = unwrapExpression(value);
+  const nameNode = ts.isPropertyAccessExpression(e) ? e.name : ts.isIdentifier(e) ? e : undefined;
+  return nameNode
+    ? resolveSymbolTargets(ctx, ctx.checker.getSymbolAtLocation(nameNode), depth)
+    : [];
 }
 
 /** Função declarada dentro de outra: `function aux() {}`, `const aux = () => {}`, `const f = useCallback(() => {})`. */
@@ -1937,12 +2096,11 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
         meta,
       });
     };
-    // receptor de tipo união (`r: Foo | Bar`, `r: UserRepo | Foo`) com o método declarado em mais
-    // de um lugar do projeto: em execução só um deles atende a chamada, e qual depende do objeto
+    // receptor de tipo união (`r: Foo | Bar`, `r: UserRepo | Foo`, `r: Foo | PacoteExterno`) que
+    // chega a mais de uma implementação: em execução só uma atende a chamada, e qual depende do objeto
     if (
       Node.isPropertyAccessExpression(callee) &&
-      projectDeclarationCount(ctx, symbol, entities) > 1 &&
-      hasCompositeReceiver(ctx, callee.compilerNode)
+      hasAmbiguousReceiver(ctx, callee.compilerNode, symbol, entities)
     ) {
       indirectEdge(possible(), 'indirect-call');
       continue;
@@ -2003,16 +2161,106 @@ function projectDeclarationCount(
   return new Set(entities.map((e) => e.id)).size + signatures.length;
 }
 
-/** O receptor de `obj.m()` tem tipo união ou interseção (também pela restrição de um genérico)? */
-function hasCompositeReceiver(ctx: Ctx, access: ts.PropertyAccessExpression): boolean {
+/**
+ * `obj.m` (chamado ou passado como handler) com receptor de tipo união ou interseção que pode
+ * chegar a mais de uma implementação: o membro declarado em mais de um lugar do projeto, ou
+ * uma parte da união em que ele é outra coisa (pacote externo, método de objeto literal,
+ * assinatura de interface). Em execução só uma delas atende, e qual depende do objeto.
+ */
+export function hasAmbiguousReceiver(
+  ctx: Ctx,
+  access: ts.PropertyAccessExpression,
+  symbol: ts.Symbol,
+  entities: Array<{ id: string }>,
+): boolean {
+  const type = compositeReceiverType(ctx, access);
+  if (!type) return false;
+  if (projectDeclarationCount(ctx, symbol, entities) > 1) return true;
+  // `#privado` só existe na própria classe: não há outra implementação possível
+  if (ts.isPrivateIdentifier(access.name)) return false;
+  try {
+    const found = memberImplementations(ctx, type, access.name.text, new Map(), 0);
+    return new Set(found).size > 1;
+  } catch {
+    return false;
+  }
+}
+
+/** Tipo união ou interseção do receptor de `obj.m` (também pela restrição de um genérico). */
+function compositeReceiverType(
+  ctx: Ctx,
+  access: ts.PropertyAccessExpression,
+): ts.UnionOrIntersectionType | undefined {
   try {
     let type = ctx.checker.getTypeAtLocation(access.expression);
     if (type.flags & ts.TypeFlags.TypeParameter)
       type = ctx.checker.getBaseConstraintOfType(type) ?? type;
-    return type.isUnion() || type.isIntersection();
+    return type.isUnion() || type.isIntersection() ? type : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+const NULLISH = ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void;
+/** Implementação sem nó no grafo (pacote externo, objeto literal, assinatura de interface). */
+const NOT_AN_ENTITY = '';
+
+/**
+ * O que pode atender `obj.name` em cada parte do tipo do receptor: os ids das entidades, ou
+ * `NOT_AN_ENTITY`. Numa união, toda parte (menos `null`/`undefined`) pode ser o objeto; numa
+ * interseção o objeto é um só, e a parte que só declara a assinatura (interface) não traz
+ * implementação: `Repo & { tag: string }` continua sendo `Repo.save`.
+ */
+function memberImplementations(
+  ctx: Ctx,
+  type: ts.Type,
+  name: string,
+  seen: Map<ts.Symbol, string[]>,
+  depth: number,
+): string[] {
+  if (depth > 4) return [NOT_AN_ENTITY];
+  if (type.flags & ts.TypeFlags.TypeParameter) {
+    const constraint = ctx.checker.getBaseConstraintOfType(type);
+    if (!constraint || constraint === type) return [];
+    type = constraint;
+  }
+  if (type.isUnion())
+    return type.types.flatMap((part) =>
+      part.flags & NULLISH ? [] : memberImplementations(ctx, part, name, seen, depth + 1),
+    );
+  if (type.isIntersection()) {
+    const parts = type.types.map((part) => ({
+      found: memberImplementations(ctx, part, name, seen, depth + 1),
+      signatureOnly: (ctx.checker.getPropertyOfType(part, name)?.declarations ?? []).every(
+        isSignatureWithoutBody,
+      ),
+    }));
+    const implementing = parts.filter((p) => p.found.length && !p.signatureOnly);
+    return (implementing.length ? implementing : parts).flatMap((p) => p.found);
+  }
+  const property = ctx.checker.getPropertyOfType(type, name);
+  if (!property) return [];
+  let found = seen.get(property);
+  if (!found) {
+    const ids = resolveSymbolTargets(ctx, property).flatMap((t) =>
+      t.kind === 'entity' ? [t.id] : [],
+    );
+    found = ids.length ? ids : [NOT_AN_ENTITY];
+    seen.set(property, found);
+  }
+  return found;
+}
+
+/**
+ * Implementações possíveis de uma referência por interface ou método abstrato (`nameNode` é o
+ * nome em `obj.nome`): `undefined` quando o membro não é só uma assinatura.
+ */
+export function interfaceCandidates(
+  ctx: Ctx,
+  nameNode: ts.Node,
+  symbol: ts.Symbol,
+): string[] | undefined {
+  return implementationsOf(ctx).indirectTargets(nameNode, symbol)?.candidates;
 }
 
 const implementationIndexes = new WeakMap<Ctx, ImplementationIndex>();

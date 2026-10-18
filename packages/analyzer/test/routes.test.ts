@@ -990,3 +990,190 @@ describe('repositório do próprio framework (express-self, fastify-self)', () =
     expect(node(g, 'route:app.ts#new Hono(…) POST /b')?.location?.startLine).toBe(4);
   });
 });
+
+describe('regressões da revisão do analisador: rotas', () => {
+  it('handler de receptor união (Mock | Real) fica não resolvido, como a chamada direta', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'a.ts': [
+        "import express from 'express';",
+        'export class RealCtrl { list(req: any, res: any) {} }',
+        'export class MockCtrl { list(req: any, res: any) {} }',
+        'const ctrl = process.env.MOCK ? new MockCtrl() : new RealCtrl();',
+        'const real = new RealCtrl();',
+        'const app = express();',
+        "app.get('/items', ctrl.list);",
+        "app.get('/real', real.list);",
+        'export function direct() { ctrl.list(1, 2); }',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(validateGraph(g).valid).toBe(true);
+    const fromItems = g.edges.filter((e) => e.source === 'route:a.ts#app GET /items');
+    expect(fromItems.map((e) => [e.target, e.resolution])).toEqual([
+      ['unresolved:a.ts#call:ctrl.list', 'unresolved'],
+    ]);
+    expect(node(g, 'unresolved:a.ts#call:ctrl.list')?.meta).toEqual({
+      reason: 'indirect-call',
+      reference: 'ctrl.list',
+      candidates: ['method:a.ts#MockCtrl.list', 'method:a.ts#RealCtrl.list'],
+    });
+    // o mesmo nó da chamada direta (mesmos candidatos)
+    expect(edge(g, 'calls', 'fn:a.ts#direct', 'unresolved:a.ts#call:ctrl.list')).toBeDefined();
+    expect(handler(g, 'route:a.ts#app GET /real', 'method:a.ts#RealCtrl.list')).toEqual(
+      ROUTE_HANDLER,
+    );
+  });
+
+  it('handler de module.exports atribuído duas vezes: não resolvido, com os dois candidatos', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'fast.js': 'module.exports = function fast(req, res) {};',
+      'slow.js': 'module.exports = function slow(req, res) {};',
+      'pick.js': [
+        "if (process.env.FAST) module.exports = require('./fast');",
+        "else module.exports = require('./slow');",
+      ].join('\n'),
+      'app.js': [
+        "const express = require('express');",
+        "const pick = require('./pick');",
+        'const app = express();',
+        "app.get('/h', pick);",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const fromH = g.edges.filter((e) => e.source === 'route:app.js#app GET /h');
+    expect(fromH.map((e) => [e.target, e.resolution])).toEqual([
+      ['unresolved:app.js#call:pick', 'unresolved'],
+    ]);
+    expect(node(g, 'unresolved:app.js#call:pick')?.meta).toMatchObject({
+      reason: 'indirect-call',
+      candidates: ['fn:fast.js#fast', 'fn:slow.js#slow'],
+    });
+  });
+
+  it('Fastify: prefixo, url e handler escondidos por um espalhamento depois não são inventados', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"fastify":"5"}}',
+      'server.ts': [
+        "import Fastify from 'fastify';",
+        'const app = Fastify();',
+        'export function h() {}',
+        'export function other() {}',
+        "async function users(f: any) { f.get('/users', h); }",
+        "async function admin(f: any) { f.get('/admin', h); }",
+        "async function twice(f: any) { f.get('/twice', h); }",
+        "const opts = { prefix: '/v2' };",
+        "app.register(users, { prefix: '/v1', ...opts });",
+        // espalhamento antes: o prefixo literal depois dele vale
+        "app.register(admin, { ...opts, prefix: '/adm' });",
+        // chave repetida: vale a última
+        "app.register(twice, { prefix: '/a', prefix: '/b' });",
+        "app.route({ method: 'GET', url: '/a', handler: h, ...{ url: '/b' } });",
+        "app.route({ method: 'GET', url: '/c', handler: h, ...{ handler: other } });",
+        "app.route({ method: 'GET', path: '/p', handler: other });",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const byName = Object.fromEntries(routes(g).map((n) => [n.meta?.routePath, n.meta]));
+    expect(byName['/users']?.fullPath).toBeUndefined();
+    expect(byName['/admin']?.fullPath).toBe('/adm/admin');
+    expect(byName['/twice']?.fullPath).toBe('/b/twice');
+    expect(byName['/a']).toBeUndefined();
+    expect(byName['/b']).toBeUndefined();
+    // handler sobrescrito pelo espalhamento: a rota não tem handler comprovado
+    expect(byName['/c']).toBeUndefined();
+    expect(byName['/p']?.fullPath).toBe('/p');
+  });
+
+  it('Next.js: %5F no nome da pasta vira _ no caminho (não é pasta privada)', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"next":"15"}}',
+      'app/%5Fescaped/page.tsx': 'export default function Page() { return null; }',
+      'app/_private/page.tsx': 'export default function Page() { return null; }',
+      'app/a%5Fb/[%5Fid]/page.tsx': 'export default function Page() { return null; }',
+    });
+    const g = await analyzeProject(root);
+    expect(routeNames(g)).toEqual(['GET /_escaped', 'GET /a_b/:_id']);
+  });
+
+  it('Next.js: pageExtensions seguido de espalhamento só seria conhecido executando', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"next":"15"}}',
+      'next.config.mjs':
+        "import base from './base.mjs';\nexport default { pageExtensions: ['page.tsx'], ...base };",
+      'base.mjs': 'export default {};',
+      'pages/about.page.tsx': 'export default function About() { return null; }',
+    });
+    const g = await analyzeProject(root);
+    expect(routeIds(g)).toEqual([]);
+    expect(g.diagnostics.some((d) => d.code === 'next-routes-skipped')).toBe(true);
+  });
+
+  it('Express: handler com .bind nativo é ligado; bind do projeto não', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'a.ts': [
+        "import express from 'express';",
+        'export class Ctrl { list(req: any, res: any) {} }',
+        'const ctrl = new Ctrl();',
+        'const fake = { list: { bind(_x: unknown) { return () => {}; } } };',
+        'const app = express();',
+        "app.get('/bound', ctrl.list.bind(ctrl));",
+        "app.get('/fake', fake.list.bind(ctrl));",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(handler(g, 'route:a.ts#app GET /bound', 'method:a.ts#Ctrl.list')).toEqual(ROUTE_HANDLER);
+    expect(g.edges.filter((e) => e.source === 'route:a.ts#app GET /fake')).toEqual([]);
+  });
+
+  it('Express: app.use(middleware(), router) monta na raiz; caminho de outro tipo continua desconhecido', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'a.ts': [
+        "import express, { Router } from 'express';",
+        'function cors() { return (req: any, res: any, next: () => void) => next(); }',
+        'function prefix(): string { return process.env.P ?? "/x"; }',
+        'export function h() {}',
+        'const app = express();',
+        'const r1 = Router();',
+        'const r2 = Router();',
+        "r1.get('/one', h);",
+        "r2.get('/two', h);",
+        'app.use(cors(), r1);',
+        'app.use(prefix(), r2);',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(node(g, 'route:a.ts#r1 GET /one')?.meta?.fullPath).toBe('/one');
+    expect(node(g, 'route:a.ts#r2 GET /two')?.meta?.fullPath).toBeUndefined();
+  });
+
+  it('roteadores montados em dois caminhos por nível, muitos níveis: compõe sem explodir', async () => {
+    const levels = 22;
+    const lines = [
+      "import express, { Router } from 'express';",
+      'export function h() {}',
+      'const app = express();',
+    ];
+    for (let i = 0; i < levels; i++) lines.push(`const r${i} = Router();`);
+    lines.push("app.use(['/a', '/b'], r0);");
+    for (let i = 1; i < levels; i++) lines.push(`r${i - 1}.use(['/a', '/b'], r${i});`);
+    for (let k = 0; k < 50; k++) lines.push(`r${levels - 1}.get('/x${k}', h);`);
+    const root = makeProject({
+      'package.json': '{"dependencies":{"express":"5"}}',
+      'app.ts': lines.join('\n'),
+    });
+    const started = performance.now();
+    const g = await analyzeProject(root);
+    expect(performance.now() - started).toBeLessThan(15_000);
+    const route = node(g, `route:app.ts#r${levels - 1} GET /x0`);
+    // prefixos demais: o caminho completo não é escolhido, e a lista é limitada e ordenada
+    expect(route?.meta?.fullPath).toBeUndefined();
+    const mounted = route?.meta?.mountedAt ?? [];
+    expect(mounted).toHaveLength(32);
+    expect([...mounted].sort()).toEqual(mounted);
+    expect(node(g, `route:app.ts#r${levels - 1} GET /x49`)?.meta?.mountedAt).toEqual(mounted);
+  });
+});
