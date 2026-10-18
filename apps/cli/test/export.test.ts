@@ -9,6 +9,7 @@ import { validateGraph, type RastroGraph } from '@rastro/core';
 import type { GraphDiff } from '@rastro/graph';
 import { buildHtmlReport, jsonForScript, REPORT_CSP } from '../src/report.js';
 import { parseExportRequest, renderExport, UsageError } from '../src/export.js';
+import { setLang } from '../src/i18n.js';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const fixture = path.join(repo, 'fixtures', 'ts-basic');
@@ -18,6 +19,8 @@ const EVIL = '</script><script>alert(1)</script><!--';
 
 let graph: RastroGraph;
 beforeAll(async () => {
+  // as mensagens conferidas aqui são as em português (o padrão sem locale é inglês)
+  setLang('pt');
   graph = await analyzeProject(fixture);
 });
 
@@ -140,8 +143,13 @@ describe('opções do export', () => {
 
 const bin = path.join(repo, 'apps', 'cli', 'bin', 'rastro.js');
 const bundled = path.join(repo, 'apps', 'cli', 'dist', 'rastro.mjs');
-const run = (args: string[], cwd = repo) =>
-  spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', cwd });
+/** Roda a CLI empacotada em português (`RASTRO_LANG=pt`), salvo outro idioma pedido. */
+const run = (args: string[], cwd = repo, lang = 'pt') =>
+  spawnSync(process.execPath, [bin, ...args], {
+    encoding: 'utf8',
+    cwd,
+    env: { ...process.env, RASTRO_LANG: lang },
+  });
 
 describe.skipIf(!fs.existsSync(bundled))('rastro export e compare (CLI empacotada)', () => {
   let saved: string;

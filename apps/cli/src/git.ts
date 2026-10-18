@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ChangedFile, ChangeSet } from '@rastro/core';
+import { t } from './i18n.js';
 
 /** Árvore vazia do git: base para repositórios ainda sem commits. */
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -52,8 +53,9 @@ function git(cwd: string, args: string[]): string {
     });
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string };
-    if (e.code === 'ENOENT') throw new GitError('o comando "git" não foi encontrado neste sistema');
-    throw new GitError((e.stderr ?? e.message).toString().trim().split('\n')[0] ?? 'erro do git');
+    if (e.code === 'ENOENT') throw new GitError(t().git.notFound);
+    // a primeira linha do próprio git (no idioma do git)
+    throw new GitError((e.stderr ?? e.message).toString().trim().split('\n')[0] || t().git.failed);
   }
 }
 
@@ -133,16 +135,13 @@ export function collectChanges(root: string, options: CollectOptions = {}): Chan
 
   const risky = riskyGitConfig(root);
   if (risky.length && !options.trustConfig) {
-    throw new GitError(
-      `o .git/config deste repositório define comandos que o git executaria (${risky.join(', ')}). ` +
-        'Por segurança o Rastro não roda o git aqui. Se você confia no repositório, use --trust-git-config.',
-    );
+    throw new GitError(t().git.riskyConfig(risky.join(', ')));
   }
 
   let base: string;
   let baseLabel: string;
   if (options.since) {
-    if (options.since.startsWith('-')) throw new GitError(`referência inválida: ${options.since}`);
+    if (options.since.startsWith('-')) throw new GitError(t().git.badRef(options.since));
     base = git(root, ['merge-base', options.since, 'HEAD']).trim();
     baseLabel = options.since;
   } else {

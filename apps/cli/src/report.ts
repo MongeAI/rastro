@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { RASTRO_VERSION, type RastroGraph } from '@rastro/core';
+import { t } from './i18n.js';
 
 /**
  * Relatório HTML único e offline: a mesma interface do `rastro <pasta>`, num arquivo só,
@@ -67,10 +68,7 @@ const escapeHtml = (s: string) =>
 export function buildHtmlReport(graph: RastroGraph, webRoot: string): string {
   const root = path.resolve(webRoot);
   const indexFile = path.join(root, 'index.html');
-  if (!fs.existsSync(indexFile))
-    throw new Error(
-      'a interface web não foi compilada. Rode "npm run build" na raiz do repositório do Rastro.',
-    );
+  if (!fs.existsSync(indexFile)) throw new Error(t().serve.webNotBuilt);
   const index = fs.readFileSync(indexFile, 'utf8');
 
   /** Caminho de um arquivo da interface (`/assets/x.js`), sem sair da pasta. */
@@ -78,7 +76,7 @@ export function buildHtmlReport(graph: RastroGraph, webRoot: string): string {
     const clean = ref.split(/[?#]/)[0]!.replace(/^\.?\/+/, '');
     const file = path.resolve(root, clean);
     if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file))
-      throw new Error(`arquivo da interface não encontrado: ${ref}`);
+      throw new Error(t().report.assetNotFound(ref));
     return file;
   };
   const dataUrl = (file: string) =>
@@ -93,22 +91,19 @@ export function buildHtmlReport(graph: RastroGraph, webRoot: string): string {
     ...index.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"[^>]*>/g),
   ].map((m) => m[1]!);
   const icon = /<link\b[^>]*\brel="icon"[^>]*\bhref="([^"]+)"[^>]*>/.exec(index)?.[1];
-  if (scripts.length !== 1)
-    throw new Error('não foi possível localizar o script da interface em index.html.');
+  if (scripts.length !== 1) throw new Error(t().report.scriptNotFound);
   const entry = asset(scripts[0]!);
   const js = fs.readFileSync(entry, 'utf8');
 
   const assetsDir = path.dirname(entry);
   const assetFiles = fs.readdirSync(assetsDir);
   const workerName = assetFiles.find((f) => /^elk-worker.*\.js$/.test(f));
-  if (!workerName) throw new Error('o worker do ELK não foi encontrado na interface compilada.');
+  if (!workerName) throw new Error(t().report.elkWorkerMissing);
   // a interface precisa caber num único bundle (mais o worker): pedaços carregados sob demanda
   // não existiriam no relatório
   for (const f of assetFiles)
     if (f.endsWith('.js') && f !== path.basename(entry) && f !== workerName && js.includes(f))
-      throw new Error(
-        `a interface compilada carrega ${f} sob demanda; o relatório HTML precisa de um bundle único.`,
-      );
+      throw new Error(t().report.lazyChunk(f));
   const worker = fs.readFileSync(path.join(assetsDir, workerName), 'utf8');
 
   // fontes e imagens do CSS viram data: URLs (nada é buscado fora do arquivo)

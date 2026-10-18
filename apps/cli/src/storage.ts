@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseGraph, type RastroGraph } from '@rastro/core';
+import { validateGraph, type RastroGraph } from '@rastro/core';
+import { t } from './i18n.js';
 
 /**
  * Armazenamento local dos resultados. Por padrão o Rastro grava no diretório de cache do
@@ -46,17 +47,29 @@ export function saveGraph(graph: RastroGraph, file: string): string {
     const code = (err as NodeJS.ErrnoException).code;
     const why =
       code === 'EISDIR'
-        ? 'o destino é uma pasta; informe um nome de arquivo, ex.: -o grafo.json'
+        ? t().storage.isDir
         : code === 'EACCES' || code === 'EPERM'
-          ? 'sem permissão para gravar nesse local'
+          ? t().storage.noPermission
           : (err as Error).message;
-    throw new Error(`Não foi possível salvar o grafo em ${target}: ${why}`, { cause: err });
+    throw new Error(t().storage.saveFailed(target, why), { cause: err });
   }
   return target;
 }
 
+/**
+ * Lê e valida um grafo salvo. Como `parseGraph` de @rastro/core, mas com as mensagens no
+ * idioma da CLI (os itens da validação continuam vindo do validador, em português).
+ */
 export function loadGraph(file: string): RastroGraph {
   const target = path.resolve(file);
-  if (!fs.existsSync(target)) throw new Error(`Arquivo não encontrado: ${target}`);
-  return parseGraph(fs.readFileSync(target, 'utf8'));
+  if (!fs.existsSync(target)) throw new Error(t().storage.fileNotFound(target));
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(target, 'utf8'));
+  } catch (err) {
+    throw new Error(t().storage.invalidJson((err as Error).message), { cause: err });
+  }
+  const result = validateGraph(data);
+  if (!result.valid) throw new Error(t().storage.invalidGraph(result.errors));
+  return data as RastroGraph;
 }

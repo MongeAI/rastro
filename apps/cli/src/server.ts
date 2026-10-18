@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { RastroGraph } from '@rastro/core';
+import { t } from './i18n.js';
 
 export interface ServerOptions {
   graph: RastroGraph;
@@ -102,31 +103,27 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     const json = (status: number, body: unknown) =>
       send(status, JSON.stringify(body), MIME['.json']);
 
+    const m = t().server;
     try {
       const host = (req.headers.host ?? '').toLowerCase();
       const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
       if (!allowedHosts.includes(host)) {
-        return send(
-          403,
-          `Host não permitido: "${host}". Abra http://127.0.0.1:${port}/ diretamente nesta máquina ` +
-            '(o Rastro recusa outros nomes de host para se proteger de DNS rebinding).',
-        );
+        return send(403, m.hostNotAllowed(host, port));
       }
       if (req.method !== 'GET' && req.method !== 'HEAD')
-        return send(405, 'Método não permitido.', undefined, { Allow: 'GET, HEAD' });
+        return send(405, m.methodNotAllowed, undefined, { Allow: 'GET, HEAD' });
 
       let url: URL;
       try {
         url = new URL(req.url ?? '/', `http://${host}`);
       } catch {
-        return send(400, 'URL inválida.');
+        return send(400, m.badUrl);
       }
 
       // troca o token da URL por um cookie e limpa a barra de endereço
       const given = url.searchParams.get('token');
       if (token && given !== null) {
-        if (!safeEqual(given, token))
-          return send(401, 'Token inválido. Use o endereço exibido no terminal.');
+        if (!safeEqual(given, token)) return send(401, m.badToken);
         url.searchParams.delete('token');
         // caminho sempre relativo à própria origem ("//evil.com" viraria outro site)
         return send(302, '', undefined, {
@@ -137,9 +134,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 
       if (url.pathname.startsWith('/api/')) {
         if (token && !safeEqual(readCookie(req.headers.cookie, cookieName()) ?? '', token)) {
-          return json(401, {
-            error: 'Acesso negado. Abra o endereço completo (com o token) exibido no terminal.',
-          });
+          return json(401, { error: m.accessDenied });
         }
         if (url.pathname === '/api/health') return json(200, { ok: true });
         if (url.pathname === '/api/graph') return send(200, graphJson, MIME['.json']);
@@ -164,7 +159,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           );
           return json(result.status, result.body);
         }
-        return json(404, { error: 'Endpoint desconhecido.' });
+        return json(404, { error: m.unknownEndpoint });
       }
 
       // arquivos estáticos da interface, com fallback para index.html
@@ -172,7 +167,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       try {
         decoded = decodeURIComponent(url.pathname);
       } catch {
-        return send(400, 'Caminho inválido.');
+        return send(400, m.badPath);
       }
       const requested = path.resolve(webRoot, `.${decoded}`);
       const insideWeb = requested.startsWith(`${webRoot}${path.sep}`);
@@ -185,10 +180,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       };
       const file = insideWeb && isFile(requested) ? requested : path.join(webRoot, 'index.html');
       if (!isFile(file)) {
-        return send(
-          500,
-          'A interface web não foi encontrada. Rode "npm run build" na raiz do repositório do Rastro.',
-        );
+        return send(500, m.webMissing);
       }
       const relative = path.relative(webRoot, file);
       const cache = relative.startsWith(`assets${path.sep}`)
@@ -204,7 +196,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       stream.on('error', () => res.destroy());
       stream.pipe(res);
     } catch {
-      if (!res.headersSent) send(500, 'Erro interno do servidor do Rastro.');
+      if (!res.headersSent) send(500, m.internalError);
       else res.destroy();
     }
   });
@@ -282,12 +274,9 @@ async function listen(server: http.Server, preferred: number): Promise<number> {
       if (lastError.code !== 'EADDRINUSE' && lastError.code !== 'EACCES') throw err;
     }
   }
-  const reason =
-    lastError?.code === 'EACCES' ? 'sem permissão para usar essas portas' : 'todas estão ocupadas';
-  throw new Error(
-    `Não foi possível abrir a interface a partir da porta ${preferred} (${reason}). ` +
-      'Tente outra com --port, por exemplo --port 5050.',
-  );
+  const m = t().server;
+  const reason = lastError?.code === 'EACCES' ? m.portsNoPermission : m.portsBusy;
+  throw new Error(m.portFailed(preferred, reason));
 }
 
 interface SourceResult {
@@ -301,40 +290,32 @@ interface SourceResult {
  * aberto com `rastro serve`, que poderia listar caminhos como `../../.ssh/id_rsa`.
  */
 export function readSource(root: string, file: string, allowed: ReadonlySet<string>): SourceResult {
-  const notInGraph = { status: 404, body: { error: 'Arquivo fora do grafo analisado.' } };
+  const m = t().server;
+  const notInGraph = { status: 404, body: { error: m.notInGraph } };
+  const outside = { status: 403, body: { error: m.outsideProject } };
   if (!file || !allowed.has(file)) return notInGraph;
   if (path.isAbsolute(file) || /^[a-z]:/i.test(file) || file.split(/[\\/]/).includes('..'))
-    return { status: 403, body: { error: 'Caminho fora do projeto.' } };
+    return outside;
   if (!SOURCE_EXTENSIONS.has(path.extname(file).toLowerCase()))
-    return {
-      status: 403,
-      body: { error: 'Só arquivos JavaScript/TypeScript podem ser exibidos.' },
-    };
+    return { status: 403, body: { error: m.onlyJsTs } };
   let realRoot: string;
   try {
     realRoot = fs.realpathSync(root);
   } catch {
-    return { status: 404, body: { error: 'A raiz do projeto não existe nesta máquina.' } };
+    return { status: 404, body: { error: m.rootMissing } };
   }
   const prefix = realRoot.endsWith(path.sep) ? realRoot : `${realRoot}${path.sep}`;
   const absolute = path.resolve(realRoot, file);
-  if (!absolute.startsWith(prefix))
-    return { status: 403, body: { error: 'Caminho fora do projeto.' } };
+  if (!absolute.startsWith(prefix)) return outside;
   try {
     const stat = fs.lstatSync(absolute);
-    if (!stat.isFile()) return { status: 404, body: { error: 'Não é um arquivo regular.' } };
+    if (!stat.isFile()) return { status: 404, body: { error: m.notRegularFile } };
     // uma pasta intermediária pode ter virado link simbólico depois da análise
-    if (!fs.realpathSync(absolute).startsWith(prefix)) {
-      return { status: 403, body: { error: 'Caminho fora do projeto.' } };
-    }
-    if (stat.size > MAX_SOURCE_BYTES)
-      return { status: 413, body: { error: 'Arquivo grande demais para exibir.' } };
+    if (!fs.realpathSync(absolute).startsWith(prefix)) return outside;
+    if (stat.size > MAX_SOURCE_BYTES) return { status: 413, body: { error: m.tooLarge } };
     const content = fs.readFileSync(absolute, 'utf8');
     return { status: 200, body: { file, content, lines: content.split(/\r?\n/).length } };
   } catch {
-    return {
-      status: 404,
-      body: { error: 'Arquivo não encontrado (o projeto mudou desde a análise?).' },
-    };
+    return { status: 404, body: { error: m.sourceNotFound } };
   }
 }

@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { analyzeProject } from '@rastro/analyzer';
 import { validateGraph, type RastroGraph } from '@rastro/core';
 import { readSource, startServer, type RunningServer } from '../src/server.js';
+import { setLang } from '../src/i18n.js';
 import { defaultGraphPath, loadGraph, saveGraph } from '../src/storage.js';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
@@ -35,6 +36,7 @@ function get(port: number, urlPath: string, host = `127.0.0.1:${port}`, method =
 
 let graph: RastroGraph;
 beforeAll(async () => {
+  setLang('pt');
   graph = await analyzeProject(fixture);
 });
 
@@ -164,7 +166,14 @@ describe.skipIf(!fs.existsSync(cli))('CLI compilada (após npm run build)', () =
       encoding: 'utf8',
       stdio: 'pipe',
     });
-    const out = execFileSync(process.execPath, [cli, 'validate', file], { encoding: 'utf8' });
-    expect(out).toMatch(/^válido/);
+    const out = execFileSync(process.execPath, [cli, 'validate', file], {
+      encoding: 'utf8',
+      env: { ...process.env, RASTRO_LANG: 'pt' },
+    });
+    expect(out).toMatch(/^válido — \d+ nós, \d+ relações/);
+    const en = execFileSync(process.execPath, [cli, 'validate', file, '--lang', 'en'], {
+      encoding: 'utf8',
+    });
+    expect(en).toMatch(/^valid — \d+ nodes, \d+ relationships/);
   });
 });
