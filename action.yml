@@ -49,6 +49,9 @@ outputs:
   changed:
     description: How many entities changed.
     value: ${{ steps.impact.outputs.changed }}
+  broken:
+    description: How many references to what changed no longer resolve (possibly broken by the change).
+    value: ${{ steps.impact.outputs.broken }}
   markdown:
     description: Path of the Markdown report.
     value: ${{ steps.impact.outputs.markdown }}

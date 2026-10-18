@@ -92,6 +92,38 @@ export function ChangesPanel({ changes, impact, highlight, onHighlight, onNaviga
         </section>
       )}
 
+      {impact.broken.length > 0 && (
+        <section className="details-section">
+          <h3 className="section-title">
+            {c.broken} <span className="count">{impact.broken.length}</span>
+          </h3>
+          <p className="muted small insight-hint">{c.brokenHint}</p>
+          <ul className="rel-list">
+            {impact.broken.slice(0, MAX).map((b, i) => (
+              <li key={`${b.from.id}|${b.reference}|${i}`}>
+                <button
+                  type="button"
+                  className="rel-item"
+                  title={b.evidence ? `${b.evidence.file}:${b.evidence.line}` : undefined}
+                  onClick={() => onNavigate(b.from.id)}
+                >
+                  <KindDot kind={b.from.kind} />
+                  <span className="rel-name">
+                    {entityName(b.from)} → <span className="mono">{b.reference}</span>
+                  </span>
+                  <span className="rel-loc">
+                    {b.target} · {c.brokenWhy(b.why)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {impact.broken.length > MAX && (
+            <p className="muted small">{t.common.andMore(impact.broken.length - MAX)}</p>
+          )}
+        </section>
+      )}
+
       {impact.routes.length > 0 && (
         <section className="details-section">
           <h3 className="section-title">

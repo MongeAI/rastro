@@ -1,6 +1,8 @@
 import { progressMessage, type ProgressEvent } from '@rastro/analyzer';
 import type { Lang, NodeKind, Resolution } from '@rastro/core';
-import type { ComparedStat } from '@rastro/graph';
+import type { BrokenReference, ComparedStat } from '@rastro/graph';
+
+type BrokenWhy = BrokenReference['why'];
 
 /**
  * Mensagens da CLI em português e inglês. O dicionário em inglês precisa ter exatamente a
@@ -151,6 +153,20 @@ servidor MCP só fala pelo stdio.
     changed: 'O que mudou',
     impacted: 'Pode ser afetado',
     nothingDepends: 'Nada conhecido depende do que mudou.',
+    broken: 'Possivelmente quebrado pela mudança',
+    brokenHint:
+      'referências ao que mudou que não resolvem no código atual (podem já estar quebradas antes); não são relações comprovadas',
+    brokenCount: (count: number) =>
+      n(count, 'referência possivelmente quebrada', 'referências possivelmente quebradas'),
+    brokenWhy: (kind: 'import' | 'call', why: BrokenWhy, reference: string, target: string) =>
+      why === 'member-missing'
+        ? `chama ${reference}, mas o tipo (declarado em ${target}) não tem esse membro`
+        : kind === 'import'
+          ? why === 'not-exported'
+            ? `importa ${reference} de ${target}, que não exporta esse nome`
+            : `importa ${reference}, mas ${target} foi ${why === 'file-deleted' ? 'removido' : 'renomeado'}`
+          : `chama ${reference}, importado de ${target} (${why === 'not-exported' ? 'que não exporta esse nome' : why === 'file-deleted' ? 'removido' : 'renomeado'})`,
+    times: (count: number) => `(${count} vezes)`,
     routes: 'Rotas HTTP envolvidas',
     tests: 'Testes para rodar',
     outside: 'Fora do mapa',
@@ -488,6 +504,19 @@ MCP server only talks over stdio.
     changed: 'What changed',
     impacted: 'Could be affected',
     nothingDepends: 'Nothing known depends on what changed.',
+    broken: 'Possibly broken by this change',
+    brokenHint:
+      'references to what changed that do not resolve in the current code (they may have been broken before); not proven relationships',
+    brokenCount: (count) => n(count, 'reference possibly broken', 'references possibly broken'),
+    brokenWhy: (kind, why, reference, target) =>
+      why === 'member-missing'
+        ? `calls ${reference}, but the type (declared in ${target}) has no such member`
+        : kind === 'import'
+          ? why === 'not-exported'
+            ? `imports ${reference} from ${target}, which does not export that name`
+            : `imports ${reference}, but ${target} was ${why === 'file-deleted' ? 'deleted' : 'renamed'}`
+          : `calls ${reference}, imported from ${target} (${why === 'not-exported' ? 'which does not export that name' : why === 'file-deleted' ? 'deleted' : 'renamed'})`,
+    times: (count) => `(${count} times)`,
     routes: 'HTTP routes involved',
     tests: 'Tests to run',
     outside: 'Outside the map',

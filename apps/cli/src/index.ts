@@ -72,6 +72,7 @@ function printChanges(graph: RastroGraph): void {
   }
   out(`${bold(m.title)} ${dim(since)}`);
   out(`  ${m.counts(changes.files.length, impact.changedEntities.length)}`);
+  if (impact.broken.length) out(`  ${yellow(t().impact.brokenCount(impact.broken.length))}`);
   out(
     `  ${m.impact(impact.impacted.length)}` +
       (impact.routes.length ? ` · ${m.routes(impact.routes.length)}` : '') +

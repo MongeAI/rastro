@@ -101,6 +101,7 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "json=$out/impact.json"
     echo "impacted=$(jq -r '.summary.impacted' "$out/impact.json")"
     echo "changed=$(jq -r '.summary.changed' "$out/impact.json")"
+    echo "broken=$(jq -r '.summary.broken' "$out/impact.json")"
     delimiter="RASTRO_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
     echo "tests<<$delimiter"
     cat "$out/tests.txt"

@@ -311,6 +311,19 @@ const pt = {
     outsideHint: 'Arquivos removidos, não analisados ou ignorados.',
     status: { added: 'novo', modified: 'alterado', deleted: 'removido', renamed: 'renomeado' },
     newFiles: 'Arquivos novos',
+    broken: 'Possivelmente quebrado',
+    brokenHint:
+      'Referências ao que mudou que não resolvem no código atual: import de arquivo removido ou renomeado, nome que deixou de ser exportado, membro que sumiu. Não são relações comprovadas.',
+    brokenWhy: (
+      why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing',
+    ): string =>
+      why === 'file-deleted'
+        ? 'arquivo removido'
+        : why === 'file-renamed'
+          ? 'arquivo renomeado'
+          : why === 'not-exported'
+            ? 'não é mais exportado'
+            : 'membro inexistente',
     legendChanged: 'mudou',
     legendImpacted: 'afetado',
   },
@@ -690,6 +703,17 @@ const en: Messages = {
     outsideHint: 'Deleted, not analyzed or ignored files.',
     status: { added: 'new', modified: 'modified', deleted: 'deleted', renamed: 'renamed' },
     newFiles: 'New files',
+    broken: 'Possibly broken',
+    brokenHint:
+      'References to what changed that do not resolve in the current code: imports of deleted or renamed files, names no longer exported, missing members. Not proven relationships.',
+    brokenWhy: (why) =>
+      why === 'file-deleted'
+        ? 'file deleted'
+        : why === 'file-renamed'
+          ? 'file renamed'
+          : why === 'not-exported'
+            ? 'no longer exported'
+            : 'no such member',
     legendChanged: 'changed',
     legendImpacted: 'affected',
   },

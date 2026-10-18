@@ -8,9 +8,14 @@ import {
   type GraphNode,
   type RastroGraph,
 } from '@rastro/core';
-import { computeChangeImpact, GraphIndex, type ChangeImpact } from '@rastro/graph';
+import {
+  computeChangeImpact,
+  GraphIndex,
+  type BrokenReference,
+  type ChangeImpact,
+} from '@rastro/graph';
 import { getLang, t } from './i18n.js';
-import { bold, cyan, dim, safeText, yellow } from './term.js';
+import { bold, cyan, dim, red, safeText, yellow } from './term.js';
 
 /**
  * `rastro impact`: o impacto das mudanças do git em texto (terminal), Markdown (comentário de
@@ -37,6 +42,21 @@ export interface ImpactedItem extends ImpactItem {
   via: { kind: string; target: string };
 }
 
+/** Referência ao que mudou que não resolve mais (ver `BrokenReference` em @rastro/graph). */
+export interface BrokenItem {
+  /** Quem faz a referência: o arquivo que importa ou a entidade que chama. */
+  from: ImpactItem;
+  kind: BrokenReference['kind'];
+  reference: string;
+  /** Arquivo alterado ou removido para onde ela aponta. */
+  target: string;
+  why: BrokenReference['why'];
+  /** Onde a referência aparece (primeira ocorrência) e quantas vezes. */
+  file?: string;
+  line?: number;
+  count: number;
+}
+
 export interface ImpactReport {
   tool: { name: 'rastro'; version: string };
   project: string;
@@ -49,6 +69,8 @@ export interface ImpactReport {
     routes: number;
     tests: number;
     outsideGraph: number;
+    /** Referências possivelmente quebradas pela mudança. */
+    broken: number;
   };
   changed: ImpactItem[];
   impacted: ImpactedItem[];
@@ -57,6 +79,11 @@ export interface ImpactReport {
   tests: string[];
   /** Arquivos alterados fora do mapa (removidos, não analisados, ignorados). */
   outsideGraph: Array<{ file: string; status: ChangedFile['status'] }>;
+  /**
+   * Referências ao que mudou que não resolvem no código atual (import de arquivo removido, nome
+   * que deixou de ser exportado, membro que sumiu): possivelmente quebradas pela mudança.
+   */
+  broken: BrokenItem[];
 }
 
 /** Nomes vêm do código analisado: um literal enorme não pode estourar um comentário. */
@@ -125,6 +152,7 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
       routes: impact.routes.length,
       tests: tests.length,
       outsideGraph: impact.outsideGraph.length,
+      broken: impact.broken.length,
     },
     changed,
     impacted: impact.impacted.map((entry) => ({
@@ -141,6 +169,15 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
     routes: impact.routes.map(item),
     tests,
     outsideGraph: impact.outsideGraph.map((f) => ({ file: f.file, status: f.status })),
+    broken: impact.broken.map((b) => ({
+      from: item(b.from),
+      kind: b.kind,
+      reference: clip(b.reference),
+      target: b.target,
+      why: b.why,
+      ...(b.evidence ? { file: b.evidence.file, line: b.evidence.line } : {}),
+      count: b.count,
+    })),
   };
 }
 
@@ -193,6 +230,14 @@ function renderText(report: ImpactReport, options: RenderOptions): string {
       lines.push(`  ${cyan('•')} ${safeText(i.name)} ${kind(i)} ${where(i)}`);
     more(report.changed.length);
   }
+  if (report.broken.length) {
+    lines.push('', bold(m.broken), `  ${dim(m.brokenHint)}`);
+    for (const b of report.broken.slice(0, limit))
+      lines.push(
+        `  ${red('✗')} ${safeText(b.from.name)} ${dim(safeText(brokenWhere(b)))} ${brokenText(b, safeText)}`,
+      );
+    more(report.broken.length);
+  }
   lines.push('', bold(m.impacted));
   if (!report.impacted.length) lines.push(`  ${dim(m.nothingDepends)}`);
   for (const i of report.impacted.slice(0, limit))
@@ -244,7 +289,11 @@ export function mdCode(text: string, inTable = false): string {
   return `${fence}${pad}${clean}${pad}${fence}`;
 }
 
-function fileLink(i: ImpactItem, options: RenderOptions, inTable: boolean): string {
+function fileLink(
+  i: Pick<ImpactItem, 'file' | 'line'>,
+  options: RenderOptions,
+  inTable: boolean,
+): string {
   if (!i.file) return '';
   const label = mdCode(`${i.file}${i.line ? `:${i.line}` : ''}`, inTable);
   if (!options.link) return label;
@@ -285,6 +334,16 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
     for (const i of report.changed.slice(0, limit))
       out.push(`| ${mdCode(i.name, true)} | ${kind(i.kind)} | ${fileLink(i, options, true)} |`);
     more(report.changed.length);
+    out.push('');
+  }
+
+  if (report.broken.length) {
+    out.push(`#### ${m.broken}`, '', `_${m.brokenHint}_`, '');
+    for (const b of report.broken.slice(0, limit))
+      out.push(
+        `- ${mdCode(b.from.name)} ${fileLink(brokenSite(b), options, false)} — ${brokenText(b, (s) => mdCode(s))}`,
+      );
+    more(report.broken.length);
     out.push('');
   }
 
@@ -358,10 +417,26 @@ function summaryLine(report: ImpactReport): string {
   return [
     m.files(s.files),
     m.changedCount(s.changed),
+    ...(s.broken ? [m.brokenCount(s.broken)] : []),
     m.impactedCount(s.impacted),
     ...(s.routes ? [m.routesCount(s.routes)] : []),
     ...(s.tests ? [m.testsCount(s.tests)] : []),
   ].join(' · ');
+}
+
+/** Onde aparece a referência quebrada: arquivo e linha (texto: `arquivo:linha`). */
+function brokenSite(b: BrokenItem): { file?: string; line?: number } {
+  return b.file ? { file: b.file, ...(b.line ? { line: b.line } : {}) } : {};
+}
+
+function brokenWhere(b: BrokenItem): string {
+  return b.file ? `${b.file}${b.line ? `:${b.line}` : ''}` : '';
+}
+
+/** O que a referência faz e por que não resolve; `code` formata nomes e caminhos. */
+function brokenText(b: BrokenItem, code: (s: string) => string): string {
+  const text = t().impact.brokenWhy(b.kind, b.why, code(b.reference), code(b.target));
+  return b.count > 1 ? `${text} ${t().impact.times(b.count)}` : text;
 }
 
 function viaText(i: ImpactedItem): string {

@@ -173,6 +173,130 @@ describe('relatório de impacto', () => {
   });
 });
 
+/** Projeto com git: `files` no commit base; `change` mexe na cópia de trabalho depois. */
+function gitProject(
+  files: Record<string, string>,
+  change: (tools: {
+    write: (rel: string, content: string) => void;
+    git: (...args: string[]) => void;
+  }) => void,
+): string {
+  const root = tmp('rastro-broken-');
+  const git = (...args: string[]) => {
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=T',
+        '-c',
+        'user.email=t@example.com',
+        '-c',
+        'commit.gpgsign=false',
+        ...args,
+      ],
+      { cwd: root, stdio: 'pipe' },
+    );
+  };
+  const write = (rel: string, content: string) => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), content);
+  };
+  for (const [rel, content] of Object.entries(files)) write(rel, content);
+  git('init', '-q', '-b', 'main');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
+  change({ write, git });
+  return root;
+}
+
+const MATH = 'export function sum(a: number, b: number) {\n  return a + b;\n}\n';
+const APP =
+  "import { sum } from './math.js';\nimport { ghost } from './missing';\n\nexport function total() {\n  return sum(1, 2) + ghost();\n}\n";
+
+describe('possivelmente quebrado pela mudança', () => {
+  const brokenOf = async (root: string) =>
+    buildImpactReport(await graphWithChanges(root)).broken.map((b) => [
+      b.kind,
+      b.from.name,
+      b.reference,
+      b.target,
+      b.why,
+      `${b.file}:${b.line}`,
+    ]);
+
+  it('nome renomeado no arquivo alterado: o import e as chamadas que não resolvem mais', async () => {
+    setLang('en');
+    const root = gitProject(
+      { 'src/math.ts': MATH, 'src/app.ts': APP, 'src/index.ts': "export { sum } from './math';\n" },
+      ({ write }) => write('src/math.ts', MATH.replace('sum', 'add')),
+    );
+    const report = buildImpactReport(await graphWithChanges(root));
+    expect(report.summary.broken).toBe(3);
+    expect(await brokenOf(root)).toEqual([
+      ['import', 'app.ts', 'sum', 'src/math.ts', 'not-exported', 'src/app.ts:1'],
+      ['import', 'index.ts', 'sum', 'src/math.ts', 'not-exported', 'src/index.ts:1'],
+      ['call', 'total', 'sum', 'src/math.ts', 'not-exported', 'src/app.ts:5'],
+    ]);
+    // `ghost` (de um arquivo que nunca existiu) não tem nada a ver com a mudança
+    expect(
+      report.broken.some((b) => b.reference.includes('ghost') || b.reference.includes('missing')),
+    ).toBe(false);
+    const text = renderImpact(report, 'text');
+    expect(text).toContain('Possibly broken by this change');
+    expect(text).toContain('imports sum from src/math.ts, which does not export that name');
+    const md = renderImpact(report, 'markdown', { link: 'https://github.com/o/r/blob/abc' });
+    expect(md).toContain('#### Possibly broken by this change');
+    expect(md).toContain(
+      '- `total` [`src/app.ts:5`](https://github.com/o/r/blob/abc/src/app.ts#L5) — calls `sum`, imported from `src/math.ts` (which does not export that name)',
+    );
+    expect(md).toContain('3 references possibly broken');
+    const json = JSON.parse(renderImpact(report, 'json')) as typeof report;
+    expect(json.broken).toHaveLength(3);
+    setLang('pt');
+    expect(renderImpact(report, 'text')).toContain('Possivelmente quebrado pela mudança');
+    setLang('en');
+  });
+
+  it('arquivo removido ou renomeado: imports do caminho antigo (também pelo .js do ESM)', async () => {
+    setLang('en');
+    const removed = gitProject({ 'src/math.ts': MATH, 'src/app.ts': APP }, ({ git }) =>
+      git('rm', '-q', 'src/math.ts'),
+    );
+    expect(await brokenOf(removed)).toEqual([
+      ['import', 'app.ts', './math.js', 'src/math.ts', 'file-deleted', 'src/app.ts:1'],
+      ['call', 'total', 'sum', 'src/math.ts', 'file-deleted', 'src/app.ts:5'],
+    ]);
+    const renamed = gitProject({ 'src/math.ts': MATH, 'src/app.ts': APP }, ({ git }) =>
+      git('mv', 'src/math.ts', 'src/calc.ts'),
+    );
+    expect((await brokenOf(renamed)).map((b) => b[4])).toEqual(['file-renamed', 'file-renamed']);
+  });
+
+  it('método renomeado numa classe: a chamada pelo tipo declarado no arquivo alterado', async () => {
+    setLang('en');
+    const dog = 'export class Dog {\n  move(): string {\n    return "x";\n  }\n}\n';
+    const root = gitProject(
+      {
+        'src/dog.ts': dog,
+        'src/use.ts':
+          "import { Dog } from './dog';\n\nexport function walk(d: Dog) {\n  return d.move();\n}\n",
+      },
+      ({ write }) => write('src/dog.ts', dog.replace('move', 'run')),
+    );
+    expect(await brokenOf(root)).toEqual([
+      ['call', 'walk', 'd.move', 'src/dog.ts', 'member-missing', 'src/use.ts:4'],
+    ]);
+  });
+
+  it('nada quebrado: nenhuma seção nova', async () => {
+    setLang('en');
+    const report = buildImpactReport(await graphWithChanges(changedProject()));
+    expect(report.broken).toEqual([]);
+    expect(renderImpact(report, 'text')).not.toContain('Possibly broken');
+    expect(renderImpact(report, 'markdown')).not.toContain('Possibly broken');
+  });
+});
+
 const run = (args: string[], cwd = repo) =>
   spawnSync(process.execPath, [bin, ...args], {
     encoding: 'utf8',
