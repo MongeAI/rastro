@@ -246,6 +246,21 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  /** Anexa as mudanças do git ao grafo quando `--changes`/`--since` foram pedidos. */
+  const attachChanges = (graph: RastroGraph, root: string, warn: boolean) => {
+    if (!values.changes && !values.since) return;
+    try {
+      graph.changes = collectChanges(root, {
+        ...(values.since ? { since: values.since } : {}),
+        trustConfig: !!values['trust-git-config'],
+      });
+    } catch (err) {
+      const reason = err instanceof GitError ? err.message : (err as Error).message;
+      if (warn)
+        process.stderr.write(`${yellow('aviso:')} mudanças do git não incluídas: ${reason}\n`);
+    }
+  };
+
   if (command === 'compare') {
     const other = rest[1];
     if (!other || rest.length > 2)
@@ -287,6 +302,7 @@ async function main(argv: string[]): Promise<void> {
         ...(maxFiles ? { maxFiles } : {}),
         onProgress: (msg) => process.stderr.write(dim(`  ${msg}\n`)),
       });
+      attachChanges(graph, source, true);
     } else {
       try {
         graph = loadGraph(source);
@@ -355,18 +371,7 @@ async function main(argv: string[]): Promise<void> {
       ...(maxFiles ? { maxFiles } : {}),
       onProgress: progress ? (msg) => process.stderr.write(dim(`  ${msg}\n`)) : undefined,
     });
-    if (values.changes || values.since) {
-      try {
-        result.changes = collectChanges(root, {
-          ...(values.since ? { since: values.since } : {}),
-          trustConfig: !!values['trust-git-config'],
-        });
-      } catch (err) {
-        const reason = err instanceof GitError ? err.message : (err as Error).message;
-        if (progress)
-          process.stderr.write(`${yellow('aviso:')} mudanças do git não incluídas: ${reason}\n`);
-      }
-    }
+    attachChanges(result, root, progress);
     return result;
   };
   const graph = await runAnalysis(!quiet);

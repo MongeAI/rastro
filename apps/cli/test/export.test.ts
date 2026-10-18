@@ -257,4 +257,39 @@ describe.skipIf(!fs.existsSync(bundled))('rastro export e compare (CLI empacotad
     expect(same.stdout).toContain('Nenhum nó, relação ou ciclo mudou');
     expect(run(['compare', saved]).status).toBe(1);
   });
+
+  it('export com --changes leva as mudanças do git junto (relatório de PR)', () => {
+    const root = tmp('rastro-exp-git-');
+    const git = (...args: string[]) =>
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=T',
+          '-c',
+          'user.email=t@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          ...args,
+        ],
+        { cwd: root, stdio: 'pipe' },
+      );
+    fs.writeFileSync(path.join(root, 'a.ts'), 'export function a() {\n  return 1;\n}\n');
+    git('init', '-q', '-b', 'main');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'inicial');
+    fs.writeFileSync(path.join(root, 'a.ts'), 'export function a() {\n  return 2;\n}\n');
+
+    const res = run(['export', root, '-f', 'json', '--changes']);
+    expect(res.status).toBe(0);
+    const exported = JSON.parse(res.stdout) as RastroGraph;
+    expect(exported.changes?.baseLabel).toBe('HEAD');
+    expect(exported.changes?.files).toEqual([
+      { file: 'a.ts', status: 'modified', ranges: [[2, 2]] },
+    ]);
+    // sem a opção, nada de git
+    expect((JSON.parse(run(['export', root, '-f', 'json']).stdout) as RastroGraph).changes).toBe(
+      undefined,
+    );
+  });
 });

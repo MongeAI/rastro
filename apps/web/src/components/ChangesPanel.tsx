@@ -18,7 +18,7 @@ const MAX = 40;
 export function ChangesPanel({ changes, impact, highlight, onHighlight, onNavigate }: Props) {
   const { t, labels } = useI18n();
   const c = t.changes;
-  const fileLevel = impact.changedFiles.filter((f) =>
+  const newFiles = impact.changedFiles.filter((f) =>
     changes.files.some((cf) => cf.file === (f.qualifiedName ?? f.name) && cf.status === 'added'),
   );
 
@@ -70,15 +70,21 @@ export function ChangesPanel({ changes, impact, highlight, onHighlight, onNaviga
 
       {changes.files.length === 0 && <p className="muted small details-section">{c.none}</p>}
 
-      {(impact.changedEntities.length > 0 || fileLevel.length > 0) && (
+      {impact.changedEntities.length > 0 && (
         <section className="details-section">
           <h3 className="section-title">
-            {c.changed}{' '}
-            <span className="count">{impact.changedEntities.length + fileLevel.length}</span>
+            {c.changed} <span className="count">{impact.changedEntities.length}</span>
           </h3>
-          {list([...impact.changedEntities, ...fileLevel], (n) =>
-            n.kind === 'file' ? c.status.added : (n.location?.file ?? ''),
-          )}
+          {list(impact.changedEntities, (n) => n.location?.file ?? '')}
+        </section>
+      )}
+
+      {newFiles.length > 0 && (
+        <section className="details-section">
+          <h3 className="section-title">
+            {c.newFiles} <span className="count">{newFiles.length}</span>
+          </h3>
+          {list(newFiles)}
         </section>
       )}
 
