@@ -12,6 +12,7 @@ import {
   type ExportLevel,
   type ExportOptions,
 } from '@rastro/graph';
+import { getLang, t } from './i18n.js';
 import { buildHtmlReport } from './report.js';
 import { tildify } from './term.js';
 
@@ -38,15 +39,11 @@ export function parseExportRequest(req: ExportRequest): {
   format: ExportFormat;
   options: ExportOptions;
 } {
-  if (!req.format)
-    throw new UsageError(
-      `informe o formato com --format (${EXPORT_FORMATS.join(', ')}). Exemplo: rastro export . --format mermaid`,
-    );
+  const m = t().export;
+  if (!req.format) throw new UsageError(m.needFormat(EXPORT_FORMATS.join(', ')));
   const format = req.format.toLowerCase() as ExportFormat;
   if (!EXPORT_FORMATS.includes(format))
-    throw new UsageError(
-      `formato desconhecido: "${req.format}". Use um destes: ${EXPORT_FORMATS.join(', ')}.`,
-    );
+    throw new UsageError(m.unknownFormat(req.format, EXPORT_FORMATS.join(', ')));
   if (!DIAGRAM_FORMATS.has(format)) {
     const flag =
       req.level !== undefined
@@ -58,15 +55,10 @@ export function parseExportRequest(req: ExportRequest): {
             : req.noUnresolved
               ? '--no-unresolved'
               : undefined;
-    if (flag)
-      throw new UsageError(
-        `${flag} não se aplica a --format ${format} (só a mermaid, dot e graphml).`,
-      );
+    if (flag) throw new UsageError(m.flagNotForFormat(flag, format));
   }
   if (req.level !== undefined && !EXPORT_LEVELS.includes(req.level as ExportLevel))
-    throw new UsageError(
-      `nível desconhecido: "${req.level}". Use um destes: ${EXPORT_LEVELS.join(', ')}.`,
-    );
+    throw new UsageError(m.unknownLevel(req.level, EXPORT_LEVELS.join(', ')));
   let edgeKinds: EdgeKind[] | undefined;
   if (req.edges !== undefined) {
     const allowed: EdgeKind[] = EDGE_KINDS.filter((k) => k !== 'contains');
@@ -75,10 +67,7 @@ export function parseExportRequest(req: ExportRequest): {
       .map((s) => s.trim())
       .filter(Boolean) as EdgeKind[];
     const unknown = edgeKinds.filter((k) => !allowed.includes(k));
-    if (unknown.length || !edgeKinds.length)
-      throw new UsageError(
-        `--edges aceita uma lista separada por vírgulas de: ${allowed.join(', ')}.`,
-      );
+    if (unknown.length || !edgeKinds.length) throw new UsageError(m.badEdges(allowed.join(', ')));
   }
   const folder = normalizeFolder(req.folder);
   return {
@@ -93,19 +82,21 @@ export function parseExportRequest(req: ExportRequest): {
   };
 }
 
-/** Gera o conteúdo exportado. `webRoot` é a interface compilada (só para `html`). */
+/**
+ * Gera o conteúdo exportado. `webRoot` é a interface compilada (só para `html`). Os
+ * comentários e rótulos dos diagramas saem no idioma da CLI, a menos que `options.lang` diga outro.
+ */
 export function renderExport(
   graph: RastroGraph,
   format: ExportFormat,
-  options: ExportOptions,
+  exportOptions: ExportOptions,
   webRoot: string,
 ): string {
+  const options: ExportOptions = { lang: getLang(), ...exportOptions };
   if (options.folder) {
     const scoped = filterGraphByFolder(graph, options.folder);
     if (!scoped.nodes.some((n) => n.kind === 'file'))
-      throw new UsageError(
-        `nenhum arquivo do grafo está na pasta "${options.folder}" (o caminho é relativo à raiz analisada).`,
-      );
+      throw new UsageError(t().export.emptyFolder(options.folder));
   }
   try {
     switch (format) {
@@ -150,11 +141,11 @@ export function writeExport(file: string, content: string): string {
     const code = (err as NodeJS.ErrnoException).code;
     const why =
       code === 'EISDIR'
-        ? 'o destino é uma pasta; informe um nome de arquivo'
+        ? t().export.isDir
         : code === 'EACCES' || code === 'EPERM'
-          ? 'sem permissão para gravar nesse local'
+          ? t().storage.noPermission
           : (err as Error).message;
-    throw new Error(`Não foi possível gravar ${target}: ${why}`, { cause: err });
+    throw new Error(t().export.writeFailed(target, why), { cause: err });
   }
   return target;
 }

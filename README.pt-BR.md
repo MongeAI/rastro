@@ -61,11 +61,13 @@ O terminal mostra um resumo e o navegador abre sozinho:
 rastro-monorepo ~/rastro
   51 arquivos analisados · 140 funções · 3 classes · 23 métodos · 26 pacotes externos · 43 não resolvidos
   relações: 820 resolvidas · 66 externas · 50 não resolvidas
-  1 ciclo(s) de importação
+  1 ciclo de importação
   análise em 1823 ms com TypeScript 6.0.2
 
 Rastro pronto em http://127.0.0.1:4321/?token=…  (Ctrl+C para encerrar)
 ```
+
+> 🌐 **Idioma:** a interface e a CLI falam **português** e **inglês**. A CLI usa `--lang pt|en`, depois a variável `RASTRO_LANG`, depois o idioma do sistema (`LC_ALL`, `LC_MESSAGES`, `LANG`: `pt*` é português) e, sem nenhum definido, inglês.
 
 <details>
 <summary><b>Rodar a partir do código-fonte</b></summary>
@@ -179,14 +181,15 @@ rastro export <caminho|grafo.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json>  # o que entrou, saiu ou mudou entre duas análises
 ```
 
-| Opção                    | Para quê                                                             |
-| ------------------------ | -------------------------------------------------------------------- |
-| `-o, --out <arquivo>`    | Onde salvar o JSON (padrão: cache do usuário, ex. `~/.cache/rastro`) |
-| `-p, --port <n>`         | Porta da interface (padrão 4321; se ocupada, usa a próxima livre)    |
-| `--no-open`              | Não abre o navegador automaticamente                                 |
-| `-e, --exclude <padrão>` | Ignora caminhos, com a sintaxe do `.gitignore` (pode repetir)        |
-| `--no-gitignore`         | Não usa o `.gitignore` do projeto                                    |
-| `--max-files <n>`        | Limite de arquivos analisados (padrão 10000)                         |
+| Opção                    | Para quê                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| `-o, --out <arquivo>`    | Onde salvar o JSON (padrão: cache do usuário, ex. `~/.cache/rastro`)                    |
+| `-p, --port <n>`         | Porta da interface (padrão 4321; se ocupada, usa a próxima livre)                       |
+| `--no-open`              | Não abre o navegador automaticamente                                                    |
+| `-e, --exclude <padrão>` | Ignora caminhos, com a sintaxe do `.gitignore` (pode repetir)                           |
+| `--no-gitignore`         | Não usa o `.gitignore` do projeto                                                       |
+| `--max-files <n>`        | Limite de arquivos analisados (padrão 10000)                                            |
+| `--lang <en\|pt>`        | Idioma das mensagens (padrão: `RASTRO_LANG`, depois o idioma do sistema, depois inglês) |
 
 ### Compartilhar e integrar
 

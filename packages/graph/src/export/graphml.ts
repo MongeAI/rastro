@@ -76,7 +76,7 @@ export function toGraphML(graph: RastroGraph, options: GraphMLOptions = {}): str
   for (const node of view.nodes) {
     const loc = nodeLocation(node, view.index);
     out += `    <node id="${xmlEscape(node.id)}">\n`;
-    out += data('n_label', nodeLabel(node), '      ');
+    out += data('n_label', nodeLabel(node, view.lang), '      ');
     out += data('n_kind', node.kind, '      ');
     out += data('n_parent', node.parent, '      ');
     out += data('n_file', loc?.file, '      ');

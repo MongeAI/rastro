@@ -14,7 +14,7 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 ### 1. Mundo: interface em inglês e português
 
 - ✅ i18n completo da interface (EN/PT), escolhido automaticamente pelo idioma do navegador, com seletor manual salvo.
-- ⬜ Mensagens da CLI em EN/PT (variável `LANG`/`--lang`).
+- ✅ Mensagens da CLI em EN/PT: `--lang`, depois `RASTRO_LANG`, depois `LC_ALL`/`LC_MESSAGES`/`LANG` (padrão inglês); progresso do analisador por código, exportadores e `compare` também traduzidos.
 - ✅ Textos de motivos ("não resolvido porque…") e legendas traduzidos.
 
 ### 2. Mudanças e impacto (git): "o que este PR afeta?"

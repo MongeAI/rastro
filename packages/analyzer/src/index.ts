@@ -1,5 +1,11 @@
 export { analyzeProject, type AnalyzeOptions } from './analyze.js';
 export {
+  progressMessage,
+  PROGRESS_CODES,
+  type ProgressCode,
+  type ProgressEvent,
+} from './progress.js';
+export {
   discoverFiles,
   DEFAULT_EXCLUDED_DIRS,
   languageOf,

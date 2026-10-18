@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { analyzeProject } from '@rastro/analyzer';
+import { analyzeProject, type ProgressEvent } from '@rastro/analyzer';
 import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
 import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
@@ -16,51 +16,16 @@ import {
   writeExport,
 } from './export.js';
 import { collectChanges, GitError } from './git.js';
+import { langArg, parseLang, setLang, t } from './i18n.js';
 import { startServer, type RunningServer } from './server.js';
 import { watchProject } from './watch.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
 import { bold, cyan, dim, fail, red, tildify, yellow } from './term.js';
 
-const HELP = `
-Rastro ${RASTRO_VERSION} — siga o rastro do seu código (mapa navegável de projetos JS/TS)
-
-Uso:
-  rastro <caminho>                  analisa o projeto e abre o mapa no navegador
-                                  (equivale a "rastro open <caminho>")
-  rastro analyze <caminho>          só analisa e salva o grafo em JSON
-  rastro serve <grafo.json>         abre o mapa de um JSON salvo anteriormente
-  rastro validate <grafo.json>      confere se um JSON exportado é válido
-  rastro export <caminho|grafo.json> --format <formato>
-                                  exporta o mapa: mermaid, dot, graphml, json ou html
-                                  (html = relatório navegável num arquivo só, offline)
-  rastro compare <a.json> <b.json>  o que entrou, saiu e mudou entre duas análises
-
-Opções:
-  -o, --out <arquivo>       onde salvar o JSON (padrão: cache do usuário); no export,
-                            o arquivo gerado (padrão: saída padrão; html: <projeto>.rastro.html)
-      --stdout              (analyze) escreve o JSON na saída padrão
-  -f, --format <formato>    (export) mermaid, dot, graphml, json ou html
-      --level <nível>       (export) modules, files (padrão) ou symbols
-      --folder <pasta>      (export) só esta pasta, ex.: src/services
-      --edges <tipos>       (export) relações, ex.: imports,calls (padrão: imports,calls,extends)
-      --external            (export) inclui pacotes externos (npm, Node.js)
-      --no-unresolved       (export) omite referências não resolvidas
-      --json                (compare) resultado em JSON
-  -p, --port <n>            porta da interface (padrão: 4321, ou a próxima livre)
-      --no-open             não abre o navegador automaticamente
-  -e, --exclude <padrão>    ignora caminhos (sintaxe do .gitignore; pode repetir)
-      --no-gitignore        não usa o .gitignore do projeto
-      --max-files <n>       limite de arquivos analisados (padrão: 10000)
-      --changes             marca o que mudou desde o último commit (git) e o impacto
-      --since <ref>         marca o que mudou desde que a branch saiu de <ref> (ex.: main)
-      --trust-git-config    permite rodar o git mesmo com comandos no .git/config
-  -w, --watch               reanalisa ao salvar arquivos e atualiza o mapa ao vivo
-  -h, --help                mostra esta ajuda
-  -v, --version             mostra a versão
-
-O Rastro só lê arquivos: não executa o projeto, não instala dependências e não
-envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
-`;
+/** Mostra uma etapa da análise no idioma da CLI. */
+function showProgress(_message: string, event: ProgressEvent): void {
+  process.stderr.write(dim(`  ${t().progress(event)}\n`));
+}
 
 function webRoot(): string {
   return fileURLToPath(new URL('./web/', import.meta.url));
@@ -70,21 +35,19 @@ function printChanges(graph: RastroGraph): void {
   const changes = graph.changes!;
   const impact = computeChangeImpact(new GraphIndex(graph), changes);
   const out = (s = '') => process.stderr.write(`${s}\n`);
-  const since =
-    changes.baseLabel === 'HEAD' ? 'desde o último commit' : `desde ${changes.baseLabel}`;
+  const m = t().changes;
+  const since = changes.baseLabel === 'HEAD' ? m.sinceLastCommit : m.since(changes.baseLabel);
   if (!changes.files.length) {
-    out(`  ${dim(`nenhuma mudança ${since}`)}`);
+    out(`  ${dim(m.none(since))}`);
     out();
     return;
   }
-  out(`${bold('Mudanças')} ${dim(since)}`);
+  out(`${bold(m.title)} ${dim(since)}`);
+  out(`  ${m.counts(changes.files.length, impact.changedEntities.length)}`);
   out(
-    `  ${changes.files.length} arquivo(s) alterado(s) · ${impact.changedEntities.length} entidade(s) alterada(s)`,
-  );
-  out(
-    `  impacto: ${impact.impacted.length} entidade(s) dependem do que mudou` +
-      (impact.routes.length ? ` · ${impact.routes.length} rota(s)` : '') +
-      (impact.tests.length ? ` · ${impact.tests.length} arquivo(s) de teste` : ''),
+    `  ${m.impact(impact.impacted.length)}` +
+      (impact.routes.length ? ` · ${m.routes(impact.routes.length)}` : '') +
+      (impact.tests.length ? ` · ${m.tests(impact.tests.length)}` : ''),
   );
   for (const route of impact.routes.slice(0, 5)) out(`    ${cyan('↳')} ${route.name}`);
   out();
@@ -95,60 +58,45 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
   const out = (s = '') => process.stderr.write(`${s}\n`);
   out();
   out(`${bold(graph.project.name)} ${dim(tildify(graph.project.root))}`);
-  const names: Partial<Record<NodeKind, [string, string]>> = {
-    function: ['função', 'funções'],
-    class: ['classe', 'classes'],
-    method: ['método', 'métodos'],
-    route: ['rota', 'rotas'],
-    package: ['pacote externo', 'pacotes externos'],
-    unresolved: ['não resolvido', 'não resolvidos'],
-  };
-  const parts = [
-    `${stats.files} ${stats.files === 1 ? 'arquivo analisado' : 'arquivos analisados'}`,
-  ];
-  for (const [kind, [one, many]] of Object.entries(names) as Array<[NodeKind, [string, string]]>) {
+  const m = t().summary;
+  const parts = [m.files(stats.files)];
+  for (const [kind, label] of Object.entries(m.kinds) as Array<
+    [NodeKind, (count: number) => string]
+  >) {
     const n = stats.nodesByKind[kind];
-    if (n) parts.push(`${n} ${n === 1 ? one : many}`);
+    if (n) parts.push(label(n));
   }
   out(`  ${parts.join(' · ')}`);
   const r = stats.edgesByResolution;
-  out(
-    `  relações: ${r.resolved ?? 0} resolvidas · ${r.external ?? 0} externas · ${r.unresolved ?? 0} não resolvidas`,
-  );
-  if (stats.importCycles.length)
-    out(`  ${yellow(`${stats.importCycles.length} ciclo(s) de importação`)}`);
+  out(`  ${m.relations(r.resolved ?? 0, r.external ?? 0, r.unresolved ?? 0)}`);
+  if (stats.importCycles.length) out(`  ${yellow(m.cycles(stats.importCycles.length))}`);
+  // as mensagens dos diagnósticos são dados do grafo (gravadas em português no JSON)
   const warnings = graph.diagnostics.filter((d) => d.level !== 'info');
   if (warnings.length) {
-    out(`  ${yellow(`${warnings.length} aviso(s):`)}`);
+    out(`  ${yellow(m.warnings(warnings.length))}`);
     for (const d of warnings.slice(0, 5))
       out(
         `    ${dim('•')} ${d.file ? `${d.file}${d.line ? `:${d.line}` : ''} — ` : ''}${d.message}`,
       );
-    if (warnings.length > 5)
-      out(dim(`    … e mais ${warnings.length - 5} (veja "diagnostics" no JSON)`));
+    if (warnings.length > 5) out(dim(`    ${m.moreWarnings(warnings.length - 5)}`));
   }
-  out(
-    dim(`  análise em ${stats.durationMs} ms com TypeScript ${graph.analyzer.typescriptVersion}`),
-  );
-  if (savedTo) out(`  grafo salvo em ${cyan(tildify(savedTo))}`);
+  out(dim(`  ${m.duration(stats.durationMs, graph.analyzer.typescriptVersion)}`));
+  if (savedTo) out(`  ${m.savedTo} ${cyan(tildify(savedTo))}`);
   out();
 }
 
 async function serve(graph: RastroGraph, port: number, open: boolean): Promise<RunningServer> {
   const root = webRoot();
-  if (!fs.existsSync(path.join(root, 'index.html'))) {
-    fail(
-      'a interface web não foi compilada. Rode "npm run build" na raiz do repositório do Rastro.',
-    );
-  }
+  const m = t().serve;
+  if (!fs.existsSync(path.join(root, 'index.html'))) fail(m.webNotBuilt);
   const server = await startServer({ graph, webRoot: root, port });
   process.stderr.write(
-    `${bold('Rastro')} pronto em ${cyan(server.url)}  ${dim('(Ctrl+C para encerrar)')}\n` +
-      dim('  O endereço inclui um token de acesso válido só nesta execução.\n'),
+    `${bold('Rastro')} ${m.readyAt} ${cyan(server.url)}  ${dim(m.stopHint)}\n` +
+      dim(`  ${m.tokenNote}\n`),
   );
   if (open) openBrowser(server.url);
   const stop = () => {
-    process.stderr.write(dim('\nEncerrando...\n'));
+    process.stderr.write(dim(`\n${m.stopping}\n`));
     void server.close().then(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref();
   };
@@ -158,6 +106,14 @@ async function serve(graph: RastroGraph, port: number, open: boolean): Promise<R
 }
 
 async function main(argv: string[]): Promise<void> {
+  // o idioma vem antes de tudo: até os erros de opções saem nele
+  const langValue = langArg(argv);
+  if (langValue !== undefined) {
+    const lang = parseLang(langValue);
+    if (!lang) fail(`${t().usage.badLang(langValue)}\n${t().usage.seeHelp}`);
+    setLang(lang);
+  }
+  const u = t().usage;
   let parsed;
   try {
     parsed = parseArgs({
@@ -182,16 +138,18 @@ async function main(argv: string[]): Promise<void> {
         external: { type: 'boolean' },
         'no-unresolved': { type: 'boolean' },
         json: { type: 'boolean' },
+        lang: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
     });
   } catch (err) {
-    fail(`${(err as Error).message}\nUse "rastro --help" para ver as opções.`);
+    fail(`${(err as Error).message}\n${u.seeHelp}`);
   }
   const { values, positionals } = parsed;
   if (values.version) return void process.stdout.write(`${RASTRO_VERSION}\n`);
-  if (values.help || positionals.length === 0) return void process.stdout.write(HELP);
+  if (values.help || positionals.length === 0)
+    return void process.stdout.write(t().help(RASTRO_VERSION));
 
   const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare'];
   const [first, ...rest] = positionals;
@@ -199,49 +157,44 @@ async function main(argv: string[]): Promise<void> {
   const isCommand = commands.includes(first!) && (rest.length > 0 || !fs.existsSync(first!));
   const command = isCommand ? first! : 'open';
   const target = isCommand ? rest[0] : first;
-  if (!target)
-    fail(`informe o caminho para "${command}". Exemplo: rastro ${command} ./meu-projeto`);
+  if (!target) fail(u.needPath(command));
 
   const servesUi = command === 'open' || command === 'serve';
   if (values.port !== undefined && (!servesUi || !/^\d+$/.test(values.port)))
-    fail(
-      servesUi
-        ? '--port precisa ser um número entre 0 e 65535.'
-        : `--port não se aplica a "${command}".`,
-    );
+    fail(servesUi ? u.portRange : u.notApplicable('--port', command));
   const port = values.port !== undefined ? Number(values.port) : 4321;
-  if (port > 65535) fail('--port precisa ser um número entre 0 e 65535.');
-  if (values.stdout && command !== 'analyze') fail('--stdout só funciona com "rastro analyze".');
+  if (port > 65535) fail(u.portRange);
+  if (values.stdout && command !== 'analyze') fail(u.onlyWith('--stdout', 'analyze'));
   if (values.out && command !== 'analyze' && command !== 'open' && command !== 'export')
-    fail(`--out não se aplica a "${command}".`);
-  if (values.json && command !== 'compare') fail('--json só funciona com "rastro compare".');
+    fail(u.notApplicable('--out', command));
+  if (values.json && command !== 'compare') fail(u.onlyWith('--json', 'compare'));
   if (command !== 'export') {
     const exportOnly = (
       ['format', 'level', 'folder', 'edges', 'external', 'no-unresolved'] as const
     ).find((k) => values[k] !== undefined);
-    if (exportOnly) fail(`--${exportOnly} só funciona com "rastro export".`);
+    if (exportOnly) fail(u.onlyWith(`--${exportOnly}`, 'export'));
   }
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
-  if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1))
-    fail('--max-files precisa ser um inteiro positivo.');
+  if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1)) fail(u.maxFiles);
 
   if (command === 'validate') {
     let data: unknown;
     try {
       data = JSON.parse(fs.readFileSync(path.resolve(target), 'utf8'));
     } catch (err) {
-      fail(`não foi possível ler o JSON: ${(err as Error).message}`);
+      fail(t().validate.cannotRead((err as Error).message));
     }
     const result = validateGraph(data);
     if (!result.valid) {
+      // os detalhes vêm do validador de @rastro/core (em português, como na interface)
       process.stderr.write(
-        `${red('inválido')}\n${result.errors.map((e) => `  • ${e}`).join('\n')}\n`,
+        `${red(t().validate.invalid)}\n${result.errors.map((e) => `  • ${e}`).join('\n')}\n`,
       );
       process.exit(1);
     }
     const g = data as RastroGraph;
     process.stdout.write(
-      `válido — ${g.nodes.length} nós, ${g.edges.length} relações (schema ${g.schemaVersion})\n`,
+      `${t().validate.valid(g.nodes.length, g.edges.length, g.schemaVersion)}\n`,
     );
     return;
   }
@@ -257,14 +210,13 @@ async function main(argv: string[]): Promise<void> {
     } catch (err) {
       const reason = err instanceof GitError ? err.message : (err as Error).message;
       if (warn)
-        process.stderr.write(`${yellow('aviso:')} mudanças do git não incluídas: ${reason}\n`);
+        process.stderr.write(`${yellow(t().warningPrefix)} ${t().changes.skipped(reason)}\n`);
     }
   };
 
   if (command === 'compare') {
     const other = rest[1];
-    if (!other || rest.length > 2)
-      fail('informe dois arquivos JSON. Exemplo: rastro compare antes.json depois.json');
+    if (!other || rest.length > 2) fail(u.compareNeedsTwo);
     let before: RastroGraph;
     let after: RastroGraph;
     try {
@@ -293,14 +245,14 @@ async function main(argv: string[]): Promise<void> {
       fail((err as Error).message);
     }
     const source = path.resolve(target);
-    if (!fs.existsSync(source)) fail(`caminho não encontrado: ${source}`);
+    if (!fs.existsSync(source)) fail(u.pathNotFound(source));
     let graph: RastroGraph;
     if (fs.statSync(source).isDirectory()) {
       graph = await analyzeProject(source, {
         ...(values.exclude ? { exclude: values.exclude } : {}),
         respectGitignore: !values['no-gitignore'],
         ...(maxFiles ? { maxFiles } : {}),
-        onProgress: (msg) => process.stderr.write(dim(`  ${msg}\n`)),
+        onProgress: showProgress,
       });
       attachChanges(graph, source, true);
     } else {
@@ -315,7 +267,7 @@ async function main(argv: string[]): Promise<void> {
       content = renderExport(graph, request.format, request.options, webRoot());
     } catch (err) {
       if (err instanceof UsageError) fail(err.message);
-      fail(`não foi possível exportar: ${(err as Error).message}`);
+      fail(t().export.failed((err as Error).message));
     }
     const outFile =
       values.out ?? (request.format === 'html' ? defaultReportPath(graph) : undefined);
@@ -329,13 +281,8 @@ async function main(argv: string[]): Promise<void> {
     } catch (err) {
       fail((err as Error).message);
     }
-    process.stderr.write(`${request.format} salvo em ${cyan(tildify(written))}\n`);
-    if (request.format === 'html')
-      process.stderr.write(
-        dim(
-          '  Abra no navegador: o mapa funciona offline, sem servidor (o código-fonte não vai junto).\n',
-        ),
-      );
+    process.stderr.write(`${t().export.saved(request.format)} ${cyan(tildify(written))}\n`);
+    if (request.format === 'html') process.stderr.write(dim(`  ${t().export.htmlHint}\n`));
     return;
   }
 
@@ -349,7 +296,7 @@ async function main(argv: string[]): Promise<void> {
     printSummary(graph);
     if (!fs.existsSync(graph.project.root)) {
       process.stderr.write(
-        `${yellow('aviso:')} a pasta analisada (${graph.project.root}) não existe nesta máquina; o código-fonte não poderá ser exibido.\n`,
+        `${yellow(t().warningPrefix)} ${t().serve.rootMissing(graph.project.root)}\n`,
       );
     }
     await serve(graph, port, !values['no-open']);
@@ -357,11 +304,9 @@ async function main(argv: string[]): Promise<void> {
   }
 
   const root = path.resolve(target);
-  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory())
-    fail(`diretório não encontrado: ${root}`);
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) fail(u.dirNotFound(root));
   const quiet = command === 'analyze' && values.stdout;
-  if (values.watch && command !== 'open')
-    fail('--watch só funciona ao abrir o mapa (rastro <caminho>).');
+  if (values.watch && command !== 'open') fail(u.watchOnly);
 
   /** Analisa o projeto (e as mudanças do git, se pedidas). Reutilizado pelo modo --watch. */
   const runAnalysis = async (progress: boolean) => {
@@ -369,7 +314,7 @@ async function main(argv: string[]): Promise<void> {
       ...(values.exclude ? { exclude: values.exclude } : {}),
       respectGitignore: !values['no-gitignore'],
       ...(maxFiles ? { maxFiles } : {}),
-      onProgress: progress ? (msg) => process.stderr.write(dim(`  ${msg}\n`)) : undefined,
+      onProgress: progress ? showProgress : undefined,
     });
     attachChanges(result, root, progress);
     return result;
@@ -414,10 +359,12 @@ function startWatch(
       const shown =
         files.slice(0, 3).join(', ') + (files.length > 3 ? ` +${files.length - 3}` : '');
       process.stderr.write(
-        `${cyan('↻')} ${shown} ${dim(`· reanalisado em ${Date.now() - started} ms · ${next.stats.files} arquivos`)}\n`,
+        `${cyan('↻')} ${shown} ${dim(t().watch.reanalyzed(Date.now() - started, next.stats.files))}\n`,
       );
     } catch (err) {
-      process.stderr.write(`${yellow('aviso:')} a reanálise falhou: ${(err as Error).message}\n`);
+      process.stderr.write(
+        `${yellow(t().warningPrefix)} ${t().watch.failed((err as Error).message)}\n`,
+      );
     } finally {
       running = false;
       if (again) {
@@ -428,7 +375,7 @@ function startWatch(
     }
   };
   watchProject(root, (files) => void rerun(files));
-  process.stderr.write(dim('  Modo ao vivo: o mapa se atualiza quando você salva um arquivo.\n'));
+  process.stderr.write(dim(`  ${t().watch.live}\n`));
 }
 
 main(process.argv.slice(2)).catch((err: unknown) =>

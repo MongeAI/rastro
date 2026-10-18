@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { t } from './i18n.js';
 
 const REDIRECT_LIFETIME_MS = 60_000;
 
@@ -21,10 +22,11 @@ export function openBrowser(url: string): void {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-'));
     const file = path.join(dir, 'abrir-rastro.html');
     const safe = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const m = t().browser;
     fs.writeFileSync(
       file,
       `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}">` +
-        `<title>Rastro</title><p>Abrindo o Rastro… <a href="${safe}">continuar</a></p>`,
+        `<title>Rastro</title><p>${m.opening} <a href="${safe}">${m.continue}</a></p>`,
       { mode: 0o600, flag: 'wx' },
     );
     target = pathToFileURL(file).href;

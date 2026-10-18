@@ -61,15 +61,15 @@ The terminal prints a summary and your browser opens by itself:
 
 ```text
 rastro-monorepo ~/rastro
-  51 arquivos analisados · 140 funções · 3 classes · 23 métodos · 26 pacotes externos · 43 não resolvidos
-  relações: 820 resolvidas · 66 externas · 50 não resolvidas
-  1 ciclo(s) de importação
-  análise em 1823 ms com TypeScript 6.0.2
+  51 files analyzed · 140 functions · 3 classes · 23 methods · 26 external packages · 43 unresolved
+  relationships: 820 resolved · 66 external · 50 unresolved
+  1 import cycle
+  analyzed in 1823 ms with TypeScript 6.0.2
 
-Rastro pronto em http://127.0.0.1:4321/?token=…  (Ctrl+C para encerrar)
+Rastro ready at http://127.0.0.1:4321/?token=…  (Ctrl+C to stop)
 ```
 
-> 🌐 **Language note:** the interface and the CLI messages are currently in **Portuguese** (Rastro is made in Brazil). They are short and icon-driven, and an English UI is on the [roadmap](ROADMAP.md). The data format, the code and this documentation are language-neutral or in English.
+> 🌐 **Language:** the interface and the CLI speak **English** and **Portuguese**. The CLI uses `--lang en|pt`, then the `RASTRO_LANG` variable, then your system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`: `pt*` means Portuguese), and English when none is set.
 
 <details>
 <summary><b>Run from source</b></summary>
@@ -183,14 +183,15 @@ rastro export <path|graph.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # what was added, removed or changed between two analyses
 ```
 
-| Option                 | Purpose                                                                  |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `-o, --out <file>`     | Where to save the JSON (default: the user cache, e.g. `~/.cache/rastro`) |
-| `-p, --port <n>`       | Interface port (default 4321; if busy, the next free one is used)        |
-| `--no-open`            | Do not open the browser automatically                                    |
-| `-e, --exclude <glob>` | Ignore paths using `.gitignore` syntax (repeatable)                      |
-| `--no-gitignore`       | Do not use the project's `.gitignore`                                    |
-| `--max-files <n>`      | Maximum number of analyzed files (default 10000)                         |
+| Option                 | Purpose                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `-o, --out <file>`     | Where to save the JSON (default: the user cache, e.g. `~/.cache/rastro`)        |
+| `-p, --port <n>`       | Interface port (default 4321; if busy, the next free one is used)               |
+| `--no-open`            | Do not open the browser automatically                                           |
+| `-e, --exclude <glob>` | Ignore paths using `.gitignore` syntax (repeatable)                             |
+| `--no-gitignore`       | Do not use the project's `.gitignore`                                           |
+| `--max-files <n>`      | Maximum number of analyzed files (default 10000)                                |
+| `--lang <en\|pt>`      | Message language (default: `RASTRO_LANG`, then the system locale, then English) |
 
 ### Share and integrate
 
@@ -241,7 +242,6 @@ Rastro is at **v0.1**. Today:
 - Routes: **Express**, **Fastify**, **Hono**, **NestJS** and **Next.js**, only when the framework is proven (imported from the framework package, or `next` declared in `package.json` for file-based routes) and the path is a literal. Prefixes that are not literals, routers mounted in more than one place, Next.js `basePath` and NestJS versioning leave the full path unknown instead of guessed. Not covered yet: routers or apps passed as function parameters (except Fastify plugins), `fastify-plugin`/autoload, NestJS `RouterModule`, Next.js `pageExtensions` and middleware.
 - Monorepos use the root `tsconfig` (and its `references`); `paths` defined only in sub-packages may not be resolved.
 - Tested on projects from dozens to a few hundred files; in a synthetic test, about 1,000 files were analyzed in ~3 s. Showing every symbol of a very large project (thousands of nodes) can take a few seconds.
-- The interface and CLI messages are in Portuguese for now.
 
 Next steps on the [roadmap](ROADMAP.md): incremental analysis, diffing two versions and the impact of a _pull request_.
 

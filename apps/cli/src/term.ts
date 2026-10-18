@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { t } from './i18n.js';
 
 /** Cores no terminal (desligadas fora de um TTY ou com NO_COLOR). */
 const color = (code: number) => (s: string) =>
@@ -14,7 +15,7 @@ export const cyan = color(36);
 
 /** Mostra o erro em vermelho e encerra com código 1. */
 export function fail(message: string): never {
-  process.stderr.write(`${red('erro:')} ${message}\n`);
+  process.stderr.write(`${red(t().errorPrefix)} ${message}\n`);
   process.exit(1);
 }
 
