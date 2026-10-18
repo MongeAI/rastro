@@ -3,6 +3,7 @@ import type { ChangeSet, GraphNode } from '@rastro/core';
 import type { ChangeImpact } from '@rastro/graph';
 import { copyText } from '../lib/editor';
 import { useI18n } from '../lib/i18n';
+import { entityName } from '../lib/names';
 import { IconCopy } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -14,7 +15,6 @@ interface Props {
   onNavigate(id: string): void;
 }
 
-const label = (n: GraphNode) => n.qualifiedName ?? n.name;
 const MAX = 40;
 
 /** Aba "Mudanças": o que mudou no git e quem pode ser afetado. */
@@ -31,7 +31,7 @@ export function ChangesPanel({ changes, impact, highlight, onHighlight, onNaviga
         <li key={n.id}>
           <button type="button" className="rel-item" onClick={() => onNavigate(n.id)}>
             <KindDot kind={n.kind} />
-            <span className="rel-name">{label(n)}</span>
+            <span className="rel-name">{entityName(n)}</span>
             {extra && <span className="rel-loc">{extra(n)}</span>}
           </button>
         </li>
@@ -124,7 +124,7 @@ export function ChangesPanel({ changes, impact, highlight, onHighlight, onNaviga
                     {i.depth}
                   </span>
                   <KindDot kind={i.node.kind} />
-                  <span className="rel-name">{label(i.node)}</span>
+                  <span className="rel-name">{entityName(i.node)}</span>
                   <span className="rel-loc">{labels.edge[i.via.kind].toLowerCase()}</span>
                 </button>
               </li>

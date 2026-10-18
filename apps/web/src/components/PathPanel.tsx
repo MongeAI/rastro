@@ -2,6 +2,7 @@ import type { GraphNode } from '@rastro/core';
 import type { GraphIndex, PathSearch } from '@rastro/graph';
 import { absolutePath, EDITORS, type EditorId } from '../lib/editor';
 import { useI18n } from '../lib/i18n';
+import { entityName } from '../lib/names';
 import { IconClose } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -21,10 +22,9 @@ interface Props {
   onClose(): void;
 }
 
-const name = (n: GraphNode | undefined) => (n ? (n.qualifiedName ?? n.name) : '?');
-
 /** "Como A chega em B?": os caminhos encontrados, passo a passo, com a evidência de cada passo. */
 export function PathPanel(p: Props) {
+  const name = (n: GraphNode | undefined) => (n ? entityName(n, p.index.graph.project.name) : '?');
   const { t, labels } = useI18n();
   const root = p.index.graph.project.root;
   const from = p.index.node(p.from);

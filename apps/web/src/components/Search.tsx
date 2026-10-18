@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GraphIndex } from '@rastro/graph';
 import { useI18n } from '../lib/i18n';
+import { shortEntityName } from '../lib/names';
 import { IconSearch } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -137,9 +138,7 @@ export function Search({ index, onPick, focusSignal }: Props) {
               >
                 <KindDot kind={r.node.kind} />
                 <span className="search-name">
-                  {r.node.qualifiedName && r.node.kind !== 'file'
-                    ? r.node.qualifiedName
-                    : r.node.name}
+                  {shortEntityName(r.node, index.graph.project.name)}
                 </span>
                 <span className="search-meta">
                   {labels.node[r.node.kind]}

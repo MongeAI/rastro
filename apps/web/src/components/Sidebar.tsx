@@ -57,15 +57,7 @@ export function Sidebar(p: Props) {
               aria-checked={p.level === id}
               className={p.level === id ? 'on' : ''}
               disabled={id === 'modules' && p.moduleCount < 2}
-              onClick={() => {
-                if (
-                  id === 'symbols' &&
-                  p.symbolCount > 1000 &&
-                  !confirm(s.confirmSymbols(p.symbolCount))
-                )
-                  return;
-                p.onLevel(id);
-              }}
+              onClick={() => p.onLevel(id)}
             >
               {s.levels[id]}
             </button>

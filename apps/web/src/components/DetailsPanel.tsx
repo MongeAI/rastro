@@ -3,6 +3,7 @@ import { type EdgeKind, type GraphEdge, type GraphNode } from '@rastro/core';
 import type { GraphIndex } from '@rastro/graph';
 import { absolutePath, copyText, EDITORS, type EditorId } from '../lib/editor';
 import { useI18n, type Messages } from '../lib/i18n';
+import { entityName } from '../lib/names';
 import {
   IconClose,
   IconCopy,
@@ -108,7 +109,11 @@ export function DetailsPanel(p: Props) {
           onNavigate={p.onNavigate}
         />
         <h2 className="details-name">
-          {node.kind === 'method' ? (node.qualifiedName ?? node.name) : node.name}
+          {node.kind === 'module' && !node.parent
+            ? index.graph.project.name
+            : node.kind === 'method'
+              ? (node.qualifiedName ?? node.name)
+              : node.name}
         </h2>
         {node.kind === 'route' && node.qualifiedName && (
           <p className="details-sub mono">{node.qualifiedName}</p>
@@ -288,8 +293,8 @@ export function DetailsPanel(p: Props) {
                   >
                     <KindDot kind={caller.kind} />
                     <span className="rel-name">
-                      {caller.qualifiedName && caller.kind !== 'file'
-                        ? caller.qualifiedName
+                      {caller.kind !== 'file'
+                        ? entityName(caller, index.graph.project.name)
                         : caller.name}
                     </span>
                     <span className="tag res-possible">{t.details.possibleTag}</span>
@@ -369,8 +374,8 @@ export function DetailsPanel(p: Props) {
                       </span>
                       <KindDot kind={i.node.kind} />
                       <span className="rel-name">
-                        {i.node.qualifiedName && i.node.kind !== 'file'
-                          ? i.node.qualifiedName
+                        {i.node.kind !== 'file'
+                          ? entityName(i.node, index.graph.project.name)
                           : i.node.name}
                       </span>
                       <span className="rel-loc">{labels.edge[i.via.kind].toLowerCase()}</span>
@@ -490,8 +495,8 @@ function RelationList({
               >
                 <KindDot kind={other.kind} />
                 <span className="rel-name">
-                  {other.qualifiedName && other.kind !== 'file' && other.kind !== 'module'
-                    ? other.qualifiedName
+                  {other.kind !== 'file' && other.kind !== 'module'
+                    ? entityName(other, index.graph.project.name)
                     : other.name}
                 </span>
                 {e.resolution !== 'resolved' && (

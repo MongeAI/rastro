@@ -2,6 +2,7 @@ import type { GraphEdge } from '@rastro/core';
 import type { GraphIndex, ViewEdge } from '@rastro/graph';
 import { absolutePath, EDITORS, type EditorId } from '../lib/editor';
 import { useI18n } from '../lib/i18n';
+import { entityName } from '../lib/names';
 import { IconClose } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -28,9 +29,7 @@ export function EdgeDetails({ index, edge, editor, onNavigate, onClose }: Props)
   const name = (id: string) => {
     const n = index.node(id);
     if (!n) return id;
-    return n.qualifiedName && n.kind !== 'module' && n.kind !== 'file'
-      ? n.qualifiedName
-      : (n.qualifiedName ?? n.name);
+    return entityName(n, index.graph.project.name);
   };
 
   return (

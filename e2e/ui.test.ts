@@ -114,6 +114,10 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     await crumbs[2]!.click();
     await sleep(400);
     expect(await text(page, '.details-name')).toBe('lib');
+    // o botão Voltar do navegador volta para a seleção anterior, sem sair do Rastro
+    await page.goBack();
+    await sleep(500);
+    expect(await text(page, '.details-name')).toBe('slugify');
     expect(problems).toEqual([]);
     await page.close();
   });
@@ -251,6 +255,9 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
       () => document.documentElement.scrollWidth - window.innerWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
+    // a busca tem largura para ler o que se digita
+    const searchWidth = await page.$eval('.search input', (el) => el.getBoundingClientRect().width);
+    expect(searchWidth).toBeGreaterThan(120);
     await page.click('.topbar .icon-button');
     await sleep(300);
     expect(await page.$('.app.sidebar-open')).not.toBeNull();
@@ -360,6 +367,16 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
       await waitForMap(page);
       expect(Date.now() - start).toBeLessThan(30_000);
       expect(await text(page, '.stage-status')).toMatch(/^15\d\d nós/);
+      // milhares de símbolos: confirmação no próprio mapa (sem diálogo nativo que trava a página)
+      const [symbols] = await page.$$(
+        'xpath/.//div[contains(@class,"segmented")]//button[contains(., "Símbolos")]',
+      );
+      await symbols!.click();
+      await page.waitForSelector('.confirm-pill');
+      await page.click('.confirm-pill .link-button');
+      await sleep(200);
+      expect(await page.$('.confirm-pill')).toBeNull();
+      expect(await text(page, '.segmented .on')).toBe('Arquivos');
       expect(problems).toEqual([]);
       await page.close();
     } finally {

@@ -1685,3 +1685,36 @@ kbd {
     animation: none;
   }
 }
+
+/* confirmação de muitos símbolos, no próprio mapa */
+.confirm-pill {
+  max-width: min(560px, 100%);
+  border-radius: 12px;
+  flex-wrap: wrap;
+  line-height: 1.45;
+}
+.confirm-pill .button {
+  padding: 3px 10px;
+}
+
+/* celular: a busca precisa de espaço para ser usável */
+@media (max-width: 600px) {
+  .brand-name,
+  .export-button {
+    display: none;
+  }
+  .top-actions {
+    gap: 2px;
+  }
+  .search {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  /* a lista de resultados ocupa a largura da tela, não só a do campo */
+  .search-results {
+    position: fixed;
+    top: 52px;
+    left: 8px;
+    right: 8px;
+  }
+}

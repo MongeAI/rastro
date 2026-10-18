@@ -2,14 +2,13 @@ import { useMemo } from 'react';
 import type { GraphNode } from '@rastro/core';
 import { computeInsights, type GraphIndex, type RankedNode } from '@rastro/graph';
 import { useI18n } from '../lib/i18n';
+import { entityName } from '../lib/names';
 import { KindDot } from './KindBadge';
 
 interface Props {
   index: GraphIndex;
   onNavigate(id: string): void;
 }
-
-const label = (n: GraphNode) => n.qualifiedName ?? n.name;
 
 /** Painel "Insights": rankings e possíveis sobras, todos clicáveis. */
 export function Insights({ index, onNavigate }: Props) {
@@ -38,7 +37,7 @@ export function Insights({ index, onNavigate }: Props) {
                 onClick={() => onNavigate(r.node.id)}
               >
                 <KindDot kind={r.node.kind} />
-                <span className="rel-name">{label(r.node)}</span>
+                <span className="rel-name">{entityName(r.node, index.graph.project.name)}</span>
                 <span className="rel-count">{unit(r.value)}</span>
                 <span
                   className="insight-bar"
@@ -67,7 +66,7 @@ export function Insights({ index, onNavigate }: Props) {
             <li key={n.id}>
               <button type="button" className="rel-item" onClick={() => onNavigate(n.id)}>
                 <KindDot kind={n.kind} />
-                <span className="rel-name">{label(n)}</span>
+                <span className="rel-name">{entityName(n, index.graph.project.name)}</span>
                 <span className="rel-loc">
                   {n.location?.file}:{n.location?.startLine}
                 </span>

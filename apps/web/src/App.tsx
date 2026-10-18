@@ -52,6 +52,7 @@ import { downloadBlob, downloadText, slug } from './lib/download';
 import { copyText, EDITORS, readPref, writePref, type EditorId } from './lib/editor';
 import type { Level } from './lib/levels';
 import { detectLang, I18nProvider, useI18n, type Messages } from './lib/i18n';
+import { entityName } from './lib/names';
 import { displayPath } from './lib/paths';
 import { PALETTES, type ThemeName } from './lib/theme';
 
@@ -417,6 +418,17 @@ function Explorer({
 
   const symbolCount = SYMBOL_KINDS.reduce((acc, k) => acc + (graph.stats.nodesByKind[k] ?? 0), 0);
 
+  /** Muitos símbolos de uma vez: pede confirmação no próprio mapa (sem travar a página). */
+  const [confirmSymbols, setConfirmSymbols] = useState(false);
+  const requestLevel = (next: Level) => {
+    if (next === 'symbols' && level !== 'symbols' && symbolCount > 1000) {
+      setConfirmSymbols(true);
+      return;
+    }
+    setConfirmSymbols(false);
+    setLevel(next);
+  };
+
   const setLevel = (next: Level) => {
     setLevelState(next);
     setModuleToggles(new Set(next === 'modules' ? autoOpen : []));
@@ -484,6 +496,8 @@ function Explorer({
     const fromHash = () => {
       const id = new URLSearchParams(window.location.hash.slice(1)).get('n');
       if (id && index.node(id) && id !== selectedRef.current) navigateRef.current(id, false);
+      // voltar (no navegador) até antes da primeira seleção limpa a seleção
+      else if (!id && selectedRef.current) setSelectedId(null);
     };
     fromHash();
     window.addEventListener('hashchange', fromHash);
@@ -499,10 +513,12 @@ function Explorer({
   }, [level]);
   useEffect(() => {
     try {
-      const url = selectedId
-        ? `#n=${encodeURIComponent(selectedId)}`
-        : window.location.pathname + window.location.search;
-      window.history.replaceState(null, '', url);
+      // cada seleção vira uma entrada do histórico: o botão Voltar do navegador percorre as
+      // seleções em vez de sair do Rastro
+      const hash = selectedId ? `#n=${encodeURIComponent(selectedId)}` : '';
+      if (window.location.hash === hash) return;
+      if (selectedId) window.history.pushState(null, '', hash);
+      else window.history.replaceState(null, '', window.location.pathname + window.location.search);
     } catch {
       // ambientes sem history (ex.: arquivo local) apenas ignoram
     }
@@ -724,12 +740,23 @@ function Explorer({
   const showChanges = !!changeImpact && panelTab === 'changes' && highlightChanges && !pathMode?.to;
   const changeHighlight = useMemo(() => {
     if (!showChanges || !changeImpact) return null;
-    const changedIds = [
-      ...changeImpact.changedEntities.map((n) => n.id),
-      ...changeImpact.changedFiles.map((n) => n.id),
-    ];
-    return { changed: changedIds, impacted: changeImpact.impacted.map((i) => i.node.id) };
-  }, [showChanges, changeImpact]);
+    // o que está escondido (ex.: uma rota dentro de um arquivo fechado) é destacado em quem o
+    // representa no mapa: o arquivo ou a pasta visível mais próxima
+    const shown = new Set(view.nodes.map((n) => n.id));
+    const rep = (id: string) =>
+      shown.has(id) ? id : index.ancestors(id).find((a) => shown.has(a.id))?.id;
+    const changed = new Set(
+      [...changeImpact.changedEntities, ...changeImpact.changedFiles]
+        .map((n) => rep(n.id))
+        .filter((id): id is string => !!id),
+    );
+    const impacted = new Set(
+      changeImpact.impacted
+        .map((i) => rep(i.node.id))
+        .filter((id): id is string => !!id && !changed.has(id)),
+    );
+    return { changed: [...changed], impacted: [...impacted] };
+  }, [showChanges, changeImpact, view, index]);
   // o que mudou (e o que é afetado diretamente) aparece no mapa quando a aba está aberta
   useEffect(() => {
     if (!showChanges || !changeImpact) return;
@@ -762,7 +789,7 @@ function Explorer({
     const selected = selectedId ? index.node(selectedId) : undefined;
     if (selected) {
       const name =
-        selected.qualifiedName && selected.kind !== 'file' ? selected.qualifiedName : selected.name;
+        selected.kind === 'file' ? selected.name : entityName(selected, graph.project.name);
       const group = `${g.selection} · ${name}`;
       actions.push(
         {
@@ -863,15 +890,7 @@ function Explorer({
           group: g.map,
           keywords: kw.level,
           icon: <IconLayout />,
-          run: () => {
-            if (
-              id === 'symbols' &&
-              symbolCount > 1000 &&
-              !confirm(t.sidebar.confirmSymbols(symbolCount))
-            )
-              return;
-            setLevel(id);
-          },
+          run: () => requestLevel(id),
         });
     actions.push(
       {
@@ -1041,7 +1060,12 @@ function Explorer({
           >
             <IconInfo /> <span className="hide-narrow">{t.top.summary}</span>
           </button>
-          <button type="button" className="button" onClick={exportJson} title={t.top.exportTitle}>
+          <button
+            type="button"
+            className="button export-button"
+            onClick={exportJson}
+            title={t.top.exportTitle}
+          >
             <IconDownload /> <span className="hide-narrow">{t.top.export}</span> JSON
           </button>
           <button
@@ -1076,7 +1100,7 @@ function Explorer({
         editor={editor}
         symbolCount={symbolCount}
         moduleCount={groupable.length}
-        onLevel={setLevel}
+        onLevel={requestLevel}
         onLayout={setLayout}
         onToggleNodeKind={(k) => toggleSet(setNodeKinds, k)}
         onToggleEdgeKind={(k) => toggleSet(setEdgeKinds, k)}
@@ -1116,6 +1140,28 @@ function Explorer({
         />
 
         <div className="stage-top">
+          {confirmSymbols && (
+            <div className="focus-pill confirm-pill" role="alertdialog" aria-live="polite">
+              <span>{t.sidebar.confirmSymbols(symbolCount)}</span>
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  setConfirmSymbols(false);
+                  setLevel('symbols');
+                }}
+              >
+                {t.sidebar.confirmShow}
+              </button>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setConfirmSymbols(false)}
+              >
+                {t.paths.cancel}
+              </button>
+            </div>
+          )}
           {pathMode && !pathMode.to && (
             <div className="focus-pill pick-pill" role="status">
               {t.paths.pick}
@@ -1128,8 +1174,8 @@ function Explorer({
             <div className="focus-pill">
               {t.stage.focus}{' '}
               <strong>
-                {focusNode.qualifiedName && focusNode.kind !== 'file'
-                  ? focusNode.qualifiedName
+                {focusNode.kind !== 'file'
+                  ? entityName(focusNode, graph.project.name)
                   : focusNode.name}
               </strong>
               <span className="muted">{t.stage.distance(focus!.depth)}</span>

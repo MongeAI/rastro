@@ -3,6 +3,7 @@ import type { GraphNode } from '@rastro/core';
 import type { GraphIndex } from '@rastro/graph';
 import { fuzzyScore } from '../lib/fuzzy';
 import { useI18n } from '../lib/i18n';
+import { shortEntityName } from '../lib/names';
 import { IconSearch } from './Icons';
 import { KindDot } from './KindBadge';
 
@@ -186,9 +187,7 @@ export function CommandPalette({ index, actions, recent, onPickNode, onClose }: 
                         <KindDot kind={item.node.kind} />
                       </span>
                       <span className="palette-label">
-                        {item.node.qualifiedName && item.node.kind !== 'file'
-                          ? item.node.qualifiedName
-                          : item.node.name}
+                        {shortEntityName(item.node, index.graph.project.name)}
                       </span>
                       <span className="palette-meta">
                         {labels.node[item.node.kind]}

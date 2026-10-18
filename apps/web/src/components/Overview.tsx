@@ -51,9 +51,18 @@ export function Overview({ graph, index, onNavigate }: Props) {
                 key={k}
                 className={`stat${k === 'unresolved' && stats.nodesByKind[k] ? ' stat-warn' : ''}`}
               >
-                <span className="stat-value">{stats.nodesByKind[k] ?? 0}</span>
+                {/* arquivos: os analisados, como na CLI; os só referenciados (css, json...) à parte */}
+                <span className="stat-value">
+                  {k === 'file' ? stats.files : (stats.nodesByKind[k] ?? 0)}
+                </span>
                 <span className="stat-label">
                   <KindDot kind={k} /> {labels.node[k]}
+                  {k === 'file' && (stats.nodesByKind.file ?? 0) > stats.files && (
+                    <span className="muted">
+                      {' '}
+                      {o.notAnalyzed((stats.nodesByKind.file ?? 0) - stats.files)}
+                    </span>
+                  )}
                 </span>
               </div>
             ))}

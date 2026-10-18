@@ -61,9 +61,10 @@ const pt = {
     noMatch: 'Nenhum nó corresponde aos filtros atuais.',
     reset: 'Restaurar visualização',
     noFiles: 'Este projeto não tem arquivos JavaScript ou TypeScript analisáveis.',
-    status: (nodes: number, edges: number) => `${nodes} nós · ${edges} relações visíveis`,
+    status: (nodes: number, edges: number) =>
+      `${n(nodes, 'nó', 'nós')} · ${n(edges, 'relação visível', 'relações visíveis')}`,
     live: (time: string) => ` · ao vivo, atualizado às ${time}`,
-    hidden: (count: number) => ` · ${count} ocultos`,
+    hidden: (count: number) => ` · ${n(count, 'nó oculto', 'nós ocultos')}`,
     controls: 'Controles do mapa',
     zoomIn: 'Aproximar',
     zoomOut: 'Afastar',
@@ -158,10 +159,11 @@ const pt = {
       symbols: 'Funções, classes e métodos de todos os arquivos, com as chamadas entre eles.',
     },
     confirmSymbols: (count: number) =>
-      `Mostrar ${count} símbolos de uma vez pode levar vários segundos e deixar o mapa difícil de ler. Dica: use a busca ou dê dois cliques nos arquivos que interessam. Continuar mesmo assim?`,
+      `Mostrar ${count} símbolos de uma vez pode levar vários segundos e deixar o mapa difícil de ler. Dica: use a busca ou dê dois cliques nos arquivos que interessam.`,
+    confirmShow: 'Mostrar mesmo assim',
     layout: 'Organização',
-    hierarchical: 'Hierárquica (fluxo de dependências)',
-    organic: 'Orgânica (por proximidade)',
+    hierarchical: 'Hierárquica (fluxo)',
+    organic: 'Orgânica (proximidade)',
     nodes: 'Nós',
     reset: 'restaurar',
     edges: 'Relações',
@@ -233,7 +235,7 @@ const pt = {
     possibleTag: 'possível',
     possibleTargets: 'Implementações possíveis',
     possibleTargetsHint:
-      'Métodos de classes do projeto que declaram implements desta interface (ou estendem a classe abstrata). O alvo real só é conhecido em execução: nenhum deles é uma ligação comprovada.',
+      'Métodos de classes do projeto que implementam esta interface (ou estendem a classe abstrata). Qual deles roda só se sabe em execução: nenhum é uma ligação comprovada.',
     possibleCallers: 'Possivelmente chamado por',
     possibleCallersHint:
       'Chamadas por interface ou método abstrato que esta implementação pode atender. Não é comprovado: depende do objeto recebido em execução.',
@@ -282,6 +284,7 @@ const pt = {
     ],
     analyzedAt: (date: string, ms: number, ts: string) =>
       `Analisado em ${date} · ${ms} ms · TypeScript ${ts}`,
+    notAnalyzed: (count: number) => `+${count} não analisados`,
   },
   changes: {
     tab: 'Mudanças',
@@ -355,7 +358,7 @@ const pt = {
   },
   source: {
     unavailable:
-      'O código não está disponível neste modo (grafo aberto a partir de um arquivo JSON). Use o caminho e as linhas acima para localizar o trecho no editor.',
+      'O código não está disponível aqui: este mapa foi aberto sem o servidor do Rastro (relatório HTML ou arquivo JSON). Use o caminho e as linhas acima para localizar o trecho no editor.',
     failed: (error: string) => `Não foi possível carregar o código: ${error}`,
     aria: (file: string, from: number, to: number) => `Código de ${file}, linhas ${from} a ${to}`,
     showWhole: (lines: number) => `Ver arquivo inteiro (${lines} linhas)`,
@@ -437,9 +440,10 @@ const en: Messages = {
     noMatch: 'No node matches the current filters.',
     reset: 'Reset view',
     noFiles: 'This project has no JavaScript or TypeScript files to analyze.',
-    status: (nodes, edges) => `${nodes} nodes · ${edges} visible relationships`,
+    status: (nodes, edges) =>
+      `${n(nodes, 'node', 'nodes')} · ${n(edges, 'visible relationship', 'visible relationships')}`,
     live: (time) => ` · live, updated at ${time}`,
-    hidden: (count) => ` · ${count} hidden`,
+    hidden: (count) => ` · ${n(count, 'hidden node', 'hidden nodes')}`,
     controls: 'Map controls',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
@@ -534,10 +538,11 @@ const en: Messages = {
       symbols: 'Functions, classes and methods of every file, with the calls between them.',
     },
     confirmSymbols: (count) =>
-      `Showing ${count} symbols at once may take several seconds and make the map hard to read. Tip: use search or double-click only the files you care about. Continue anyway?`,
+      `Showing ${count} symbols at once may take several seconds and make the map hard to read. Tip: use search or double-click only the files you care about.`,
+    confirmShow: 'Show anyway',
     layout: 'Layout',
-    hierarchical: 'Hierarchical (dependency flow)',
-    organic: 'Organic (by proximity)',
+    hierarchical: 'Hierarchical (flow)',
+    organic: 'Organic (proximity)',
     nodes: 'Nodes',
     reset: 'reset',
     edges: 'Relationships',
@@ -609,7 +614,7 @@ const en: Messages = {
     possibleTag: 'possible',
     possibleTargets: 'Possible implementations',
     possibleTargetsHint:
-      'Methods of project classes that declare implements of this interface (or extend the abstract class). The real target is only known at runtime: none of them is a proven link.',
+      'Methods of project classes that implement this interface (or extend the abstract class). Which one runs is only known at runtime: none of them is a proven link.',
     possibleCallers: 'Possibly called by',
     possibleCallersHint:
       'Calls through an interface or abstract method that this implementation may serve. Not proven: it depends on the object received at runtime.',
@@ -657,6 +662,7 @@ const en: Messages = {
       'Dashed red lines are references that could not be resolved.',
     ],
     analyzedAt: (date, ms, ts) => `Analyzed on ${date} · ${ms} ms · TypeScript ${ts}`,
+    notAnalyzed: (count) => `+${count} not analyzed`,
   },
   changes: {
     tab: 'Changes',
@@ -731,7 +737,7 @@ const en: Messages = {
   },
   source: {
     unavailable:
-      'Source code is not available in this mode (graph opened from a JSON file). Use the path and lines above to find the snippet in your editor.',
+      'Source code is not available here: this map was opened without the Rastro server (HTML report or JSON file). Use the path and lines above to find the snippet in your editor.',
     failed: (error) => `Could not load the code: ${error}`,
     aria: (file, from, to) => `Code of ${file}, lines ${from} to ${to}`,
     showWhole: (lines) => `View the whole file (${lines} lines)`,
