@@ -60,6 +60,9 @@ type Load =
   | { status: 'ready'; graph: RastroGraph; fromServer: boolean; updatedAt?: number }
   | { status: 'error'; message: (t: Messages) => string; canPickFile: boolean };
 
+/** Versão do grafo informada pelo servidor (modo --watch). */
+const versionOf = (res: Response) => Number(res.headers.get('X-Rastro-Version')) || 0;
+
 const DEFAULT_EDGES: EdgeKind[] = ['imports', 'calls', 'extends'];
 /** Pacotes externos começam ocultos no mapa para não poluir; continuam nos filtros e nos detalhes. */
 const DEFAULT_NODES: NodeKind[] = NODE_KIND_ORDER.filter((k) => k !== 'package');
@@ -84,6 +87,8 @@ export function App() {
 function Loader({ onLang }: { onLang(lang: Lang): void }) {
   const { t } = useI18n();
   const [load, setLoad] = useState<Load>({ status: 'loading' });
+  /** Versão do grafo mostrado (cabeçalho X-Rastro-Version do servidor; 0 = desconhecida). */
+  const graphVersion = useRef(0);
 
   const openGraph = useCallback((data: unknown, fromServer: boolean) => {
     const result = validateGraph(data);
@@ -125,6 +130,7 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
           return;
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        graphVersion.current = versionOf(res);
         openGraph(await res.json(), true);
       })
       .catch(() =>
@@ -141,11 +147,18 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
   useEffect(() => {
     if (!live || typeof EventSource === 'undefined') return;
     const events = new EventSource('/api/events');
-    events.addEventListener('graph', () => {
+    // cada grafo tem uma versão: respostas fora de ordem ou repetidas são descartadas, e uma
+    // reconexão ("hello") com versão mais nova busca o que foi perdido
+    const refresh = (announced: number) => {
       fetch('/api/graph')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data: unknown) => {
-          if (!data || !validateGraph(data).valid) return;
+        .then(async (res) => {
+          if (!res.ok) return;
+          const version = versionOf(res) || announced;
+          if (version && version <= graphVersion.current) return;
+          const data: unknown = await res.json();
+          if (!validateGraph(data).valid) return;
+          if (version && version <= graphVersion.current) return;
+          graphVersion.current = version;
           clearSourceCache();
           setLoad({
             status: 'ready',
@@ -155,6 +168,24 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
           });
         })
         .catch(() => {});
+    };
+    const versionIn = (e: MessageEvent<string>) => {
+      try {
+        return Number((JSON.parse(e.data) as { version?: unknown }).version) || 0;
+      } catch {
+        return 0;
+      }
+    };
+    // "hello" (conexão ou reconexão) só busca se o servidor já tiver um grafo mais novo
+    events.addEventListener('hello', (e: MessageEvent<string>) => {
+      const version = versionIn(e);
+      // versão do grafo inicial desconhecida: o que acabou de ser carregado é o atual
+      if (!graphVersion.current) graphVersion.current = version;
+      else if (version > graphVersion.current) refresh(version);
+    });
+    events.addEventListener('graph', (e: MessageEvent<string>) => {
+      const version = versionIn(e);
+      if (!version || version > graphVersion.current) refresh(version);
     });
     return () => events.close();
   }, [live]);
@@ -552,7 +583,15 @@ function Explorer({
       setPaletteOpen((o) => !o);
       return;
     }
-    if (paletteOpen || shortcutsOpen) return;
+    if (paletteOpen || shortcutsOpen) {
+      // com o foco fora do diálogo (ex.: depois de um clique dentro dele), Esc ainda fecha
+      if (e.key === 'Escape') {
+        setPaletteOpen(false);
+        setShortcutsOpen(false);
+      }
+      return;
+    }
+    if (e.isComposing) return;
     const target = e.target;
     const typing =
       (target instanceof HTMLInputElement &&
@@ -561,12 +600,19 @@ function Explorer({
       target instanceof HTMLTextAreaElement ||
       (target instanceof HTMLElement && target.isContentEditable);
     if (typing || e.ctrlKey || e.metaKey) return;
-    // setas e Enter têm significado próprio em listas, abas e botões; no mapa (ou sem foco) navegam
+    // setas e Enter têm significado próprio em controles, listas e painéis (que rolam com as
+    // setas); no mapa ou sem foco, navegam pelo mapa
+    const control =
+      target instanceof Element &&
+      !!target.closest('button, a, input, select, textarea, [role="button"]');
     const onMap =
       target === document.body ||
-      (target instanceof Element && !!target.closest('.graph-canvas, .stage'));
+      (target instanceof Element && !!target.closest('.graph-canvas, .stage') && !control);
     const arrowsFree =
-      !(target instanceof Element) || !target.closest('[role="listbox"], [role="tablist"], pre');
+      !(target instanceof Element) ||
+      !target.closest(
+        '[role="listbox"], [role="tablist"], [role="radiogroup"], pre, .panel, .sidebar, select',
+      );
     const picking = !!pathModeRef.current && !pathModeRef.current.to;
     const arrows: Record<string, Direction> = {
       ArrowUp: 'up',

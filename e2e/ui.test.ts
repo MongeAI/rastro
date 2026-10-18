@@ -186,6 +186,22 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     await sleep(100);
     expect(await page.$('.shortcuts')).toBeNull();
 
+    // Enter num botão da barra do mapa aciona o botão, não expande a seleção
+    await pick(page, 'math.ts');
+    const before = await text(page, '.stage-status');
+    await page.focus('.zoom-controls .icon-button');
+    await page.keyboard.press('Enter');
+    await sleep(400);
+    expect(await text(page, '.stage-status')).toBe(before);
+
+    // Esc fecha a paleta mesmo depois de um clique dentro dela (foco fora do campo)
+    await pressCombo(page, 'Control', 'k');
+    await page.waitForSelector('.palette');
+    await page.click('.palette-foot');
+    await page.keyboard.press('Escape');
+    await sleep(150);
+    expect(await page.$('.palette')).toBeNull();
+
     await page.keyboard.press('m');
     await sleep(100);
     expect(await page.$('canvas.minimap')).toBeNull();

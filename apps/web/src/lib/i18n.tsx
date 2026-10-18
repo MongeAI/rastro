@@ -756,11 +756,23 @@ const en: Messages = {
 export const MESSAGES: Record<Lang, Messages> = { pt, en };
 
 /** Idioma inicial: o salvo pelo usuário ou o do navegador (português para pt-*, inglês para o resto). */
-export function detectLang(saved: string | null): Lang {
+/**
+ * Idioma inicial: o escolhido antes (salvo) ou o primeiro da preferência do navegador que o
+ * Rastro conhece (`['en-US', 'pt-BR']` → inglês). Sem nenhum conhecido, inglês.
+ */
+export function detectLang(
+  saved: string | null,
+  languages: readonly string[] = typeof navigator !== 'undefined'
+    ? (navigator.languages ?? [navigator.language])
+    : [],
+): Lang {
   if (saved === 'pt' || saved === 'en') return saved;
-  const langs =
-    typeof navigator !== 'undefined' ? (navigator.languages ?? [navigator.language]) : [];
-  return langs.some((l) => l?.toLowerCase().startsWith('pt')) ? 'pt' : 'en';
+  for (const l of languages) {
+    const code = l?.toLowerCase() ?? '';
+    if (code.startsWith('pt')) return 'pt';
+    if (code.startsWith('en')) return 'en';
+  }
+  return 'en';
 }
 
 interface I18n {

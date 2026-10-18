@@ -16,7 +16,8 @@ export type Positions = Record<string, { x: number; y: number }>;
  * congelar a interface. Um pedido novo cancela o anterior (o worker é encerrado e recriado).
  */
 let elk: ELK | null = null;
-let running = false;
+/** Encerra o cálculo em andamento (rejeita a promessa dele com `LayoutCancelled`). */
+let cancelRunning: (() => void) | null = null;
 let embeddedWorkerUrl: string | null = null;
 
 /**
@@ -56,28 +57,35 @@ const LARGE_EDGES = 4000;
  * empacotados em grade, respeitando a proporção da tela.
  */
 export async function computeElkPositions(cy: Core, aspectRatio: number): Promise<Positions> {
-  if (running && elk) {
-    // um layout anterior ainda está calculando: descartamos o trabalho dele
-    elk.terminateWorker();
-    elk = null;
-  }
+  // um layout anterior ainda está calculando: descartamos o trabalho dele (o terminateWorker do
+  // elkjs não rejeita a promessa pendente; sem isso ela ficaria presa até o tempo limite)
+  cancelRunning?.();
   const root = buildGraph(cy, aspectRatio);
-  running = true;
   const instance = getElk();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const stopWorker = () => {
+    if (instance === elk) {
+      elk.terminateWorker();
+      elk = null;
+    }
+  };
   try {
+    const cancelled = new Promise<never>((_, reject) => {
+      cancelRunning = () => {
+        cancelRunning = null;
+        stopWorker();
+        reject(new LayoutCancelled());
+      };
+    });
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         // encerra o worker: o cálculo para de consumir CPU
-        if (instance === elk) {
-          elk.terminateWorker();
-          elk = null;
-          running = false;
-        }
+        cancelRunning = null;
+        stopWorker();
         reject(new LayoutTimeout());
       }, ELK_TIMEOUT_MS);
     });
-    const result = await Promise.race([instance.layout(root), timeout]);
+    const result = await Promise.race([instance.layout(root), timeout, cancelled]);
     const positions: Positions = {};
     const walk = (node: ElkNode, offsetX: number, offsetY: number) => {
       for (const child of node.children ?? []) {
@@ -90,14 +98,9 @@ export async function computeElkPositions(cy: Core, aspectRatio: number): Promis
     };
     walk(result, 0, 0);
     return positions;
-  } catch (err) {
-    if (err instanceof LayoutTimeout) throw err;
-    // worker encerrado por um pedido mais novo
-    if (instance !== elk) throw new LayoutCancelled();
-    throw err;
   } finally {
     clearTimeout(timer);
-    if (instance === elk) running = false;
+    if (instance === elk) cancelRunning = null;
   }
 }
 

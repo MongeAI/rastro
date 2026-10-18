@@ -125,6 +125,8 @@ export function CommandPalette({ index, actions, recent, onPickNode, onClose }: 
             autoComplete="off"
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
+              // Enter que confirma uma composição (IME, acentos) não escolhe item
+              if (e.nativeEvent.isComposing) return;
               if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setActive((a) => (items.length ? (a + 1) % items.length : 0));
