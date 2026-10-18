@@ -1,11 +1,12 @@
 import { Node, ts } from 'ts-morph';
 import { compareStrings, nodeId, type NodeMeta } from '@rastro/core';
-import type { DiscoveredFile } from '../discover.js';
+import { toPosix, type DiscoveredFile } from '../discover.js';
 import {
   addUnresolvedNode,
   evidenceAt,
   moduleSpecifierOfAlias,
   rangeOf,
+  referenceText,
   resolveSymbolTargets,
   unresolvedReason,
   unwrapExpression,
@@ -129,7 +130,21 @@ export function importBinding(
     return undefined;
   }
   const module = moduleSpecifierOfAlias(decl);
-  return module ? { module, name } : undefined;
+  return module ? { module: packageOfSpecifier(ctx, module, decl), name } : undefined;
+}
+
+/**
+ * Especificador como nome de pacote: `../..` vira `express` quando o arquivo exigido é o ponto
+ * de entrada do package.json chamado `express` (exemplos e testes no repositório do próprio
+ * framework). Qualquer outro especificador fica como está.
+ */
+function packageOfSpecifier(ctx: AnalyzerContext, specifier: string, at: ts.Node): string {
+  if (!specifier.startsWith('.')) return specifier;
+  const target = ctx.resolver.resolve(specifier, toPosix(at.getSourceFile().fileName));
+  if (target.kind !== 'file') return specifier;
+  // `../fastify` chega ao fastify.d.ts escrito à mão, mas quem roda é o fastify.js ao lado
+  const runtime = target.absolute.replace(/\.d\.([cm]?)ts$/, '.$1js');
+  return ctx.resolver.packageEntryName(runtime) ?? specifier;
 }
 
 /**
@@ -159,10 +174,14 @@ export function frameworkExport(
       return undefined;
     }
     const required = requiredModule(base); // require('express').Router
-    return required !== undefined && modules.has(required) ? e.name.text : undefined;
+    return required !== undefined && modules.has(packageOfSpecifier(ctx, required, base))
+      ? e.name.text
+      : undefined;
   }
   const required = requiredModule(e);
-  return required !== undefined && modules.has(required) ? '*' : undefined;
+  return required !== undefined && modules.has(packageOfSpecifier(ctx, required, e))
+    ? '*'
+    : undefined;
 }
 
 /** `require('m')` → `'m'`. */
@@ -235,7 +254,7 @@ function resolveSymbolValue(
   const out: ts.Node[] = [];
   for (const decl of resolved.declarations ?? []) {
     if (ts.isVariableDeclaration(decl)) {
-      const init = decl.initializer && unwrapExpression(decl.initializer);
+      const init = decl.initializer && assignedValue(decl.initializer);
       if (
         init &&
         (ts.isIdentifier(init) || ts.isPropertyAccessExpression(init) || moduleReference(init))
@@ -287,7 +306,7 @@ export function resolveOwner(
     let found: OwnerKey | undefined;
     if (ts.isVariableDeclaration(terminal)) {
       const init = terminal.initializer;
-      if (init) found = guarded(terminal, () => classify(unwrapExpression(init), terminal));
+      if (init) found = guarded(terminal, () => classify(assignedValue(init), terminal));
     } else if (ts.isParameter(terminal) || ts.isFunctionLike(terminal)) {
       found = other?.(terminal);
     } else if (terminal !== e) {
@@ -296,6 +315,17 @@ export function resolveOwner(
     if (found !== undefined) return found;
   }
   return undefined;
+}
+
+/**
+ * Valor de uma atribuição encadeada: em `var app = module.exports = express()` (comum em
+ * exemplos CommonJS), o valor de `app` é o de `express()`, o lado direito da última atribuição.
+ */
+function assignedValue(expr: ts.Expression): ts.Expression {
+  let current = unwrapExpression(expr);
+  while (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.EqualsToken)
+    current = unwrapExpression(current.right);
+  return current;
 }
 
 /** Nós sendo classificados agora: `const app = app.get(...)` não pode entrar em laço. */
@@ -316,7 +346,7 @@ export function receiverName(expr: ts.Expression): string {
   let current = unwrapExpression(expr);
   while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression))
     current = unwrapExpression(current.expression.expression);
-  return ts.isIdentifier(current) ? current.text : current.getText().replace(/\s+/g, '');
+  return referenceText(current);
 }
 
 // ---------------------------------------------------------------------------
@@ -617,7 +647,12 @@ export function linkHandlerSymbol(
         meta: { callKind: 'route-handler' },
       });
     }
-  } else if (unresolvedAllowed && !targets.some((t) => t.kind === 'external')) {
+  } else if (
+    unresolvedAllowed &&
+    !targets.some((t) => t.kind === 'external') &&
+    // função declarada dentro de outra (sem nó próprio, como nas chamadas): existe, não é "sem declaração"
+    !targets.every((t) => t.kind === 'local')
+  ) {
     const target = addUnresolvedNode(
       ctx,
       file.relative,

@@ -1,0 +1,5 @@
+{
+  "name": "express",
+  "private": true,
+  "description": "Reprodução do repositório do próprio Express: os exemplos usam require('../..') em vez de require('express')."
+}

@@ -339,4 +339,91 @@ describe('paths por subpacote em monorepos (fixtures/monorepo-paths)', () => {
       ),
     ).toBeDefined();
   });
+
+  it('alias "@/*" para arquivo que não é código vira arquivo, não pacote npm', () => {
+    const theme = 'file:packages/web/src/pages/theme.ts';
+    expect(edge(g, 'imports', theme, 'file:packages/web/src/styles/cart.css')).toMatchObject({
+      resolution: 'resolved',
+      meta: { specifier: '@/styles/cart.css' },
+    });
+    expect(g.nodes.some((n) => n.id === 'pkg:@/styles')).toBe(false);
+    // o alias casa, mas o arquivo (gerado) não existe: é um módulo ausente do projeto
+    expect(
+      node(g, 'unresolved:packages/web/src/pages/theme.ts#import:@/generated/tokens')?.meta?.reason,
+    ).toBe('module-not-found');
+  });
+});
+
+describe('cadeias de chamadas em várias linhas (fixtures/chains)', () => {
+  let g: RastroGraph;
+  beforeAll(async () => {
+    g = await analyzeProject(fixture('chains'));
+  });
+
+  it('gera um grafo válido', () => expectValid(g));
+
+  it('a evidência de cada método da cadeia é a linha do próprio método', () => {
+    const B = 'src/builder.ts';
+    const at = (target: string) =>
+      edge(g, 'calls', 'fn:src/main.ts#report', target)?.evidence.map((e) => [e.line, e.snippet]);
+    expect(at(`fn:${B}#query`)).toEqual([[8, 'return query()']]);
+    expect(at(`method:${B}#QueryBuilder.where`)).toEqual([[9, ".where('active')"]]);
+    expect(at(`method:${B}#QueryBuilder.orderBy`)).toEqual([[10, ".orderBy('name')"]]);
+    expect(at(`method:${B}#QueryBuilder.run`)).toEqual([[11, '.run();']]);
+    // numa linha só, a coluna é a do nome chamado
+    expect(
+      edge(g, 'calls', 'fn:src/main.ts#listUsers', `method:${B}#QueryBuilder.run`)?.evidence[0],
+    ).toMatchObject({ line: 4, column: 50 });
+  });
+
+  it('não resolvidos de cadeia têm nome curto, sem argumentos nem palavras coladas', () => {
+    const done = node(g, 'unresolved:src/main.ts#call:pipeline.step(…).step(…).done');
+    expect(done?.meta).toMatchObject({ reason: 'indirect-call' });
+    expect(done?.location?.startLine).toBe(18);
+    expect(edge(g, 'calls', 'fn:src/main.ts#build', done!.id)?.evidence[0]?.snippet).toBe(
+      '.done();',
+    );
+    for (const n of g.nodes.filter((x) => x.kind === 'unresolved')) {
+      expect(n.name).not.toMatch(/instanceof|=>/);
+      expect(n.name.length).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('cadeias muito longas guardam o final (o nome chamado)', async () => {
+    const steps = Array.from({ length: 40 }, (_, i) => `  .step('s${i}', (v) => v)`).join('\n');
+    const root = makeProject({
+      'p.ts': 'export interface P { step(n: string, f: (v: unknown) => unknown): P; done(): void }',
+      'use.ts': `import type { P } from './p';\nexport function go(p: P) {\n  p\n${steps}\n  .done();\n}`,
+    });
+    const g2 = await analyzeProject(root);
+    const done = g2.nodes.find((n) => n.kind === 'unresolved' && n.name.endsWith('.done'));
+    expect(done?.name.startsWith('…')).toBe(true);
+    expect(done?.name.length).toBe(100);
+    expectValid(g2);
+  });
+});
+
+describe("reexportação CommonJS: module.exports = require('./lib/x')", () => {
+  it('a chamada do módulo reexportado chega à função exportada pelo arquivo exigido', async () => {
+    const g = await analyzeProject(fixture('express-self'));
+    expectValid(g);
+    for (const example of ['hello', 'multi', 'internal'])
+      expect(
+        edge(g, 'calls', `file:examples/${example}/index.js`, 'fn:lib/express.js#createApplication')
+          ?.resolution,
+      ).toBe('resolved');
+    expect(g.nodes.some((n) => n.id === 'unresolved:examples/hello/index.js#call:express')).toBe(
+      false,
+    );
+  });
+
+  it('reexportação de pacote externo continua externa, sem inventar destino', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"left-pad":"1"}}',
+      'index.js': "module.exports = require('left-pad');",
+      'use.js': "const pad = require('./index');\npad('x', 3);",
+    });
+    const g = await analyzeProject(root);
+    expect(g.edges.filter((e) => e.kind === 'calls' && e.resolution === 'resolved')).toEqual([]);
+  });
 });

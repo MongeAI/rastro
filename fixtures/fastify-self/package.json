@@ -1,0 +1,6 @@
+{
+  "name": "fastify",
+  "private": true,
+  "main": "fastify.js",
+  "description": "Reprodução do repositório do próprio Fastify: fastify.js com um fastify.d.ts escrito à mão ao lado."
+}
