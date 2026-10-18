@@ -191,7 +191,7 @@ export class ImplementationIndex {
 }
 
 /** Assinatura sem implementação: membro de interface/tipo ou método/propriedade abstrata. */
-function isSignatureWithoutBody(decl: ts.Declaration): boolean {
+export function isSignatureWithoutBody(decl: ts.Declaration): boolean {
   if (ts.isMethodSignature(decl) || ts.isPropertySignature(decl)) return true;
   if (ts.isMethodDeclaration(decl) || ts.isPropertyDeclaration(decl))
     return (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Abstract) !== 0;

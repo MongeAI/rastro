@@ -136,7 +136,8 @@ export function importBinding(
 /**
  * Especificador como nome de pacote: `../..` vira `express` quando o arquivo exigido é o ponto
  * de entrada do package.json chamado `express` (exemplos e testes no repositório do próprio
- * framework). Qualquer outro especificador fica como está.
+ * framework) e esse ponto de entrada comprovadamente é o framework (ver `isFrameworkEntry`).
+ * Qualquer outro especificador fica como está.
  */
 function packageOfSpecifier(ctx: AnalyzerContext, specifier: string, at: ts.Node): string {
   if (!specifier.startsWith('.')) return specifier;
@@ -144,7 +145,51 @@ function packageOfSpecifier(ctx: AnalyzerContext, specifier: string, at: ts.Node
   if (target.kind !== 'file') return specifier;
   // `../fastify` chega ao fastify.d.ts escrito à mão, mas quem roda é o fastify.js ao lado
   const runtime = target.absolute.replace(/\.d\.([cm]?)ts$/, '.$1js');
-  return ctx.resolver.packageEntryName(runtime) ?? specifier;
+  const name = ctx.resolver.packageEntryName(runtime);
+  return name !== undefined && isFrameworkEntry(ctx, name, runtime) ? name : specifier;
+}
+
+/**
+ * Fábrica de cada framework no código dele: `createApplication` no lib/express.js do Express,
+ * `function fastify()` no fastify.js do Fastify.
+ */
+const FRAMEWORK_FACTORIES: Record<string, string> = {
+  express: 'createApplication',
+  fastify: 'fastify',
+};
+
+const frameworkEntries = new WeakMap<AnalyzerContext, Map<string, boolean>>();
+
+/**
+ * O ponto de entrada do pacote chamado `name` é o próprio framework? Só o nome no package.json
+ * não basta: um projeto qualquer pode se chamar `express`, e um `require('..')` dele viraria o
+ * Express, inventando rotas. A prova é o valor do `module.exports` do ponto de entrada (seguindo
+ * `module.exports = require('./lib/express')`) ser exatamente a fábrica do framework, uma
+ * função analisada do projeto. Com mais de um `module.exports =` (condicional), não há prova.
+ */
+function isFrameworkEntry(ctx: AnalyzerContext, name: string, entry: string): boolean {
+  let cache = frameworkEntries.get(ctx);
+  if (!cache) frameworkEntries.set(ctx, (cache = new Map()));
+  const cached = cache.get(entry);
+  if (cached !== undefined) return cached;
+  let proven = false;
+  const factory = Object.hasOwn(FRAMEWORK_FACTORIES, name) ? FRAMEWORK_FACTORIES[name] : undefined;
+  const sf = factory && ctx.filesByAbs.has(entry) ? ctx.program.getSourceFile(entry) : undefined;
+  if (sf) {
+    // arquivos CommonJS não expõem o símbolo do módulo pela API pública; lemos o do binder
+    const moduleSymbol =
+      ctx.checker.getSymbolAtLocation(sf) ?? (sf as unknown as { symbol?: ts.Symbol }).symbol;
+    const exported = moduleSymbol?.exports?.get(ts.InternalSymbolName.ExportEquals);
+    const targets = exported ? resolveSymbolTargets(ctx, exported) : [];
+    proven =
+      targets.length > 0 &&
+      targets.every((t) => {
+        const node = t.kind === 'entity' ? ctx.builder.getNode(t.id) : undefined;
+        return node?.kind === 'function' && node.name === factory;
+      });
+  }
+  cache.set(entry, proven);
+  return proven;
 }
 
 /**
