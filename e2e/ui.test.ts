@@ -30,6 +30,14 @@ const bundled = fs.existsSync(path.join(repo, 'apps', 'cli', 'dist', 'rastro.mjs
 if (process.env.CI && (!chrome || !bundled))
   throw new Error('no CI os testes de interface precisam do Chrome e de "npm run build"');
 
+/** O gerador de projetos dos benchmarks (tudo em src/, pastas que se importam entre si). */
+async function generateProject(root: string, files: number): Promise<void> {
+  const bench = (await import(pathToFileURL(path.join(repo, 'scripts', 'bench.mjs')).href)) as {
+    generateProject(root: string, files: number): void;
+  };
+  bench.generateProject(root, files);
+}
+
 /** Projeto pequeno num repositório git temporário. */
 function gitProject(files: Record<string, string>): string {
   const root = tmp('rastro-e2e-git-');
@@ -37,6 +45,12 @@ function gitProject(files: Record<string, string>): string {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), content);
   }
+  commitAll(root);
+  return root;
+}
+
+/** Transforma a pasta num repositório git com tudo num commit inicial. */
+function commitAll(root: string): void {
   const git = (...args: string[]) =>
     execFileSync(
       'git',
@@ -54,7 +68,6 @@ function gitProject(files: Record<string, string>): string {
   git('init', '-q', '-b', 'main');
   git('add', '-A');
   git('commit', '-q', '-m', 'inicial');
-  return root;
 }
 
 describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
@@ -240,6 +253,51 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     await page.close();
   });
 
+  it('caminho: tipo de relação desmarcado ainda mostra as linhas; Voltar cancela a escolha', async () => {
+    const { page, problems } = await openPage(browser, basic.url);
+    // sem "chamadas" nos filtros, um caminho feito de chamadas continua com as linhas no mapa
+    await page.evaluate(() =>
+      document
+        .querySelector('.sidebar .e-calls')!
+        .closest('label')!
+        .querySelector('input')!
+        .click(),
+    );
+    await waitForMap(page);
+    await pick(page, 'main');
+    const startPath = async () => {
+      const [start] = await page.$$(
+        'xpath/.//button[contains(., "Traçar caminho a partir daqui")]',
+      );
+      await start!.click();
+      await sleep(200);
+    };
+    await startPath();
+    await page.keyboard.type('UserService.create');
+    await sleep(150);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.path-steps');
+    await waitForMap(page);
+    const steps = (await texts(page, '.path-option.on .path-steps .rel-name')).length;
+    expect(await cyEval(page, (cy) => cy.edges('.path').length)).toBe(steps - 1);
+
+    // "Voltar" enquanto escolhe o destino volta para a seleção anterior, sem criar um caminho
+    await page.keyboard.press('Escape');
+    await pick(page, 'slugify');
+    await pressCombo(page, 'Alt', 'ArrowUp');
+    await sleep(300);
+    expect(await text(page, '.details-name')).toBe('strings.ts');
+    await startPath();
+    expect(await page.$('.pick-pill')).not.toBeNull();
+    await page.click('.pill-button');
+    await sleep(400);
+    expect(await page.$('.pick-pill')).toBeNull();
+    expect(await page.$('.path-steps')).toBeNull();
+    expect(await text(page, '.details-name')).toBe('slugify');
+    expect(problems).toEqual([]);
+    await page.close();
+  });
+
   it('interface em inglês e troca de idioma', async () => {
     const { page, problems } = await openPage(browser, basic.url, { lang: 'en' });
     expect(await text(page, '.stage-status')).toMatch(/^\d+ nodes · \d+ visible relationships/);
@@ -297,6 +355,63 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
       expect(names).toContain('test/a.test.ts');
       const copy = await page.$$('xpath/.//button[contains(., "Copiar caminhos")]');
       expect(copy.length).toBe(1);
+      expect(problems).toEqual([]);
+      await page.close();
+    } finally {
+      await run.stop();
+    }
+  });
+
+  it('--changes: link direto e fechar um caminho não levam o mapa para as mudanças', async () => {
+    const root = tmp('rastro-e2e-changes-map-');
+    await generateProject(root, 300);
+    commitAll(root);
+    fs.appendFileSync(path.join(root, 'src/d0/m0.ts'), '\n// mudou\n');
+    const run = await startRastro([
+      root,
+      '--changes',
+      '-o',
+      path.join(graphOut, 'changes-map.json'),
+    ]);
+    try {
+      // link direto: o mapa vai até a entidade do link (e não enquadra as mudanças por cima)
+      const target = 'file:src/d7/m295.ts';
+      const { page, problems } = await openPage(
+        browser,
+        `${run.url.split('#')[0]}#n=${encodeURIComponent(target)}`,
+      );
+      await sleep(1200);
+      expect(await text(page, '.details-name')).toBe('m295.ts');
+      const zoom = () => cyEval(page, (cy) => cy.zoom());
+      expect(await zoom()).toBeGreaterThan(0.5);
+
+      // fechar um caminho deixa o mapa onde estava
+      const [start] = await page.$$(
+        'xpath/.//button[contains(., "Traçar caminho a partir daqui")]',
+      );
+      await start!.click();
+      await sleep(200);
+      await page.keyboard.type('m55.ts');
+      await sleep(150);
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('.path-steps');
+      await waitForMap(page);
+      await page.click('.details-head .toggle input');
+      await waitForMap(page);
+      await sleep(600);
+      await cyEval(
+        page,
+        (cy, id) => {
+          cy.stop();
+          cy.zoom(1.5);
+          cy.center(cy.getElementById(id));
+        },
+        target,
+      );
+      await page.click('.panel .details-kind .icon-button');
+      await sleep(1200);
+      expect(await page.$('.path-steps')).toBeNull();
+      expect(await zoom()).toBeCloseTo(1.5, 2);
       expect(problems).toEqual([]);
       await page.close();
     } finally {
@@ -384,6 +499,78 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     }
   });
 
+  it('--watch: nova análise mantém a escolha do destino e descarta pontas e foco apagados', async () => {
+    const root = tmp('rastro-e2e-watch-path-');
+    const write = (rel: string, content: string) => fs.writeFileSync(path.join(root, rel), content);
+    write('a.ts', 'import { beta } from "./b";\nexport function alpha() {\n  return beta();\n}\n');
+    write('b.ts', 'import { gamma } from "./c";\nexport function beta() {\n  return gamma();\n}\n');
+    const c =
+      'export function gamma() {\n  return 1;\n}\nexport function delta() {\n  return 2;\n}\n';
+    write('c.ts', c);
+    const run = await startRastro([root, '--watch', '-o', path.join(graphOut, 'watch-path.json')]);
+    try {
+      const { page, problems } = await openPage(browser, run.url);
+      /** Salva e espera o mapa buscar a nova análise. */
+      const save = async (rel: string, content: string) => {
+        const fetched = page.waitForResponse((r) => r.url().includes('/api/graph'), {
+          timeout: 20_000,
+        });
+        write(rel, content);
+        await fetched;
+        await sleep(800);
+      };
+      await pick(page, 'alpha');
+      const [start] = await page.$$(
+        'xpath/.//button[contains(., "Traçar caminho a partir daqui")]',
+      );
+      await start!.click();
+      await sleep(200);
+      expect(await page.$('.pick-pill')).not.toBeNull();
+      // salvar um arquivo enquanto escolhe o destino não cancela a escolha
+      await save('c.ts', `${c}// mexido\n`);
+      expect(await page.$('.pick-pill')).not.toBeNull();
+      await page.keyboard.type('gamma');
+      await sleep(150);
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('.path-steps');
+
+      // o destino deixa de existir: o caminho é fechado (em vez de "nenhum caminho")
+      write(
+        'b.ts',
+        'import { gamma2 } from "./c";\nexport function beta() {\n  return gamma2();\n}\n',
+      );
+      await save(
+        'c.ts',
+        'export function gamma2() {\n  return 1;\n}\nexport function delta() {\n  return 2;\n}\n',
+      );
+      await page.waitForFunction(
+        () => document.querySelector('.details-name')?.textContent === 'alpha',
+        { timeout: 20_000 },
+      );
+      expect(await page.$('.path-steps')).toBeNull();
+
+      // o foco numa entidade apagada é desfeito (em vez de um mapa vazio)
+      await pick(page, 'delta');
+      const [focus] = await page.$$('xpath/.//button[contains(., "Focar vizinhança")]');
+      await focus!.click();
+      await waitForMap(page);
+      expect((await texts(page, '.focus-pill')).some((p) => p.startsWith('Foco'))).toBe(true);
+      await save('c.ts', 'export function gamma2() {\n  return 1;\n}\n');
+      await page.waitForFunction(
+        () =>
+          ![...document.querySelectorAll('.focus-pill')].some((p) =>
+            p.textContent?.startsWith('Foco'),
+          ),
+        { timeout: 20_000 },
+      );
+      expect(await page.$('.stage-empty')).toBeNull();
+      expect(problems).toEqual([]);
+      await page.close();
+    } finally {
+      await run.stop();
+    }
+  });
+
   it('--watch --changes: salvar não mexe no zoom nem no trecho de código fica velho', async () => {
     const root = gitProject({
       'src/a.ts': 'export function alpha() {\n  return 1;\n}\n',
@@ -455,11 +642,7 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
 
   it('projeto grande (1500 arquivos): pastas abertas no início e nível de arquivos rápido', async () => {
     const root = tmp('rastro-e2e-big-');
-    // o mesmo gerador dos benchmarks: tudo dentro de src/, pastas que se importam entre si
-    const { generateProject } = (await import(
-      pathToFileURL(path.join(repo, 'scripts', 'bench.mjs')).href
-    )) as { generateProject(root: string, files: number): void };
-    generateProject(root, 1500);
+    await generateProject(root, 1500);
     const run = await startRastro([root, '-o', path.join(graphOut, 'big.json')]);
     try {
       const { page, problems } = await openPage(browser, run.url);

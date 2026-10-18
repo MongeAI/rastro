@@ -350,6 +350,22 @@ function Explorer({
   );
   const [highlightChanges, setHighlightChanges] = useState(true);
   const [highlightRules, setHighlightRules] = useState(true);
+  /**
+   * Pedido para enquadrar no mapa o destaque de uma aba (Mudanças ou Regras). Só a pessoa pede,
+   * ao abrir a aba ou ligar o destaque: nova análise, fechar um caminho ou limpar a seleção não
+   * mexem no mapa que ela está olhando. Ao abrir o Rastro na aba Mudanças também enquadra,
+   * menos com um link direto (#n=...), que já leva a uma entidade.
+   */
+  const [frameRequest, setFrameRequest] = useState<{ tab: PanelTab; seq: number } | null>(() => {
+    if (!graph.changes?.files.length) return null;
+    const linked = new URLSearchParams(window.location.hash.slice(1)).get('n');
+    return linked && index.node(linked) ? null : { tab: 'changes', seq: 1 };
+  });
+  const requestFrame = (tab: PanelTab) => setFrameRequest((r) => ({ tab, seq: (r?.seq ?? 0) + 1 }));
+  const openTab = (tab: PanelTab) => {
+    setPanelTab(tab);
+    requestFrame(tab);
+  };
   /** Caminho A → B: origem escolhida e, depois, o destino. */
   const [pathMode, setPathMode] = useState<{ from: string; to?: string } | null>(null);
   const [activePath, setActivePath] = useState(0);
@@ -385,45 +401,62 @@ function Explorer({
     [level, groupable, moduleToggles],
   );
 
+  const pathResult = useMemo(
+    () => (pathMode?.to ? findPaths(index, pathMode.from, pathMode.to) : null),
+    [index, pathMode],
+  );
+  /** O caminho na tela: a opção escolhida no painel (as alternativas aparecem ao serem escolhidas). */
+  const shownPath = pathResult?.paths[activePath] ?? pathResult?.paths[0];
+  const shownPathEdges = useMemo(
+    () => new Set(shownPath?.edges.map((e) => e.id) ?? []),
+    [shownPath],
+  );
+  /**
+   * Os tipos de relação filtrados não escondem os passos do caminho: com "Chamadas" desmarcado,
+   * um caminho feito de chamadas ainda precisa das linhas para ser lido.
+   */
+  const viewEdgeKinds = useMemo(() => {
+    const missing = (shownPath?.edges ?? []).filter((e) => !edgeKinds.has(e.kind));
+    return missing.length ? new Set([...edgeKinds, ...missing.map((e) => e.kind)]) : edgeKinds;
+  }, [edgeKinds, shownPath]);
+
   const baseView = useMemo(() => {
     const v = computeView(index, {
       nodeKinds,
-      edgeKinds,
+      edgeKinds: viewEdgeKinds,
       expandedFiles,
       expandAll: level === 'symbols',
       collapsedModules,
       pinned,
       ...(focus ? { focus } : {}),
     });
-    return hideTypeOnly ? { ...v, edges: v.edges.filter((e) => !e.typeOnly) } : v;
+    return hideTypeOnly
+      ? {
+          ...v,
+          edges: v.edges.filter((e) => !e.typeOnly || e.members.some((m) => shownPathEdges.has(m))),
+        }
+      : v;
   }, [
     index,
     nodeKinds,
-    edgeKinds,
+    viewEdgeKinds,
     expandedFiles,
     level,
     collapsedModules,
     pinned,
     focus,
     hideTypeOnly,
+    shownPathEdges,
   ]);
-
-  const pathResult = useMemo(
-    () => (pathMode?.to ? findPaths(index, pathMode.from, pathMode.to) : null),
-    [index, pathMode],
-  );
   /**
    * Com um caminho na tela, o mapa mostra só ele (os passos e as pastas/arquivos que os
    * contêm): no mapa inteiro, passos em pastas distantes ficam pequenos demais para ler.
    */
   const view = useMemo(() => {
-    if (!pathOnly || !pathResult?.paths.length) return baseView;
+    if (!pathOnly || !shownPath) return baseView;
     const byId = new Map(baseView.nodes.map((n) => [n.id, n]));
-    // só a opção escolhida: as alternativas aparecem ao serem escolhidas no painel
-    const path = pathResult.paths[activePath] ?? pathResult.paths[0]!;
-    const pathEdges = new Set(path.edges.map((e) => e.id));
     const keep = new Set<string>();
-    for (const id of path.nodes) {
+    for (const id of shownPath.nodes) {
       // o passo, ou quem o representa no mapa (ex.: o arquivo recolhido que contém a função)
       let cur =
         byId.get(id) ??
@@ -439,11 +472,12 @@ function Explorer({
       ...baseView,
       nodes,
       edges: baseView.edges.filter(
-        (e) => keep.has(e.source) && keep.has(e.target) && e.members.some((m) => pathEdges.has(m)),
+        (e) =>
+          keep.has(e.source) && keep.has(e.target) && e.members.some((m) => shownPathEdges.has(m)),
       ),
       hiddenCount: baseView.hiddenCount + baseView.nodes.length - nodes.length,
     };
-  }, [baseView, pathOnly, pathResult, activePath, index]);
+  }, [baseView, pathOnly, shownPath, shownPathEdges, index]);
 
   const symbolCount = SYMBOL_KINDS.reduce((acc, k) => acc + (graph.stats.nodesByKind[k] ?? 0), 0);
 
@@ -521,21 +555,27 @@ function Explorer({
   navigateRef.current = navigate;
 
   // link direto: #n=<id> na URL seleciona a entidade (ao abrir e quando a URL muda)
+  // (este efeito também roda a cada nova análise do --watch, quando o índice muda)
   useEffect(() => {
     const fromHash = () => {
+      // escolhendo o destino de um caminho: a URL não muda a seleção (nem vira o destino)
+      if (pathModeRef.current && !pathModeRef.current.to) return;
       const id = new URLSearchParams(window.location.hash.slice(1)).get('n');
-      // voltar enquanto escolhe o destino de um caminho cancela a escolha (não vira o destino)
-      if (pathModeRef.current && !pathModeRef.current.to) {
-        pathModeRef.current = null;
-        setPathMode(null);
-      }
       if (id && index.node(id) && id !== selectedRef.current) navigateRef.current(id, false);
       // voltar (no navegador) até antes da primeira seleção limpa a seleção
       else if (!id && selectedRef.current) setSelectedId(null);
     };
+    const onHashChange = () => {
+      // voltar (no navegador) enquanto escolhe o destino de um caminho cancela a escolha
+      if (pathModeRef.current && !pathModeRef.current.to) {
+        pathModeRef.current = null;
+        setPathMode(null);
+      }
+      fromHash();
+    };
     fromHash();
-    window.addEventListener('hashchange', fromHash);
-    return () => window.removeEventListener('hashchange', fromHash);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
   }, [index]);
 
   // ao trocar de nível, a seleção é levada para onde ela aparece no novo nível
@@ -560,14 +600,26 @@ function Explorer({
 
   // nova análise (--watch) sem a entidade selecionada (apagada ou renomeada): limpa a seleção
   // e o histórico interno, em vez de manter um id que não existe mais
+  // o mesmo vale para as pontas de um caminho e para o foco
   useEffect(() => {
     if (selectedRef.current && !index.node(selectedRef.current)) setSelectedId(null);
     setHistory((h) => (h.every((id) => index.node(id)) ? h : h.filter((id) => index.node(id))));
+    const path = pathModeRef.current;
+    if (path && (!index.node(path.from) || (path.to && !index.node(path.to)))) {
+      pathModeRef.current = null;
+      setPathMode(null);
+    }
+    setFocus((f) => (f && !index.node(f.id) ? null : f));
   }, [index]);
 
   const goBack = () => {
     const prev = history[history.length - 1];
     if (!prev) return;
+    // voltar enquanto escolhe o destino de um caminho cancela a escolha (não vira o destino)
+    if (pathModeRef.current && !pathModeRef.current.to) {
+      pathModeRef.current = null;
+      setPathMode(null);
+    }
     setHistory((h) => h.slice(0, -1));
     navigate(prev, false);
   };
@@ -749,10 +801,10 @@ function Explorer({
     const replacement = view.edges.find((e) => e.members.some((m) => members.has(m)));
     setSelectedEdgeId(replacement ? replacement.id : null);
   }, [view, selectedEdgeId]);
-  const pathHighlight = useMemo(() => {
-    const path = pathResult?.paths[activePath];
-    return path ? { nodes: path.nodes, edges: path.edges.map((e) => e.id) } : null;
-  }, [pathResult, activePath]);
+  const pathHighlight = useMemo(
+    () => (shownPath ? { nodes: shownPath.nodes, edges: [...shownPathEdges] } : null),
+    [shownPath, shownPathEdges],
+  );
   // os nós dos caminhos precisam aparecer no mapa: abre pastas e arquivos e fixa os nós
   const collapsedRef = useRef(collapsedModules);
   collapsedRef.current = collapsedModules;
@@ -760,13 +812,13 @@ function Explorer({
   setModuleOpenRef.current = setModuleOpen;
   // só ao abrir um caminho (ou trocar de alternativa): uma nova análise (--watch) refaz o
   // índice, mas não deve mexer de novo no mapa que a pessoa está olhando
-  const shownPath = useRef<string | null>(null);
+  const framedPath = useRef<string | null>(null);
   useEffect(() => {
     const key = pathResult?.paths.length
       ? `${pathModeRef.current?.from}\n${pathModeRef.current?.to}\n${activePath}`
       : null;
-    if (key === shownPath.current) return;
-    shownPath.current = key;
+    if (key === framedPath.current) return;
+    framedPath.current = key;
     if (!pathResult?.paths.length) return;
     const ids = new Set(pathResult.paths.flatMap((p) => p.nodes));
     for (const id of ids) {
@@ -781,6 +833,15 @@ function Explorer({
     const shown = pathResult.paths[activePath]?.nodes ?? [...ids];
     if (origin) setCenterRequest((r) => ({ id: origin, seq: (r?.seq ?? 0) + 1, fitIds: shown }));
   }, [pathResult, activePath, index]);
+
+  const panelMode =
+    pathMode?.to && pathResult
+      ? 'path'
+      : selectedEdge
+        ? 'edge'
+        : selectedId && index.node(selectedId)
+          ? 'node'
+          : 'overview';
 
   const changeImpact = useMemo(
     () => (graph.changes ? computeChangeImpact(index, graph.changes) : null),
@@ -839,18 +900,19 @@ function Explorer({
       }
     return { nodes: [...nodes], edges };
   }, [showRules, rulesState, view, index]);
-  // ao abrir a aba (não a cada nova análise do --watch), o mapa enquadra o que quebra regras
-  const rulesShown = useRef(false);
+  // ao abrir a aba ou ligar o destaque (não a cada nova análise do --watch), o mapa enquadra o
+  // que quebra regras
+  const rulesFramed = useRef(0);
   useEffect(() => {
-    const was = rulesShown.current;
-    rulesShown.current = showRules;
-    if (was || !showRules || !rulesState?.check) return;
+    if (frameRequest?.tab !== 'rules' || frameRequest.seq === rulesFramed.current) return;
+    rulesFramed.current = frameRequest.seq;
+    if (!showRules || !rulesState?.check || panelMode !== 'overview') return;
     const ids = rulesState.check.outcomes
       .flatMap((o) => o.violations.map((v) => nodeId.file(v.from)))
       .filter((id) => index.node(id))
       .slice(0, 60);
     if (ids.length) setCenterRequest((r) => ({ id: ids[0]!, seq: (r?.seq ?? 0) + 1, fitIds: ids }));
-  }, [showRules, rulesState, index]);
+  }, [frameRequest, showRules, rulesState, index, panelMode]);
   /** Abre a entidade onde a violação aparece (a origem da primeira relação). */
   const openViolation = (v: RuleViolation) => {
     const edge = v.edges.length ? index.edges.get(v.edges[0]!) : undefined;
@@ -859,11 +921,11 @@ function Explorer({
 
   // o que mudou (e o que é afetado diretamente) aparece no mapa quando a aba está aberta
   // só quando a aba (ou o destaque) é aberta, não a cada nova análise do --watch
-  const changesShown = useRef(false);
+  const changesFramed = useRef(0);
   useEffect(() => {
-    const was = changesShown.current;
-    changesShown.current = showChanges;
-    if (was || !showChanges || !changeImpact) return;
+    if (frameRequest?.tab !== 'changes' || frameRequest.seq === changesFramed.current) return;
+    changesFramed.current = frameRequest.seq;
+    if (!showChanges || !changeImpact || panelMode !== 'overview') return;
     const ids = [
       ...changeImpact.changedEntities.map((n) => n.id),
       ...changeImpact.impacted.filter((i) => i.depth === 1).map((i) => i.node.id),
@@ -877,7 +939,7 @@ function Explorer({
         setExpandedFiles((s) => (s.has(file.id) ? s : new Set(s).add(file.id)));
     }
     setCenterRequest((r) => ({ id: ids[0]!, seq: (r?.seq ?? 0) + 1, fitIds: ids }));
-  }, [showChanges, changeImpact, index]);
+  }, [frameRequest, showChanges, changeImpact, index, panelMode]);
 
   /** Ações da paleta de comandos (só montadas com a paleta aberta). */
   const paletteActions = (): PaletteAction[] => {
@@ -887,7 +949,7 @@ function Explorer({
       setSelectedId(null);
       setSelectedEdgeId(null);
       setPathMode(null);
-      setPanelTab(tab);
+      openTab(tab);
     };
     const actions: PaletteAction[] = [];
     const selected = selectedId ? index.node(selectedId) : undefined;
@@ -1111,15 +1173,6 @@ function Explorer({
     );
     return actions;
   };
-
-  const panelMode =
-    pathMode?.to && pathResult
-      ? 'path'
-      : selectedEdge
-        ? 'edge'
-        : selectedId && index.node(selectedId)
-          ? 'node'
-          : 'overview';
 
   return (
     <div
@@ -1505,7 +1558,7 @@ function Explorer({
                   role="tab"
                   aria-selected={panelTab === tab}
                   className={panelTab === tab ? 'on' : ''}
-                  onClick={() => setPanelTab(tab)}
+                  onClick={() => openTab(tab)}
                 >
                   {tab === 'summary'
                     ? t.insights.tabSummary
@@ -1526,7 +1579,10 @@ function Explorer({
                 changes={graph.changes}
                 impact={changeImpact}
                 highlight={highlightChanges}
-                onHighlight={setHighlightChanges}
+                onHighlight={(on) => {
+                  setHighlightChanges(on);
+                  if (on) requestFrame('changes');
+                }}
                 onNavigate={(id) => navigate(id)}
               />
             ) : panelTab === 'rules' && rulesState ? (
@@ -1535,7 +1591,10 @@ function Explorer({
                 issues={rulesState.issues}
                 check={rulesState.check}
                 highlight={highlightRules}
-                onHighlight={setHighlightRules}
+                onHighlight={(on) => {
+                  setHighlightRules(on);
+                  if (on) requestFrame('rules');
+                }}
                 onOpen={openViolation}
               />
             ) : panelTab !== 'insights' ? (
