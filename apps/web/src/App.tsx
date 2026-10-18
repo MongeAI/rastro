@@ -292,6 +292,7 @@ function Explorer({
   /** Caminho A → B: origem escolhida e, depois, o destino. */
   const [pathMode, setPathMode] = useState<{ from: string; to?: string } | null>(null);
   const [activePath, setActivePath] = useState(0);
+  const [pathOnly, setPathOnly] = useState(true);
   const [searchFocus, setSearchFocus] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -323,7 +324,7 @@ function Explorer({
     [level, groupable, moduleToggles],
   );
 
-  const view = useMemo(() => {
+  const baseView = useMemo(() => {
     const v = computeView(index, {
       nodeKinds,
       edgeKinds,
@@ -345,6 +346,43 @@ function Explorer({
     focus,
     hideTypeOnly,
   ]);
+
+  const pathResult = useMemo(
+    () => (pathMode?.to ? findPaths(index, pathMode.from, pathMode.to) : null),
+    [index, pathMode],
+  );
+  /**
+   * Com um caminho na tela, o mapa mostra só ele (os passos e as pastas/arquivos que os
+   * contêm): no mapa inteiro, passos em pastas distantes ficam pequenos demais para ler.
+   */
+  const view = useMemo(() => {
+    if (!pathOnly || !pathResult?.paths.length) return baseView;
+    const byId = new Map(baseView.nodes.map((n) => [n.id, n]));
+    // só a opção escolhida: as alternativas aparecem ao serem escolhidas no painel
+    const path = pathResult.paths[activePath] ?? pathResult.paths[0]!;
+    const pathEdges = new Set(path.edges.map((e) => e.id));
+    const keep = new Set<string>();
+    for (const id of path.nodes) {
+      // o passo, ou quem o representa no mapa (ex.: o arquivo recolhido que contém a função)
+      let cur =
+        byId.get(id) ??
+        index
+          .ancestors(id)
+          .map((a) => byId.get(a.id))
+          .find((n) => !!n);
+      for (; cur && !keep.has(cur.id); cur = cur.parent ? byId.get(cur.parent) : undefined)
+        keep.add(cur.id);
+    }
+    const nodes = baseView.nodes.filter((n) => keep.has(n.id));
+    return {
+      ...baseView,
+      nodes,
+      edges: baseView.edges.filter(
+        (e) => keep.has(e.source) && keep.has(e.target) && e.members.some((m) => pathEdges.has(m)),
+      ),
+      hiddenCount: baseView.hiddenCount + baseView.nodes.length - nodes.length,
+    };
+  }, [baseView, pathOnly, pathResult, activePath, index]);
 
   const symbolCount = SYMBOL_KINDS.reduce((acc, k) => acc + (graph.stats.nodesByKind[k] ?? 0), 0);
 
@@ -608,10 +646,6 @@ function Explorer({
     const replacement = view.edges.find((e) => e.members.some((m) => members.has(m)));
     setSelectedEdgeId(replacement ? replacement.id : null);
   }, [view, selectedEdgeId]);
-  const pathResult = useMemo(
-    () => (pathMode?.to ? findPaths(index, pathMode.from, pathMode.to) : null),
-    [index, pathMode],
-  );
   const pathHighlight = useMemo(() => {
     const path = pathResult?.paths[activePath];
     return path ? { nodes: path.nodes, edges: path.edges.map((e) => e.id) } : null;
@@ -633,8 +667,9 @@ function Explorer({
     }
     setPinned((s) => new Set([...s, ...ids]));
     const origin = pathModeRef.current?.from;
-    if (origin) setCenterRequest((r) => ({ id: origin, seq: (r?.seq ?? 0) + 1, fitIds: [...ids] }));
-  }, [pathResult, index]);
+    const shown = pathResult.paths[activePath]?.nodes ?? [...ids];
+    if (origin) setCenterRequest((r) => ({ id: origin, seq: (r?.seq ?? 0) + 1, fitIds: shown }));
+  }, [pathResult, activePath, index]);
 
   const changeImpact = useMemo(
     () => (graph.changes ? computeChangeImpact(index, graph.changes) : null),
@@ -1185,6 +1220,8 @@ function Explorer({
               setPathMode(null);
               navigate(id);
             }}
+            pathOnly={pathOnly}
+            onPathOnly={setPathOnly}
             onSwap={() => {
               setPathMode({ from: pathMode.to!, to: pathMode.from });
               setActivePath(0);

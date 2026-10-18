@@ -7,13 +7,12 @@ const SANS = 'Inter, ui-sans-serif, system-ui, sans-serif';
 const MONO = 'JetBrains Mono, ui-monospace, monospace';
 
 /** Texto exibido no nó: arquivos com símbolos ganham "+", pastas recolhidas mostram a contagem. */
-export function displayLabel(n: ViewNode): string {
-  if (n.collapsed) return `${n.label}/  ·  ${n.fileCount ?? 0} arq.`;
+export function displayLabel(n: ViewNode, files: (count: number) => string): string {
+  if (n.collapsed) return `${n.label}/  ·  ${files(n.fileCount ?? 0)}`;
   if (n.kind === 'file' && n.expandable && !n.expanded) return `${n.label}  +`;
   return n.label;
 }
 
-/** Largura estimada pelo tamanho do rótulo (o layout ELK usa o tamanho real do nó). */
 /**
  * Largura estimada pelo tamanho do rótulo. Calculada uma vez ao criar o nó (vai em `data.w`):
  * uma função no estilo seria reavaliada a cada recálculo, caro com milhares de nós.

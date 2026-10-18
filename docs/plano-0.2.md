@@ -33,6 +33,7 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 
 - ✅ Seleção de origem e destino e o **menor caminho** pelas chamadas, imports e herança, desenhado no mapa com as evidências de cada passo.
 - ✅ Lista dos caminhos alternativos (até N).
+- ✅ Visão "só o caminho": o mapa mostra apenas os passos da opção escolhida (e as pastas/arquivos que os contêm), legível mesmo quando os passos estão em pastas distantes; uma caixa volta ao mapa inteiro.
 
 ### 5. Ao vivo: modo `--watch`
 

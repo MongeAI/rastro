@@ -85,6 +85,7 @@ const pt = {
     showMinimap: 'Mostrar minimapa (M)',
     hideMinimap: 'Ocultar minimapa (M)',
     breadcrumb: 'Onde fica',
+    fileCount: (count: number) => `${count} arq.`,
   },
   palette: {
     title: 'Paleta de comandos',
@@ -318,6 +319,7 @@ const pt = {
     none: 'Nenhum caminho comprovado liga essas duas entidades (considerando chamadas, imports e herança resolvidos).',
     option: (i: number, steps: number) => `Opção ${i} · ${n(steps, 'passo', 'passos')}`,
     swap: 'Inverter',
+    onlyPath: 'Mostrar só o caminho no mapa',
     close: 'Fechar caminho',
   },
   insights: {
@@ -457,6 +459,7 @@ const en: Messages = {
     showMinimap: 'Show minimap (M)',
     hideMinimap: 'Hide minimap (M)',
     breadcrumb: 'Where it lives',
+    fileCount: (count) => n(count, 'file', 'files'),
   },
   palette: {
     title: 'Command palette',
@@ -689,6 +692,7 @@ const en: Messages = {
     none: 'No proven path connects these two entities (considering resolved calls, imports and inheritance).',
     option: (i, steps) => `Option ${i} · ${n(steps, 'step', 'steps')}`,
     swap: 'Swap',
+    onlyPath: 'Show only the path on the map',
     close: 'Close path',
   },
   insights: {

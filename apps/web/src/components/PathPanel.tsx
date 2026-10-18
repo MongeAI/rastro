@@ -14,6 +14,9 @@ interface Props {
   editor: EditorId;
   onActive(i: number): void;
   onNavigate(id: string): void;
+  /** O mapa mostra só os caminhos (em vez do mapa inteiro com o resto apagado). */
+  pathOnly: boolean;
+  onPathOnly(value: boolean): void;
   onSwap(): void;
   onClose(): void;
 }
@@ -62,6 +65,16 @@ export function PathPanel(p: Props) {
             ⇄ {t.paths.swap}
           </button>
         </div>
+        {p.result.paths.length > 0 && (
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={p.pathOnly}
+              onChange={(e) => p.onPathOnly(e.target.checked)}
+            />
+            {t.paths.onlyPath}
+          </label>
+        )}
       </header>
 
       {p.result.reversed && <div className="callout cycle">{t.paths.reversed}</div>}

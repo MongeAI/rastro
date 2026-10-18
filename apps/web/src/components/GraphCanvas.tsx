@@ -462,7 +462,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
 
     /** Atualiza um nó que já está no mapa ou o adiciona perto do pai ou de um vizinho. */
     const syncNode = (n: ViewNode) => {
-      const display = displayLabel(n);
+      const display = displayLabel(n, i18nRef.current.t.stage.fileCount);
       const classes = [
         n.inCycle && 'cycle',
         n.expandable && !n.expanded && 'expandable',
@@ -596,7 +596,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     lastFitKey.current = props.fitKey;
     if (structural || fit) runLayout(fit || firstLayout.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.view, props.fitKey]);
+  }, [props.view, props.fitKey, i18n.lang]);
 
   // trocar o tipo de layout reorganiza tudo
   const lastLayout = useRef(props.layout);

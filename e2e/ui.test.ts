@@ -207,6 +207,14 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     const steps = await texts(page, '.path-option.on .path-steps .rel-name');
     expect(steps[0]).toBe('main');
     expect(steps[steps.length - 1]).toBe('UserService.create');
+    // o mapa mostra só o caminho; desmarcando, volta o mapa inteiro
+    await waitForMap(page);
+    const count = async () =>
+      Number(/^(\d+) nós/.exec((await text(page, '.stage-status')) ?? '')?.[1]);
+    const onlyPath = await count();
+    await page.click('.details-head .toggle input');
+    await waitForMap(page);
+    expect(await count()).toBeGreaterThan(onlyPath);
     expect(problems).toEqual([]);
     await page.close();
   });
