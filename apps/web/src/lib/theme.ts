@@ -13,6 +13,8 @@ export interface Palette {
   cycle: string;
   /** Mudanças do git: o que mudou e o que é afetado. */
   changed: string;
+  /** Regras de arquitetura: o que quebra uma regra. */
+  violation: string;
   unresolved: string;
   node: Record<NodeKind, string>;
   edge: Record<EdgeKind, string>;
@@ -33,6 +35,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     selection: '#ffffff',
     cycle: '#fb923c',
     changed: '#4ade80',
+    violation: '#f87171',
     unresolved: '#f87171',
     node: {
       module: '#71717a',
@@ -63,6 +66,7 @@ export const PALETTES: Record<ThemeName, Palette> = {
     selection: '#000000',
     cycle: '#ea580c',
     changed: '#16a34a',
+    violation: '#dc2626',
     unresolved: '#dc2626',
     node: {
       module: '#a1a1aa',

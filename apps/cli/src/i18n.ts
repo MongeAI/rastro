@@ -38,6 +38,9 @@ Uso:
   rastro impact <caminho|grafo.json>
                                     o impacto das mudanças do git: o que mudou, quem pode ser
                                     afetado, rotas e testes (texto, markdown ou json)
+  rastro check [caminho]            confere as regras de arquitetura (rastro.rules.json):
+                                    quem pode depender de quem, sem ciclos; com --changes ou
+                                    --since, só o que a mudança introduziu reprova
   rastro mcp [caminho]              servidor MCP (stdio) para agentes de IA consultarem o
                                     grafo: Claude Code, Cursor, VS Code... (padrão: a pasta
                                     do projeto do Claude Code, ou a pasta atual)
@@ -47,9 +50,13 @@ Opções:
                             o arquivo gerado (padrão: saída padrão; html: <projeto>.rastro.html)
       --stdout              (analyze) escreve o JSON na saída padrão
   -f, --format <formato>    (export) mermaid, dot, graphml, json ou html
-                            (impact) text (padrão), markdown ou json
+                            (impact, check) text (padrão), markdown ou json
       --tests               (impact) só os arquivos de teste afetados, um por linha
-      --link <url>          (impact) base dos links arquivo:linha no markdown, ex.:
+      --rules <arquivo>     arquivo de regras de arquitetura (padrão: rastro.rules.json
+                            na pasta analisada)
+      --init                (check) cria o rastro.rules.json com as regras que o projeto
+                            já cumpre (camadas, ciclos, testes)
+      --link <url>          (impact, check) base dos links arquivo:linha no markdown, ex.:
                             https://github.com/org/repo/blob/<commit>
       --level <nível>       (export) modules, files (padrão) ou symbols
       --folder <pasta>      (export) só esta pasta, ex.: src/services
@@ -196,6 +203,58 @@ servidor MCP só fala pelo stdio.
       `--link precisa ser um endereço http:// ou https:// (recebido: "${value}").`,
     oddTest: (file: string) =>
       `arquivo de teste com caracteres de controle no nome ficou de fora: ${file}`,
+  },
+  rules: {
+    title: 'Regras de arquitetura',
+    ruleCount: (count: number) => n(count, 'regra', 'regras'),
+    violations: (count: number) => n(count, 'violação', 'violações'),
+    newViolations: (count: number) => n(count, 'violação nova', 'violações novas'),
+    cycles: (count: number) => n(count, 'ciclo', 'ciclos'),
+    warnings: (count: number) => n(count, 'aviso', 'avisos'),
+    warning: 'aviso',
+    existing: (count: number) =>
+      count === 1
+        ? '1 já existia antes (não reprova)'
+        : `${count} já existiam antes (não reprovam)`,
+    noNew: 'nenhuma violação nova',
+    allPassed: (count: number) =>
+      count === 1 ? 'a regra é cumprida' : `todas as ${count} regras são cumpridas`,
+    noRules: 'o arquivo não tem nenhuma regra',
+    noFiles: 'nenhum arquivo analisado casa com "from"/"except": o padrão está certo?',
+    possibleTitle: (count: number) => n(count, 'violação possível', 'violações possíveis'),
+    possibleHint:
+      'possível = por uma chamada não resolvida (interface ou método abstrato) que pode ir para lá; nunca reprova.',
+    kind: { imports: 'import', calls: 'chamada', extends: 'herança' },
+    typeOnly: 'só tipos',
+    package: 'pacote',
+    times: (count: number) => `(${count} vezes)`,
+    cycleOf: (size: number) => `ciclo entre ${size} arquivos`,
+    invalid: (source: string) => `${source} tem problemas; nenhuma regra foi conferida:`,
+    notFound: (file: string) => `arquivo de regras não encontrado: ${file}`,
+    noRulesFile: (dir: string) =>
+      `nenhum rastro.rules.json em ${dir}. Crie um com "rastro check --init" (as regras que o projeto já cumpre) ou aponte outro arquivo com --rules.`,
+    notRegular: (file: string) =>
+      `${file} não é um arquivo comum (links simbólicos não são seguidos; use --rules para apontar o arquivo).`,
+    tooLarge: (file: string) => `${file} passa de 1 MB.`,
+    unreadable: (file: string, reason: string) => `não foi possível ler ${file}: ${reason}`,
+    ignored: (reason: string) => `regras de arquitetura não conferidas: ${reason}`,
+    initExists: (file: string) => `${file} já existe: edite-o (ou apague-o para gerar de novo).`,
+    initWritten: (file: string, count: number) =>
+      `${file} criado com ${n(count, 'regra', 'regras')} que o projeto já cumpre:`,
+    initEmpty: (file: string) =>
+      `${file} criado sem regras: o projeto não tem camadas claras nem fica livre de ciclos hoje. Escreva as suas (veja o README).`,
+    initNext:
+      'Confira com "rastro check". No CI, a Action do Rastro aponta (e reprova) as violações que um pull request introduz.',
+    layerName: (folder: string, above: string[]) =>
+      `${folder} não depende de ${above.length === 1 ? above[0] : `${above.slice(0, -1).join(', ')} nem ${above[above.length - 1]}`}`,
+    noCyclesName: 'Sem ciclos de importação',
+    testsName: 'O código não depende dos testes',
+    summaryLine: (errors: number, warnings: number) =>
+      `regras: ${errors ? n(errors, 'violação', 'violações') : 'nenhuma violação'}${warnings ? ` · ${n(warnings, 'aviso', 'avisos')}` : ''} (rastro check para os detalhes)`,
+    initNotWithChanges: '--init não se combina com --changes ou --since.',
+    initNotWithFormat: '--init não se combina com --format.',
+    badFormat: (value: string) =>
+      `formato desconhecido para check: "${value}". Use text, markdown ou json.`,
   },
   serve: {
     webNotBuilt:
@@ -378,6 +437,9 @@ Usage:
   rastro impact <path|graph.json>
                                     the impact of the git changes: what changed, what could be
                                     affected, routes and tests (text, markdown or json)
+  rastro check [path]               check the architecture rules (rastro.rules.json): who
+                                    may depend on whom, no cycles; with --changes or --since,
+                                    only what the change introduced fails
   rastro mcp [path]                 MCP server (stdio) so AI agents can query the graph:
                                     Claude Code, Cursor, VS Code... (default: the Claude Code
                                     project folder, or the current folder)
@@ -387,9 +449,13 @@ Options:
                             the output file (default: standard output; html: <project>.rastro.html)
       --stdout              (analyze) write the JSON to standard output
   -f, --format <format>     (export) mermaid, dot, graphml, json or html
-                            (impact) text (default), markdown or json
+                            (impact, check) text (default), markdown or json
       --tests               (impact) only the affected test files, one per line
-      --link <url>          (impact) base for file:line links in markdown, e.g.
+      --rules <file>        architecture rules file (default: rastro.rules.json in the
+                            analyzed folder)
+      --init                (check) create rastro.rules.json with the rules the project
+                            already follows (layers, cycles, tests)
+      --link <url>          (impact, check) base for file:line links in markdown, e.g.
                             https://github.com/org/repo/blob/<commit>
       --level <level>       (export) modules, files (default) or symbols
       --folder <path>       (export) only this folder, e.g. src/services
@@ -545,6 +611,55 @@ MCP server only talks over stdio.
     linkNeedsMarkdown: '--link only applies to --format markdown.',
     badLink: (value) => `--link must be an http:// or https:// address (got: "${value}").`,
     oddTest: (file) => `test file left out because its name has control characters: ${file}`,
+  },
+  rules: {
+    title: 'Architecture rules',
+    ruleCount: (count: number) => n(count, 'rule', 'rules'),
+    violations: (count: number) => n(count, 'violation', 'violations'),
+    newViolations: (count: number) => n(count, 'new violation', 'new violations'),
+    cycles: (count: number) => n(count, 'cycle', 'cycles'),
+    warnings: (count: number) => n(count, 'warning', 'warnings'),
+    warning: 'warning',
+    existing: (count: number) => `${count} already existed (not failing)`,
+    noNew: 'no new violations',
+    allPassed: (count: number) => (count === 1 ? 'the rule passes' : `all ${count} rules pass`),
+    noRules: 'the file has no rules',
+    noFiles: 'no analyzed file matches "from"/"except": is the pattern right?',
+    possibleTitle: (count: number) => n(count, 'possible violation', 'possible violations'),
+    possibleHint:
+      'possible = through an unresolved call (interface or abstract method) that may go there; never fails.',
+    kind: { imports: 'import', calls: 'call', extends: 'inheritance' },
+    typeOnly: 'types only',
+    package: 'package',
+    times: (count: number) => `(${count} times)`,
+    cycleOf: (size: number) => `cycle among ${size} files`,
+    invalid: (source: string) => `${source} has problems; no rule was checked:`,
+    notFound: (file: string) => `rules file not found: ${file}`,
+    noRulesFile: (dir: string) =>
+      `no rastro.rules.json in ${dir}. Create one with "rastro check --init" (the rules the project already follows) or point to another file with --rules.`,
+    notRegular: (file: string) =>
+      `${file} is not a regular file (symbolic links are not followed; use --rules to point to the file).`,
+    tooLarge: (file: string) => `${file} is larger than 1 MB.`,
+    unreadable: (file: string, reason: string) => `could not read ${file}: ${reason}`,
+    ignored: (reason: string) => `architecture rules not checked: ${reason}`,
+    initExists: (file: string) =>
+      `${file} already exists: edit it (or delete it to generate it again).`,
+    initWritten: (file: string, count: number) =>
+      `${file} created with ${n(count, 'rule', 'rules')} the project already follows:`,
+    initEmpty: (file: string) =>
+      `${file} created without rules: the project has no clear layers and is not free of cycles today. Write your own (see the README).`,
+    initNext:
+      'Check with "rastro check". In CI, the Rastro Action points out (and fails) the violations a pull request introduces.',
+    layerName: (folder: string, above: string[]) =>
+      `${folder} does not depend on ${above.length === 1 ? above[0] : `${above.slice(0, -1).join(', ')} or ${above[above.length - 1]}`}`,
+    noCyclesName: 'No import cycles',
+    testsName: 'Code does not depend on tests',
+    summaryLine: (errors: number, warnings: number) =>
+      `rules: ${errors ? n(errors, 'violation', 'violations') : 'no violations'}${warnings ? ` · ${n(warnings, 'warning', 'warnings')}` : ''} (rastro check for details)`,
+    initNotWithChanges: '--init cannot be combined with --changes or --since.',
+    initNotWithFormat: '--init cannot be combined with --format.',
+    badFormat: (value: string) =>
+      `unknown format for check: "${value}". Use text, markdown or json.`,
   },
   serve: {
     webNotBuilt:

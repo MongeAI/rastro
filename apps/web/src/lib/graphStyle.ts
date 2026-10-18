@@ -238,6 +238,29 @@ export function buildStyle(
       style: { opacity: 0.9, 'line-color': p.changed, 'target-arrow-color': p.changed },
     },
     {
+      selector: 'node.violation',
+      style: {
+        'border-width': 3,
+        'border-color': p.violation,
+        'border-style': 'solid',
+        'underlay-color': p.violation,
+        'underlay-opacity': 0.16,
+        'underlay-padding': 5,
+        'z-index': 22,
+      },
+    },
+    {
+      selector: 'edge.violation',
+      style: {
+        width: 3.2,
+        opacity: 1,
+        'line-color': p.violation,
+        'target-arrow-color': p.violation,
+        'line-style': 'solid',
+        'z-index': 38,
+      },
+    },
+    {
       selector: 'node.path',
       style: { 'border-width': 2.5, 'border-color': p.selection, 'z-index': 25 },
     },

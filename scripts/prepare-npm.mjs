@@ -22,4 +22,11 @@ const readme = fs
   .replace(/href="(?!https?:|#)([^"]+)"/g, (_, p) => `href="${repo}/blob/main/${p}"`);
 fs.writeFileSync(new URL('README.md', cli), readme);
 fs.copyFileSync(new URL('LICENSE', root), new URL('LICENSE', cli));
-console.log('README e LICENSE preparados para o pacote npm.');
+// os JSON Schemas vão no pacote: o "$schema" do rastro.rules.json aponta para o unpkg
+fs.mkdirSync(new URL('schema/', cli), { recursive: true });
+for (const schema of ['rastro-graph.schema.json', 'rastro-rules.schema.json'])
+  fs.copyFileSync(
+    new URL(`packages/core/schema/${schema}`, root),
+    new URL(`schema/${schema}`, cli),
+  );
+console.log('README, LICENSE e JSON Schemas preparados para o pacote npm.');

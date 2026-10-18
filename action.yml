@@ -1,7 +1,8 @@
 name: Rastro impact
 description: >-
-  Comments on every pull request what the change affects (proven calls, imports, routes and tests to run)
-  and attaches an offline interactive map. Static analysis only: no code from the repository is executed.
+  Comments on every pull request what the change affects (proven calls, imports, routes and tests to run),
+  checks your architecture rules (rastro.rules.json) and attaches an offline interactive map. Static
+  analysis only: no code from the repository is executed.
 author: MongeAI
 branding:
   icon: git-pull-request
@@ -29,6 +30,11 @@ inputs:
   artifact-name:
     description: Name of the report artifact (use a different one per call when running the action more than once in a workflow).
     default: rastro-report
+  fail-on-violations:
+    description: >-
+      Fail the job when the pull request introduces a violation of an architecture rule
+      (rastro.rules.json in the analyzed path; "error" rules only). The comment is posted first.
+    default: 'true'
   lang:
     description: Language of the comment and report (en or pt).
     default: en
@@ -52,6 +58,10 @@ outputs:
   broken:
     description: How many references to what changed no longer resolve (possibly broken by the change).
     value: ${{ steps.impact.outputs.broken }}
+  violations:
+    description: >-
+      How many architecture rule violations the pull request introduces (0 without rastro.rules.json).
+    value: ${{ steps.impact.outputs.violations }}
   markdown:
     description: Path of the Markdown report.
     value: ${{ steps.impact.outputs.markdown }}
@@ -110,3 +120,16 @@ runs:
         RASTRO_LANG: ${{ inputs.lang }}
         RASTRO_AUTHOR: ${{ inputs.comment-author }}
       run: bash "$GITHUB_ACTION_PATH/scripts/action/comment.sh"
+
+    # por último: o comentário (com as violações) sai antes de o job falhar
+    - if: inputs.fail-on-violations == 'true' && steps.impact.outputs.failing != '0'
+      shell: bash
+      env:
+        RASTRO_FAILING: ${{ steps.impact.outputs.failing }}
+      run: |
+        if [ "$RASTRO_FAILING" = "invalid" ]; then
+          echo "::error title=Rastro::rastro.rules.json has problems, so the architecture rules were not checked. See the Rastro comment or the job summary."
+        else
+          echo "::error title=Rastro::This pull request introduces ${RASTRO_FAILING} architecture rule violation(s). See the Rastro comment or the job summary."
+        fi
+        exit 1

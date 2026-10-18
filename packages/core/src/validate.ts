@@ -65,6 +65,10 @@ const VALIDATION_TEXTS = {
     pt: (p) => `${p.field} inválido.`,
     en: (p) => `${p.field} is invalid.`,
   },
+  'invalid-rules': {
+    pt: () => 'rules inválido (precisa de source e, opcionalmente, config ou issues).',
+    en: () => 'rules is invalid (it needs source and, optionally, config or issues).',
+  },
   'invalid-changes': {
     pt: () => 'changes inválido (precisa de base, baseLabel, includesUntracked e files).',
     en: () => 'changes is invalid (it needs base, baseLabel, includesUntracked and files).',
@@ -278,6 +282,20 @@ export function graphIssues(
             (!Array.isArray(f.deletionsAt) || !f.deletionsAt.every(isPositiveInt)))
         )
           fail('invalid-item', { field: `changes.files[${i}]` });
+  }
+  if (input.rules !== undefined) {
+    const rules = input.rules;
+    if (
+      !isObject(rules) ||
+      typeof rules.source !== 'string' ||
+      (rules.config !== undefined && !isObject(rules.config)) ||
+      (rules.issues !== undefined &&
+        (!Array.isArray(rules.issues) ||
+          !rules.issues.every(
+            (issue) => isObject(issue) && typeof issue.code === 'string' && isObject(issue.params),
+          )))
+    )
+      fail('invalid-rules');
   }
   if (!isObject(input.project) || !Array.isArray(input.project.languages))
     fail('not-list', { field: 'project.languages' });

@@ -304,6 +304,63 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     }
   });
 
+  it('regras de arquitetura: aba Regras, violação em vermelho no mapa e ao vivo', async () => {
+    const root = tmp('rastro-e2e-rules-');
+    const write = (rel: string, content: string) => {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), content);
+    };
+    write('src/db/client.ts', 'export function query(sql: string) {\n  return sql;\n}\n');
+    write(
+      'src/ui/page.ts',
+      "import { query } from '../db/client';\n\nexport function render() {\n  return query('x');\n}\n",
+    );
+    const rules = (deny: string) =>
+      JSON.stringify({
+        rules: [
+          { name: 'UI sem banco', from: 'src/ui', deny, because: 'Use os serviços.' },
+          { name: 'Sem ciclos', noCycles: true },
+        ],
+      });
+    write('rastro.rules.json', rules('src/db'));
+    const run = await startRastro([root, '--watch', '-o', path.join(graphOut, 'rules.json')]);
+    try {
+      const { page, problems } = await openPage(browser, run.url);
+      const tab = await page.$('xpath/.//div[@role="tablist"]/button[contains(., "Regras")]');
+      expect(tab).toBeTruthy();
+      expect(await page.evaluate((el) => el!.textContent, tab)).toMatch(/^Regras\s*1$/);
+      await tab!.click();
+      await page.waitForSelector('.rule-violation');
+      expect(await text(page, '.details-name')).toBe('1 violação');
+      expect(await texts(page, '.rule-name')).toEqual(['UI sem banco', 'Sem ciclos']);
+      expect(await text(page, '.rule-violation .rel-name')).toBe(
+        'src/ui/page.ts → src/db/client.ts',
+      );
+      expect(await text(page, '.rule-violation .rel-loc')).toContain('src/ui/page.ts:1');
+      // a dependência proibida fica vermelha no mapa
+      const red = await cyEval(page, (cy) => cy.edges('.violation').length);
+      expect(red).toBeGreaterThan(0);
+      // ao vivo: trocar a regra atualiza a aba sem recarregar
+      write('rastro.rules.json', rules('src/outra'));
+      await page.waitForFunction(() => document.querySelectorAll('.rule-violation').length === 0, {
+        timeout: 20_000,
+      });
+      expect(await text(page, '.details-name')).toBe('As 2 regras são cumpridas');
+      write('rastro.rules.json', rules('src/db'));
+      await page.waitForSelector('.rule-violation', { timeout: 20_000 });
+      // a violação leva à entidade onde ela aparece
+      await page.click('.rule-violation');
+      await page.waitForFunction(() => !document.querySelector('[role="tablist"]'), {
+        timeout: 5_000,
+      });
+      expect(['page.ts', 'render']).toContain(await text(page, '.details-name'));
+      expect(problems).toEqual([]);
+      await page.close();
+    } finally {
+      await run.stop();
+    }
+  });
+
   it('--watch: o mapa atualiza ao salvar, sem recarregar', async () => {
     const root = tmp('rastro-e2e-watch-');
     fs.writeFileSync(path.join(root, 'a.ts'), 'export function alpha() {\n  return 1;\n}\n');

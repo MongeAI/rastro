@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   graphIssues,
+  nodeId,
   validateGraph,
   validationText,
   type EdgeKind,
@@ -9,12 +10,16 @@ import {
   type RastroGraph,
 } from '@rastro/core';
 import {
+  checkRules,
   computeChangeImpact,
   computeView,
   findPaths,
   GraphIndex,
+  graphRules,
   groupableModules,
   initialOpenModules,
+  type RulesCheck,
+  type RuleViolation,
 } from '@rastro/graph';
 import { ChangesPanel } from './components/ChangesPanel';
 import { CommandPalette, type PaletteAction } from './components/CommandPalette';
@@ -46,6 +51,7 @@ import {
 import { Insights } from './components/Insights';
 import { Overview } from './components/Overview';
 import { PathPanel } from './components/PathPanel';
+import { RulesPanel } from './components/RulesPanel';
 import { Search } from './components/Search';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { clearSourceCache } from './components/SourceView';
@@ -261,6 +267,16 @@ function Loader({ onLang }: { onLang(lang: Lang): void }) {
 const level0 = (groupable: number, files: number): Level =>
   groupable > 3 && files > 60 ? 'modules' : 'files';
 
+type PanelTab = 'summary' | 'insights' | 'changes' | 'rules';
+
+/** Contador da aba Regras: violações (vermelho quando há erros) ou "!" para um arquivo inválido. */
+function RulesCount({ check }: { check: RulesCheck | null }) {
+  if (!check) return <span className="tab-count bad">!</span>;
+  const total = check.errors + check.warnings;
+  if (!total) return null;
+  return <span className={`tab-count${check.errors ? ' bad' : ''}`}>{total}</span>;
+}
+
 function Explorer({
   graph,
   fromServer,
@@ -321,10 +337,11 @@ function Explorer({
   );
   const [history, setHistory] = useState<string[]>([]);
   // com mudanças do git, a aba "Mudanças" abre primeiro
-  const [panelTab, setPanelTab] = useState<'summary' | 'insights' | 'changes'>(() =>
+  const [panelTab, setPanelTab] = useState<PanelTab>(() =>
     graph.changes?.files.length ? 'changes' : 'summary',
   );
   const [highlightChanges, setHighlightChanges] = useState(true);
+  const [highlightRules, setHighlightRules] = useState(true);
   /** Caminho A → B: origem escolhida e, depois, o destino. */
   const [pathMode, setPathMode] = useState<{ from: string; to?: string } | null>(null);
   const [activePath, setActivePath] = useState(0);
@@ -781,6 +798,57 @@ function Explorer({
     );
     return { changed: [...changed], impacted: [...impacted] };
   }, [showChanges, changeImpact, view, index]);
+
+  // regras de arquitetura (rastro.rules.json): conferidas aqui, com o mesmo cálculo do
+  // `rastro check` (e as violações novas, quando o mapa tem as mudanças do git)
+  const rulesState = useMemo(() => {
+    const parsed = graphRules(graph);
+    if (!parsed || !graph.rules) return null;
+    return {
+      rules: graph.rules,
+      issues: parsed.issues,
+      check: parsed.rules ? checkRules(index, parsed.rules, graph.changes) : null,
+    };
+  }, [graph, index]);
+  const showRules = !!rulesState?.check && panelTab === 'rules' && highlightRules && !pathMode?.to;
+  const ruleHighlight = useMemo(() => {
+    if (!showRules || !rulesState?.check) return null;
+    const shown = new Set(view.nodes.map((n) => n.id));
+    const rep = (id: string) =>
+      shown.has(id) ? id : index.ancestors(id).find((a) => shown.has(a.id))?.id;
+    const nodes = new Set<string>();
+    const edges: string[] = [];
+    for (const outcome of rulesState.check.outcomes)
+      for (const v of outcome.violations) {
+        edges.push(...v.edges);
+        for (const id of [
+          nodeId.file(v.from),
+          v.package ? nodeId.package(v.to) : nodeId.file(v.to),
+        ]) {
+          const shownId = rep(id);
+          if (shownId) nodes.add(shownId);
+        }
+      }
+    return { nodes: [...nodes], edges };
+  }, [showRules, rulesState, view, index]);
+  // ao abrir a aba (não a cada nova análise do --watch), o mapa enquadra o que quebra regras
+  const rulesShown = useRef(false);
+  useEffect(() => {
+    const was = rulesShown.current;
+    rulesShown.current = showRules;
+    if (was || !showRules || !rulesState?.check) return;
+    const ids = rulesState.check.outcomes
+      .flatMap((o) => o.violations.map((v) => nodeId.file(v.from)))
+      .filter((id) => index.node(id))
+      .slice(0, 60);
+    if (ids.length) setCenterRequest((r) => ({ id: ids[0]!, seq: (r?.seq ?? 0) + 1, fitIds: ids }));
+  }, [showRules, rulesState, index]);
+  /** Abre a entidade onde a violação aparece (a origem da primeira relação). */
+  const openViolation = (v: RuleViolation) => {
+    const edge = v.edges.length ? index.edges.get(v.edges[0]!) : undefined;
+    navigate(edge?.source ?? nodeId.file(v.from));
+  };
+
   // o que mudou (e o que é afetado diretamente) aparece no mapa quando a aba está aberta
   // só quando a aba (ou o destaque) é aberta, não a cada nova análise do --watch
   const changesShown = useRef(false);
@@ -807,7 +875,7 @@ function Explorer({
   const paletteActions = (): PaletteAction[] => {
     const g = t.palette.groups;
     const kw = t.palette.keywords;
-    const showPanel = (tab: 'summary' | 'insights' | 'changes') => {
+    const showPanel = (tab: PanelTab) => {
       setSelectedId(null);
       setSelectedEdgeId(null);
       setPathMode(null);
@@ -976,6 +1044,14 @@ function Explorer({
         group: g.panel,
         icon: <IconInfo />,
         run: () => showPanel('changes'),
+      });
+    if (rulesState)
+      actions.push({
+        id: 'rules',
+        label: t.palette.showRules,
+        group: g.panel,
+        icon: <IconInfo />,
+        run: () => showPanel('rules'),
       });
     actions.push(
       {
@@ -1149,6 +1225,7 @@ function Explorer({
           selectedEdgeId={selectedEdge ? selectedEdge.id : null}
           pathHighlight={pathHighlight}
           changeHighlight={changeHighlight}
+          ruleHighlight={ruleHighlight}
           highlightNeighbors={highlightNeighbors}
           minimap={minimap}
           fitKey={fitKey}
@@ -1387,9 +1464,13 @@ function Explorer({
         ) : (
           <>
             <div className="panel-tabs" role="tablist">
-              {(changeImpact
-                ? (['changes', 'summary', 'insights'] as const)
-                : (['summary', 'insights'] as const)
+              {(
+                [
+                  ...(changeImpact ? ['changes'] : []),
+                  'summary',
+                  'insights',
+                  ...(rulesState ? ['rules'] : []),
+                ] as PanelTab[]
               ).map((tab) => (
                 <button
                   key={tab}
@@ -1403,10 +1484,13 @@ function Explorer({
                     ? t.insights.tabSummary
                     : tab === 'insights'
                       ? t.insights.tabInsights
-                      : t.changes.tab}
+                      : tab === 'rules'
+                        ? t.rules.tab
+                        : t.changes.tab}
                   {tab === 'changes' && graph.changes && (
                     <span className="tab-count">{graph.changes.files.length}</span>
                   )}
+                  {tab === 'rules' && rulesState && <RulesCount check={rulesState.check} />}
                 </button>
               ))}
             </div>
@@ -1418,7 +1502,16 @@ function Explorer({
                 onHighlight={setHighlightChanges}
                 onNavigate={(id) => navigate(id)}
               />
-            ) : panelTab === 'summary' || panelTab === 'changes' ? (
+            ) : panelTab === 'rules' && rulesState ? (
+              <RulesPanel
+                rules={rulesState.rules}
+                issues={rulesState.issues}
+                check={rulesState.check}
+                highlight={highlightRules}
+                onHighlight={setHighlightRules}
+                onOpen={openViolation}
+              />
+            ) : panelTab !== 'insights' ? (
               <Overview graph={graph} index={index} onNavigate={(id) => navigate(id)} />
             ) : (
               <Insights index={index} onNavigate={(id) => navigate(id)} />

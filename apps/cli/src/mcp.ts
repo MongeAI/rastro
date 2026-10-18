@@ -59,7 +59,7 @@ export const INSTRUCTIONS = `Rastro is a static code graph of this JavaScript/Ty
 
 Prefer Rastro over grep for structural questions: "who calls X?", "what does X call?", "what breaks if I change X?", "how does A reach B?", "which routes and tests do my changes affect?". Grep is still better for literal text, comments and non-JS/TS files.
 
-Typical flow: rastro_overview to get oriented; rastro_search to find an entity; rastro_entity for its details (source: true adds the code); rastro_references for callers/callees/importers with evidence; rastro_impact before changing code (targets) or before committing (git changes, or since: "main"); rastro_path for chains between two entities; rastro_routes for HTTP endpoints.
+Typical flow: rastro_overview to get oriented; rastro_search to find an entity; rastro_entity for its details (source: true adds the code); rastro_references for callers/callees/importers with evidence; rastro_impact before changing code (targets) or before committing (git changes, or since: "main"); rastro_path for chains between two entities; rastro_routes for HTTP endpoints; rastro_check for the project's architecture rules (rastro.rules.json) — run it with changes: true before finishing a change, and fix new violations instead of working around them.
 
 Semantics: PROVEN = resolved by the type checker or an explicit framework rule, always with file:line evidence. POSSIBLE = an unresolved reference (call through an interface or abstract method, callback, dynamic call) with candidate targets; the real target is only known at runtime, so never present it as fact. Rastro never guesses: no proven relationship does not mean no use (reflection, string-based dispatch, dependency injection, code outside the analyzed folder).
 
@@ -107,6 +107,8 @@ const isId = (v: unknown): v is Id =>
 export interface McpServerOptions {
   project: LiveProject;
   trustGitConfig?: boolean;
+  /** `--rules <arquivo>` (caminho absoluto). */
+  rulesFile?: string;
   tools?: ToolDefinition[];
   /** Erros inesperados (stderr). */
   log?: (message: string) => void;
@@ -340,6 +342,7 @@ export class McpServer {
         snapshot,
         trustGitConfig: !!this.options.trustGitConfig,
         watchMode: project.watchMode,
+        ...(this.options.rulesFile ? { rulesFile: this.options.rulesFile } : {}),
       });
       return { content: [{ type: 'text', text }], isError: false };
     } catch (err) {
@@ -452,6 +455,8 @@ export interface RunMcpOptions {
   /** `--no-watch` desliga a observação de arquivos. */
   watch: boolean;
   trustGitConfig: boolean;
+  /** `--rules <arquivo>`: as regras de arquitetura (padrão: `rastro.rules.json` na raiz). */
+  rulesFile?: string;
 }
 
 /**
@@ -490,6 +495,7 @@ export async function runMcp(options: RunMcpOptions): Promise<void> {
   const server = new McpServer({
     project,
     trustGitConfig: options.trustGitConfig,
+    ...(options.rulesFile ? { rulesFile: path.resolve(options.rulesFile) } : {}),
     log: (text) => say(text),
   });
 

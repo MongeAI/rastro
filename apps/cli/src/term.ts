@@ -23,10 +23,10 @@ export function safeText(text: string): string {
   return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
 }
 
-/** Mostra o erro em vermelho e encerra com código 1. */
-export function fail(message: string): never {
+/** Mostra o erro em vermelho e encerra (código 1, ou o pedido). */
+export function fail(message: string, code = 1): never {
   process.stderr.write(`${red(t().errorPrefix)} ${safeText(message)}\n`);
-  process.exit(1);
+  process.exit(code);
 }
 
 /** Mostra a pasta pessoal como ~ (não expõe o nome do usuário em capturas, logs e relatórios). */

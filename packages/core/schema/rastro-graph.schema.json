@@ -205,6 +205,34 @@
         }
       }
     },
+    "rules": {
+      "description": "Architecture rules read from rastro.rules.json (see rastro-rules.schema.json).",
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "config": {
+          "type": "object"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "params"],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
     "changes": {
       "type": "object",
       "required": ["base", "baseLabel", "includesUntracked", "files"],

@@ -9,7 +9,13 @@ import {
 
 const IGNORED = new Set<string>(DEFAULT_EXCLUDED_DIRS);
 /** Arquivos de configuração que mudam a resolução de módulos. */
-const CONFIG_FILES = new Set(['package.json', 'tsconfig.json', 'jsconfig.json', '.gitignore']);
+const CONFIG_FILES = new Set([
+  'package.json',
+  'tsconfig.json',
+  'jsconfig.json',
+  '.gitignore',
+  'rastro.rules.json',
+]);
 
 /** O arquivo alterado importa para a análise? (código JS/TS ou configuração, fora de pastas ignoradas) */
 export function isRelevantChange(relative: string): boolean {

@@ -5,3 +5,4 @@ export * from './diagnostics.js';
 export * from './validate.js';
 export * from './version.js';
 export * from './compare.js';
+export * from './rules.js';

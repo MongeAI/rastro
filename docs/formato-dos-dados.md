@@ -18,9 +18,13 @@ O Rastro exporta um único arquivo JSON com todo o grafo. Ele é:
   "nodes": [ /* GraphNode */ ],
   "edges": [ /* GraphEdge */ ],
   "stats": { /* contagens e ciclos */ },
-  "diagnostics": [ /* avisos da análise */ ]
+  "diagnostics": [ /* avisos da análise */ ],
+  "changes": { /* opcional: mudanças do git (--changes, --since) */ },
+  "rules": { /* opcional: regras de arquitetura (rastro.rules.json) */ }
 }
 ```
+
+`rules` existe quando a pasta analisada tem um `rastro.rules.json` (ou foi passado `--rules`): `source` é o caminho do arquivo (relativo à raiz quando está dentro dela), `config` o conteúdo quando é válido e `issues` os problemas (`{ code, params }`, texto em `ruleIssueText`) quando não é. As violações não são gravadas: a interface, o `rastro check`/`impact` e o MCP as calculam do grafo com `checkRules` (o mesmo cálculo em todos). O formato do arquivo de regras está em `schema/rastro-rules.schema.json`.
 
 Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`. Linhas e colunas começam em **1**.
 

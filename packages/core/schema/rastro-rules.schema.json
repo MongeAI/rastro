@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MongeAI/rastro/blob/main/packages/core/schema/rastro-rules.schema.json",
+  "title": "Rastro architecture rules (rastro.rules.json)",
+  "description": "Who may depend on whom in the project. Checked by `rastro check`, the Rastro GitHub Action, the map and `rastro mcp`. Only proven relationships (resolved imports, calls and inheritance, with file and line) violate a rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rules"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A path relative to the analyzed folder: `*` (anything but `/`), `**` (any number of folders), `?` and `{a,b}`; brackets are literal (`app/[id]/page.tsx`). Without wildcards it is the file or everything inside the folder (`src/db` = `src/db/**`). Packages start with `pkg:` (`pkg:pg`, `pkg:@aws-sdk/*`, `pkg:node:*` for Node.js built-ins)."
+    },
+    "patterns": {
+      "oneOf": [
+        { "$ref": "#/$defs/pattern" },
+        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/pattern" } }
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A short name, shown with every violation. Unique in the file."
+        },
+        "from": {
+          "$ref": "#/$defs/patterns",
+          "description": "Files the rule applies to (default: all). Project files only (no `pkg:`)."
+        },
+        "except": {
+          "$ref": "#/$defs/patterns",
+          "description": "Files of `from` left out (for example, tests)."
+        },
+        "deny": {
+          "$ref": "#/$defs/patterns",
+          "description": "Files and packages the `from` files must not depend on."
+        },
+        "allow": {
+          "$ref": "#/$defs/patterns",
+          "description": "The only files and packages the `from` files may depend on (besides each other)."
+        },
+        "noCycles": {
+          "type": "boolean",
+          "description": "No import cycle among the `from` files (type-only imports never count)."
+        },
+        "ignoreTypeImports": {
+          "type": "boolean",
+          "description": "`deny`/`allow`: type-only imports (`import type`) do not count."
+        },
+        "severity": {
+          "enum": ["error", "warning"],
+          "description": "`error` (default) fails `rastro check` and the Action; `warning` only reports."
+        },
+        "because": {
+          "type": "string",
+          "description": "Why, or what to do instead (shown with the violations)."
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["deny"],
+          "not": {
+            "anyOf": [
+              { "required": ["allow"] },
+              { "required": ["noCycles"], "properties": { "noCycles": { "const": true } } }
+            ]
+          }
+        },
+        {
+          "required": ["allow"],
+          "not": {
+            "anyOf": [
+              { "required": ["deny"] },
+              { "required": ["noCycles"], "properties": { "noCycles": { "const": true } } }
+            ]
+          }
+        },
+        {
+          "required": ["noCycles"],
+          "properties": { "noCycles": { "const": true } },
+          "not": {
+            "anyOf": [
+              { "required": ["deny"] },
+              { "required": ["allow"] },
+              { "required": ["ignoreTypeImports"] }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

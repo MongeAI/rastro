@@ -102,6 +102,10 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "impacted=$(jq -r '.summary.impacted' "$out/impact.json")"
     echo "changed=$(jq -r '.summary.changed' "$out/impact.json")"
     echo "broken=$(jq -r '.summary.broken' "$out/impact.json")"
+    # violações novas de regras de arquitetura (todas) e as que reprovam (severidade error)
+    echo "violations=$(jq -r '.summary.violations // 0' "$out/impact.json")"
+    # arquivo de regras com problemas também reprova (como uma configuração de lint quebrada)
+    echo "failing=$(jq -r 'if .rules.issues then "invalid" else (.rules.summary.introduced.errors // 0) end' "$out/impact.json")"
     delimiter="RASTRO_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
     echo "tests<<$delimiter"
     cat "$out/tests.txt"

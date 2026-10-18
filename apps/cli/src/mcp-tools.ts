@@ -6,24 +6,33 @@ import {
   EDGE_KINDS,
   NODE_KIND_LABELS_EN,
   NODE_KINDS,
+  parseRules,
   RASTRO_VERSION,
+  ruleIssueText,
   type ChangedFile,
+  type ChangeSet,
   type EdgeKind,
   type GraphEdge,
   type GraphNode,
   type NodeKind,
+  type Rule,
+  type RuleIssue,
   type UnresolvedReason,
 } from '@rastro/core';
 import {
+  checkRules,
   findPathBetween,
   findPaths,
   findPossiblePath,
   routesAndTests,
+  suggestRules,
   type BrokenReference,
   type GraphIndex,
   type ImpactEntry,
   type PathResult,
+  type RuleViolation,
 } from '@rastro/graph';
+import { readRules } from './check.js';
 import { collectChanges } from './git.js';
 import { getLang, setLang } from './i18n.js';
 import { changesWithImpact, mdCode } from './impact.js';
@@ -146,6 +155,8 @@ export interface ToolContext {
   trustGitConfig: boolean;
   /** Observação de arquivos: `live`, `polling` ou `off` (`--no-watch`). */
   watchMode: 'live' | 'polling' | 'off';
+  /** `rastro mcp --rules <arquivo>` (caminho absoluto); sem ele, `rastro.rules.json` na raiz. */
+  rulesFile?: string;
 }
 
 export interface ToolDefinition {
@@ -1177,6 +1188,24 @@ function overview(_args: Args, ctx: ToolContext): string {
   }
   const branch = gitBranch(graph.project.root);
   if (branch) out.push(`Git branch: ${tick(branch)}`);
+  let rules: LoadedRules | undefined;
+  try {
+    rules = loadRules(ctx);
+  } catch {
+    rules = undefined;
+  }
+  if (rules) {
+    const result = rules.rules ? checkRules(index, rules.rules) : undefined;
+    out.push(
+      `Architecture rules: ${tick(rules.source, 300)} — ${
+        !result
+          ? 'the file has problems'
+          : result.errors + result.warnings
+            ? `${plural(result.errors, 'violation')}${result.warnings ? `, ${plural(result.warnings, 'warning')}` : ''}`
+            : `all ${plural(rules.rules!.length, 'rule')} pass`
+      } (details: \`rastro_check\`)`,
+    );
+  }
   out.push('', freshness(ctx));
   return out.toString();
 }
@@ -1679,6 +1708,8 @@ function impact(args: Args, ctx: ToolContext): string {
   let routes: GraphNode[];
   let tests: GraphNode[];
   let broken: BrokenReference[] = [];
+  /** Modo git: as mudanças (para conferir as regras de arquitetura). */
+  let gitScope: ChangeSet | undefined;
   let title: string;
   let summary: string;
   /** Seção "o que mudou" (só aparece no formato completo, depois das rotas e dos testes). */
@@ -1724,6 +1755,7 @@ function impact(args: Args, ctx: ToolContext): string {
         : `changes since ${tick(changes.baseLabel)} (merge base ${changes.base.slice(0, 10)}, including uncommitted and untracked files)`;
     title = `# Impact of ${label}`;
     if (!changes.files.length) return out.push(title, 'No changed files.').toString();
+    gitScope = changes;
     const result = changesWithImpact(index, changes);
     starts = result.changed;
     impacted = result.impact.impacted;
@@ -1808,6 +1840,24 @@ function impact(args: Args, ctx: ToolContext): string {
     maxLimit: 200,
     hint: '`format: "tests"` lists them all (with `offset`)',
   });
+  if (gitScope) {
+    const loaded = loadRules(ctx);
+    if (loaded && !loaded.rules)
+      out.push(
+        '',
+        `Architecture rules: ${tick(loaded.source, 300)} has problems — see \`rastro_check\`.`,
+      );
+    else if (loaded?.rules) {
+      const result = checkRules(index, loaded.rules, gitScope);
+      const fresh = (result.introduced?.errors ?? 0) + (result.introduced?.warnings ?? 0);
+      out.push(
+        '',
+        fresh
+          ? `**Architecture rules: ${plural(fresh, 'new violation')} introduced by these changes** — \`rastro_check\` with the same \`changes\`/\`since\` lists them with file:line.`
+          : 'Architecture rules: no new violation.',
+      );
+    }
+  }
   if (broken.length) {
     out.section(
       `Possibly broken by this change (${broken.length}; references to what changed that do not resolve in the current code — they may have been broken before)`,
@@ -1850,6 +1900,198 @@ function impact(args: Args, ctx: ToolContext): string {
   out.push(
     '',
     '_Unresolved references (callbacks, dynamic calls, untyped receivers) are not followed: something may depend on this without appearing here._',
+  );
+  return out.toString();
+}
+
+// ---- regras de arquitetura
+
+interface LoadedRules {
+  source: string;
+  rules?: Rule[];
+  issues: RuleIssue[];
+}
+
+/** As regras do projeto, lidas a cada chamada (editar o arquivo vale na hora, sem reanálise). */
+function loadRules(ctx: ToolContext): LoadedRules | undefined {
+  let file;
+  try {
+    file = inEnglish(() => readRules(ctx.snapshot.graph.project.root, ctx.rulesFile));
+  } catch (err) {
+    throw new ToolError(`Could not read the architecture rules: ${plain((err as Error).message)}`);
+  }
+  if (!file) return undefined;
+  if (file.issues) return { source: file.source, issues: file.issues };
+  return { source: file.source, ...parseRules(file.config) };
+}
+
+/** As mudanças do git pedidas (`changes: true` ou `since`), ou nenhuma. */
+function gitChanges(args: Args, ctx: ToolContext): ChangeSet | undefined {
+  const since = typeof args.since === 'string' ? args.since : undefined;
+  if (!since && args.changes !== true) return undefined;
+  try {
+    return inEnglish(() =>
+      collectChanges(ctx.snapshot.graph.project.root, {
+        ...(since ? { since } : {}),
+        trustConfig: ctx.trustGitConfig,
+      }),
+    );
+  } catch (err) {
+    throw new ToolError(`Could not read the git changes: ${plain((err as Error).message)}`);
+  }
+}
+
+const RULE_KIND_TEXT: Partial<Record<EdgeKind, string>> = {
+  imports: 'import',
+  calls: 'call',
+  extends: 'inheritance',
+};
+
+function violationLine(v: RuleViolation): string {
+  const isNew = v.introduced ? ' — **new**' : '';
+  if (v.cycle) {
+    const steps = v.cycle
+      .map((s) => tick(s.evidence ? `${s.file}:${s.evidence.line}` : s.file, 300))
+      .join(' → ');
+    const size =
+      v.cycleSize && v.cycleSize > v.cycle.length
+        ? ` (${v.cycleSize} files depend on each other in this cycle)`
+        : '';
+    return `cycle: ${steps} → ${tick(v.cycle[0]!.file, 300)}${size}${isNew}`;
+  }
+  const kinds = [
+    ...v.kinds.map((k) => RULE_KIND_TEXT[k] ?? k),
+    ...(v.typeOnly ? ['type-only'] : []),
+  ].join(', ');
+  const first = v.evidence[0];
+  const where = first
+    ? ` — ${tick(`${first.file}:${first.line}`, 300)}${first.snippet ? ` ${tick(first.snippet, 140)}` : ''}`
+    : '';
+  return `${tick(v.from, 300)} → ${tick(v.to, 300)}${v.package ? ' (package)' : ''} (${kinds})${where}${v.count > 1 ? ` (${v.count} sites)` : ''}${isNew}`;
+}
+
+/** Bloco de código cercado que nenhum texto do projeto consegue fechar. */
+function fenced(text: string, lang: string): string[] {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return [`${fence}${lang}`, text, fence];
+}
+
+function rulesTool(args: Args, ctx: ToolContext): string {
+  const { index } = ctx.snapshot;
+  const page = paged(args, 30, 200);
+  const out = new Out();
+  const loaded = loadRules(ctx);
+  if (!loaded) {
+    // sem regras: as que o código já cumpre hoje, para o agente propor o arquivo
+    const suggested = suggestRules(index, {
+      layer: (folder, above) => `${folder} does not depend on ${above.join(', ')}`,
+      noCycles: 'No import cycles',
+      tests: 'Code does not depend on tests',
+    });
+    out.push(
+      '# Architecture rules',
+      ctx.rulesFile
+        ? `No rules file at ${tick(ctx.rulesFile, 300)}.`
+        : 'The project has no `rastro.rules.json` at its root, so there are no architecture rules to check.',
+    );
+    if (!suggested.length) {
+      out.push(
+        'The code has no clear layering between its main folders and is not free of import cycles, so there is nothing to lock in automatically.',
+      );
+      return out.toString();
+    }
+    const json = JSON.stringify(
+      {
+        $schema: `https://unpkg.com/@mongeai/rastro@${RASTRO_VERSION}/schema/rastro-rules.schema.json`,
+        rules: suggested,
+      },
+      null,
+      2,
+    );
+    out.push(
+      '',
+      `Rules the code already follows today (derived from proven dependencies; all ${suggested.length} pass now). To adopt them, the user can run \`npx @mongeai/rastro check --init\`, or you can write this as \`rastro.rules.json\` at the project root — ask the user first: it becomes a team convention, enforced in CI by the Rastro GitHub Action.`,
+      '',
+      // o JSON já escapa os controles C0; os outros separadores de linha viram escapes JSON
+      ...fenced(
+        json.replace(
+          /[\u007f-\u009f\u2028\u2029]/g,
+          (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
+        ),
+        'json',
+      ),
+      '',
+      'Each rule: `name`, `from`/`except` (file patterns), and one of `deny` (patterns the files must not depend on), `allow` (the only ones they may depend on) or `noCycles: true`. Patterns: `*`, `**`, `?`, `{a,b}`, a folder path means everything inside it, and `pkg:<name>` for packages (`pkg:node:*` for Node.js built-ins). Optional: `severity` (`error`/`warning`), `because`, `ignoreTypeImports`.',
+    );
+    return out.toString();
+  }
+  if (!loaded.rules) {
+    out.push(
+      `# Architecture rules — ${tick(loaded.source, 300)}`,
+      'The rules file has problems, so no rule was checked:',
+    );
+    out.list(loaded.issues, (i) => plain(ruleIssueText(i, 'en')), { limit: 50 });
+    return out.toString();
+  }
+
+  const changes = gitChanges(args, ctx);
+  const result = checkRules(index, loaded.rules, changes);
+  const scope = changes
+    ? changes.baseLabel === 'HEAD'
+      ? 'the uncommitted changes'
+      : `the changes since ${tick(changes.baseLabel)}`
+    : undefined;
+  out.push(
+    `# Architecture rules — ${tick(loaded.source, 300)} (${plural(loaded.rules.length, 'rule')})`,
+  );
+  const failing = (severity: Rule['severity']) =>
+    result.outcomes.filter(
+      (o) => o.rule.severity === severity && o.violations.some((v) => !changes || v.introduced),
+    ).length;
+  if (changes && result.introduced) {
+    const fresh = result.introduced.errors + result.introduced.warnings;
+    const existing = result.errors + result.warnings - fresh;
+    out.push(
+      `Summary: ${fresh ? `${plural(fresh, 'new violation')} introduced by ${scope} (${result.introduced.errors} errors, ${result.introduced.warnings} warnings)` : `no new violation in ${scope}`}${existing ? ` · ${existing} already existed (not caused by these changes; listed with no \`changes\`/\`since\`)` : ''}. "New" = the evidence is on a line these changes added or modified.`,
+    );
+  } else {
+    const total = result.errors + result.warnings;
+    out.push(
+      `Summary: ${total ? `${plural(result.errors, 'violation')} of ${plural(failing('error'), 'error rule')}${result.warnings ? ` · ${plural(result.warnings, 'warning')}` : ''}` : `all ${plural(loaded.rules.length, 'rule')} pass`}${result.possible ? ` · ${plural(result.possible, 'possible violation')} (not proven)` : ''}`,
+    );
+  }
+
+  for (const outcome of result.outcomes) {
+    const { rule } = outcome;
+    const list = changes ? outcome.violations.filter((v) => v.introduced) : outcome.violations;
+    const kind =
+      rule.kind === 'cycles'
+        ? 'no import cycles'
+        : `${rule.kind} ${rule.targets.map((p) => tick(p, 120)).join(', ')}`;
+    const state = list.length
+      ? `${rule.severity === 'error' ? 'FAILS' : 'warning'}: ${plural(list.length, changes ? 'new violation' : 'violation')}`
+      : changes && outcome.violations.length
+        ? `no new violation (${outcome.violations.length} already existed)`
+        : 'passes';
+    out.section(`${tick(rule.name, 160)} — ${state}`);
+    out.push(
+      `Applies to ${rule.from.map((p) => tick(p, 120)).join(', ')}${rule.except.length ? ` except ${rule.except.map((p) => tick(p, 120)).join(', ')}` : ''} (${plural(outcome.files, 'analyzed file')}) · ${kind}${rule.ignoreTypeImports ? ' · type-only imports ignored' : ''}`,
+    );
+    if (outcome.files === 0)
+      out.push('**No analyzed file matches `from`/`except`: the pattern is probably wrong.**');
+    if (rule.because && list.length) out.push(`Why: ${tick(rule.because, 400)}`);
+    if (list.length) out.list(list, violationLine, page);
+    if (!changes && outcome.possible.length) {
+      out.push(
+        `Possible (NOT proven: unresolved calls through interfaces/abstract methods that may reach the target; never fail): ${outcome.possible.length}`,
+      );
+      out.list(outcome.possible, violationLine, { limit: 5, hint: 'not listed further' });
+    }
+  }
+  out.push(
+    '',
+    '_Only proven relationships (resolved imports, calls and inheritance, with file:line) violate a rule. Type-only imports never form cycles. Fix a violation by moving the code to an allowed place or depending on an allowed module instead; do not edit the rules file to silence it unless the user asks._',
   );
   return out.toString();
 }
@@ -2238,6 +2480,32 @@ const TOOL_LIST: ToolDefinition[] = [
       additionalProperties: false,
     },
     run: impact,
+  },
+  {
+    name: 'rastro_check',
+    title: 'Architecture rules',
+    description:
+      "Check the project's architecture rules (`rastro.rules.json`: which folders/files may depend on which, allowed packages, no import cycles). Lists each rule with its violations: the files involved, the kind (import, call, inheritance) and the file:line that proves it. Use it before finishing a change: with `changes: true` (uncommitted) or `since` (a git ref), only violations introduced by those changes are listed. Without a rules file, it proposes the rules the code already follows. Possible (unproven) violations through interface calls are listed apart and never fail.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        changes: {
+          type: 'boolean',
+          description: 'Only violations introduced by the uncommitted git changes.',
+        },
+        since: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            'Only violations introduced since the current branch forked from this git ref (plus uncommitted changes).',
+        },
+        limit: limit(200, 30),
+        offset: offset('each list of violations'),
+      },
+      additionalProperties: false,
+    },
+    run: rulesTool,
   },
   {
     name: 'rastro_path',

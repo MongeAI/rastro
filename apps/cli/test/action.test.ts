@@ -120,6 +120,58 @@ describe.skipIf(!bundled || !hasTools || process.platform === 'win32')('GitHub A
     expect(graph.nodes.some((n) => n.id === 'file:src/math.ts')).toBe(true);
   });
 
+  it('impact.sh: regras de arquitetura — só o que a PR introduz conta, e reprova', () => {
+    const root = featureRepo();
+    const git = (...args: string[]) =>
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=T',
+          '-c',
+          'user.email=t@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          ...args,
+        ],
+        { cwd: root, stdio: 'pipe' },
+      );
+    fs.writeFileSync(
+      path.join(root, 'rastro.rules.json'),
+      JSON.stringify({
+        rules: [
+          { name: 'math is a leaf', from: 'src/math.ts', deny: 'src', because: 'Keep math pure.' },
+          { name: 'old debt', from: 'test', deny: 'src/math.ts', severity: 'warning' },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(root, 'src/math.ts'),
+      "import { total } from './app';\nexport function sum(a: number, b: number) {\n  return b + a;\n}\nexport const t = () => total();\n",
+    );
+    git('add', '-A');
+    git('commit', '-qm', 'break the rule');
+    const { res, summary, outputs } = runImpact(root, {});
+    expect(res.status, res.stderr).toBe(0);
+    expect(summary).toContain('🧱');
+    expect(summary).toContain('`math is a leaf`');
+    expect(summary).toContain('`Keep math pure.`');
+    // a violação antiga (o teste já importava math.ts na main) não aparece como nova
+    expect(summary).not.toContain('`old debt`');
+    expect(outputs).toMatch(/^violations=1$/m);
+    expect(outputs).toMatch(/^failing=1$/m);
+
+    fs.writeFileSync(
+      path.join(root, 'rastro.rules.json'),
+      '{"rules": [{"name": "x", "form": "src"}]}',
+    );
+    git('commit', '-qam', 'typo');
+    const invalid = runImpact(root, {});
+    expect(invalid.res.status, invalid.res.stderr).toBe(0);
+    expect(invalid.summary).toContain('unknown field');
+    expect(invalid.outputs).toMatch(/^failing=invalid$/m);
+  });
+
   it('impact.sh: subpasta com espaço entra codificada nos links', () => {
     const root = featureRepo('my app');
     const { res, summary } = runImpact(root, {

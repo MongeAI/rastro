@@ -124,6 +124,8 @@ interface Props {
   pathHighlight: { nodes: string[]; edges: string[] } | null;
   /** Mudanças do git a destacar: o que mudou e o que é afetado. */
   changeHighlight: { changed: string[]; impacted: string[] } | null;
+  /** Regras de arquitetura: nós e relações (ids originais) que quebram uma regra. */
+  ruleHighlight: { nodes: string[]; edges: string[] } | null;
   highlightNeighbors: boolean;
   /** Mostra o minimapa no canto do mapa. */
   minimap: boolean;
@@ -622,7 +624,30 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     const cy = cyRef.current;
     if (!cy) return;
     cy.batch(() => {
-      cy.elements().removeClass('faded highlight chosen path changed impacted impact-edge');
+      cy.elements().removeClass(
+        'faded highlight chosen path changed impacted impact-edge violation',
+      );
+      if (
+        props.ruleHighlight &&
+        !props.selectedId &&
+        !props.selectedEdgeId &&
+        !props.pathHighlight
+      ) {
+        // a linha do mapa que representa alguma relação da violação fica vermelha
+        const nodeIds = new Set(props.ruleHighlight.nodes);
+        const edgeIds = new Set(props.ruleHighlight.edges);
+        const nodes = cy.nodes().filter((n) => nodeIds.has(n.id()));
+        const edges = cy
+          .edges()
+          .filter((e) =>
+            ((e.data('members') as string[] | undefined) ?? [e.id()]).some((m) => edgeIds.has(m)),
+          );
+        nodes.addClass('violation');
+        edges.addClass('violation');
+        const keep = nodes.union(edges).union(edges.connectedNodes());
+        if (keep.nonempty()) cy.elements().not(keep.union(keep.ancestors())).addClass('faded');
+        return;
+      }
       if (
         props.changeHighlight &&
         !props.selectedId &&
@@ -688,6 +713,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
     props.view,
     props.pathHighlight,
     props.changeHighlight,
+    props.ruleHighlight,
   ]);
 
   // centraliza quando pedido: se um layout estiver em andamento, espera ele terminar

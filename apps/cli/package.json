@@ -12,6 +12,7 @@
     "bin",
     "dist/rastro.mjs",
     "dist/web",
+    "schema",
     "README.md",
     "LICENSE"
   ],

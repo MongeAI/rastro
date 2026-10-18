@@ -148,15 +148,16 @@ Without a path, `rastro mcp` analyzes the project Claude Code is working on (Cla
 
 Any other MCP client: a stdio server started with `npx -y @mongeai/rastro@0.2.0 mcp /path/to/project`.
 
-| Tool                | What the agent gets                                                                                                                                                                                                                          |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rastro_overview`   | Size, entity counts, proven and unresolved relationships per kind, main folders, routes, most called functions, central files, possibly unused code, diagnostics and freshness                                                               |
-| `rastro_search`     | Functions, classes, methods, files, folders, routes and packages by name, `Class.method` or path, with ids and `file:line`                                                                                                                   |
-| `rastro_entity`     | Everything about one entity: location, parents, exports, members, callers and callees, what it overrides, imports and top-level calls of a file, inheritance, route details; `source: true` adds its code                                    |
-| `rastro_references` | Callers/callees, importers/imports and subclasses with evidence, grouped into proven, external and possible; `depth` up to 3; `limit` and `offset` to page                                                                                   |
-| `rastro_impact`     | What could break: for entities you plan to change, for the uncommitted changes or `since` a branch; routes and tests to run first, references the change possibly broke, affected entities by distance; `format: "tests"` for just the tests |
-| `rastro_path`       | How A reaches B (entities, files, folders, or an external package as destination): the shortest proven chains with evidence, or a clear "no proven path" (with the reverse, file-level or possible paths when they exist)                    |
-| `rastro_routes`     | HTTP routes with method, full path (or why it is unknown), framework, handler and `file:line`                                                                                                                                                |
+| Tool                | What the agent gets                                                                                                                                                                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rastro_overview`   | Size, entity counts, proven and unresolved relationships per kind, main folders, routes, most called functions, central files, possibly unused code, diagnostics and freshness                                                                                                                  |
+| `rastro_search`     | Functions, classes, methods, files, folders, routes and packages by name, `Class.method` or path, with ids and `file:line`                                                                                                                                                                      |
+| `rastro_entity`     | Everything about one entity: location, parents, exports, members, callers and callees, what it overrides, imports and top-level calls of a file, inheritance, route details; `source: true` adds its code                                                                                       |
+| `rastro_references` | Callers/callees, importers/imports and subclasses with evidence, grouped into proven, external and possible; `depth` up to 3; `limit` and `offset` to page                                                                                                                                      |
+| `rastro_impact`     | What could break: for entities you plan to change, for the uncommitted changes or `since` a branch; routes and tests to run first, references the change possibly broke, affected entities by distance; `format: "tests"` for just the tests                                                    |
+| `rastro_check`      | The project's architecture rules (`rastro.rules.json`): each violation with the files, the kind (import, call, inheritance) and `file:line`; with `changes: true` or `since`, only what the agent's own change introduced; without a rules file, it proposes the rules the code already follows |
+| `rastro_path`       | How A reaches B (entities, files, folders, or an external package as destination): the shortest proven chains with evidence, or a clear "no proven path" (with the reverse, file-level or possible paths when they exist)                                                                       |
+| `rastro_routes`     | HTTP routes with method, full path (or why it is unknown), framework, handler and `file:line`                                                                                                                                                                                                   |
 
 An answer looks like this (a method only reachable through an interface):
 
@@ -179,9 +180,50 @@ none
 
 ## What's new in 0.2
 
+### Architecture rules that check themselves
+
+Write down who may depend on whom in `rastro.rules.json`, and Rastro proves every violation with the line that causes it:
+
+```json
+{
+  "$schema": "https://unpkg.com/@mongeai/rastro@0.2.0/schema/rastro-rules.schema.json",
+  "rules": [
+    {
+      "name": "The UI does not touch the database",
+      "from": "src/ui",
+      "deny": ["src/db", "pkg:pg"],
+      "because": "Go through src/services."
+    },
+    { "name": "Pure domain", "from": "src/domain", "allow": ["pkg:zod"] },
+    { "name": "No import cycles", "noCycles": true }
+  ]
+}
+```
+
+```text
+$ rastro check
+Architecture rules rastro.rules.json · 3 rules
+
+✗ The UI does not touch the database · 1 violation
+    Go through src/services.
+    src/ui/page.ts → src/db/client.ts (import, call) src/ui/page.ts:2 (2 times)
+✓ Pure domain
+✓ No import cycles
+
+✗ 1 violation
+```
+
+**`rastro check --init` writes the rules your code already follows** (the layering between the main folders, no import cycles, production code not importing tests), so today's architecture is locked in with one command. From then on:
+
+- in **CI**, the Action comments the violations a pull request **introduces** and fails the job: debt that already exists never blocks anyone;
+- the map gets a **Rules** tab that draws the offending dependencies in red;
+- **your AI agent** calls `rastro_check` with `changes: true` before saying it is done, and fixes what it broke.
+
+Only proven relationships (resolved imports, calls and inheritance) violate a rule; calls that only _may_ reach a forbidden place (through an interface) are shown apart and never fail. Details in [Architecture rules](#architecture-rules).
+
 ### Your AI agent can ask the graph
 
-`rastro mcp` is a Model Context Protocol server for Claude Code, Cursor, VS Code and other agents: seven read-only tools answer who calls what, what a change can break, how A reaches B and which routes exist, always with `file:line` evidence and with proven and possible relationships kept apart. The graph is re-analyzed after every edit. Setup in [Rastro for AI agents](#rastro-for-ai-agents-mcp).
+`rastro mcp` is a Model Context Protocol server for Claude Code, Cursor, VS Code and other agents: eight read-only tools answer who calls what, what a change can break, how A reaches B, which routes exist and whether a change respects the architecture rules, always with `file:line` evidence and with proven and possible relationships kept apart. The graph is re-analyzed after every edit. Setup in [Rastro for AI agents](#rastro-for-ai-agents-mcp).
 
 ### Rastro in every pull request
 
@@ -350,6 +392,8 @@ rastro validate <graph.json>     # check that a JSON file is a valid graph
 rastro export <path|graph.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # what was added, removed or changed between two analyses
 rastro impact <path|graph.json>  # the impact of the git changes (text, markdown or json)
+rastro check [path]              # check the architecture rules (rastro.rules.json)
+rastro check --init              # write the rules the project already follows
 rastro mcp [path]                # MCP server (stdio) for AI agents; see "Rastro for AI agents"
 ```
 
@@ -357,6 +401,7 @@ rastro mcp [path]                # MCP server (stdio) for AI agents; see "Rastro
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `--changes`            | Mark what changed since the last commit (git, including untracked files) and its impact                            |
 | `--since <ref>`        | Mark what changed since the current branch forked from `<ref>` (e.g. `main`): the impact of a pull request         |
+| `--rules <file>`       | Architecture rules file (default: `rastro.rules.json` in the analyzed folder)                                      |
 | `--trust-git-config`   | Run git even if the repository's local config defines commands (see [Privacy and security](#privacy-and-security)) |
 | `-w, --watch`          | Re-analyze when files are saved and update the open map live                                                       |
 | `--no-watch`           | (`mcp`) Do not watch files: the graph stays as first analyzed                                                      |
@@ -413,24 +458,54 @@ rastro export . --format html --since main                   # an offline report
 
 Everything that comes from the analyzed project (names, paths) goes into Markdown as inline code, so a file name cannot inject links, images, mentions or HTML into a pull request comment.
 
+### Architecture rules
+
+`rastro check [path]` reads `rastro.rules.json` from the analyzed folder (or the file given with `--rules`), analyzes the project and checks every rule. Each rule applies to the files in `from` (default: all), minus those in `except`, and has exactly one of:
+
+| Field      | Meaning                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| `deny`     | These files must not depend on the listed files or packages                                          |
+| `allow`    | These files may only depend on the listed files or packages (and on each other)                      |
+| `noCycles` | `true`: no import cycle among these files (type-only imports never count: they disappear at runtime) |
+
+Optional fields: `name` (required, unique; shown with every violation), `severity` (`error`, the default, fails; `warning` only reports), `because` (why, or what to do instead) and `ignoreTypeImports` (`deny`/`allow`: `import type` does not count). An unknown field is an error, so a typo like `"form"` never silently turns a rule off; the JSON Schema gives your editor autocompletion.
+
+**Patterns** are paths relative to the analyzed folder: `*` (anything but `/`), `**` (any number of folders), `?` and `{a,b}`; brackets are literal, so `app/[id]/page.tsx` works. A path without wildcards is the file or everything inside the folder (`src/db` = `src/db/**`). Packages start with `pkg:`: `pkg:pg`, `pkg:@aws-sdk/*`, `pkg:node:*` for Node.js built-ins.
+
+**What counts.** A dependency is every proven relationship from a file to another: imports (re-exports and `import()` included), calls and inheritance, grouped per pair of files with the `file:line` of each occurrence. Calls through interfaces or abstract methods that _may_ reach a forbidden file are listed as **possible** and never fail. A rule whose `from` matches no analyzed file is flagged (the pattern is probably wrong).
+
+| Option             | Purpose                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------- |
+| `--init`           | Write `rastro.rules.json` with the rules the project already follows (never overwrites an existing file) |
+| `--changes`        | Only violations introduced by the uncommitted changes fail (the others are counted as already existing)  |
+| `--since <ref>`    | Only violations introduced since the branch forked from `<ref>` fail                                     |
+| `-f, --format <f>` | `text` (default), `markdown` or `json`                                                                   |
+| `--link <url>`     | Turn `file:line` into links in Markdown                                                                  |
+| `-o, --out <file>` | Write to a file instead of the standard output                                                           |
+
+A violation is **introduced** by a change when its evidence is on a line the change added or modified. Exit codes, like a linter: `0` no failing violation, `1` at least one (`error` rules only), `2` a problem with the rules file. `rastro impact`, the pull request comment, the map (**Rules** tab, with the violations in red) and `rastro_check` use the same rules and the same calculation.
+
+The rules file is plain JSON: nothing from the project is executed. In CI it comes from the pull request, so it is read like untrusted input: a symbolic link is refused (`--rules` follows one on purpose), a JSON error never quotes the file, and patterns are matched without regular expressions (a crafted pattern cannot hang the job). Since a pull request can also edit the rules, protect `rastro.rules.json` with a `CODEOWNERS` entry if they matter.
+
 ### GitHub Action
 
-`uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment per analyzed `path`, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact. In a monorepo, call it once per package with a different `path` and `artifact-name`: each call gets its own comment, outputs and report. Links in the comment point to the analyzed commit and to the file's path in the repository.
+`uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment per analyzed `path`, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact. In a monorepo, call it once per package with a different `path` and `artifact-name`: each call gets its own comment, outputs and report. Links in the comment point to the analyzed commit and to the file's path in the repository. When the analyzed folder has a `rastro.rules.json`, the comment also lists the [architecture rule](#architecture-rules) violations the pull request introduces, and the job fails on them after commenting (`fail-on-violations: false` to only report).
 
-| Input            | Default                 | Purpose                                                             |
-| ---------------- | ----------------------- | ------------------------------------------------------------------- |
-| `path`           | `.`                     | Project folder to analyze                                           |
-| `base`           | the pull request's base | Branch to compare against                                           |
-| `exclude`        |                         | Paths to ignore, one per line (`.gitignore` syntax)                 |
-| `comment`        | `true`                  | Comment on the pull request                                         |
-| `github-token`   | `${{ github.token }}`   | Token used to comment on the pull request                           |
-| `comment-author` | `github-actions[bot]`   | Login that posts the comment (change it with a custom token)        |
-| `report`         | `true`                  | Upload the offline HTML report                                      |
-| `artifact-name`  | `rastro-report`         | Artifact name (one per call when running the action more than once) |
-| `lang`           | `en`                    | `en` or `pt`                                                        |
-| `version`        | `0.2.0`                 | Version of `@mongeai/rastro` to run                                 |
+| Input                | Default                 | Purpose                                                                                                                                                   |
+| -------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`               | `.`                     | Project folder to analyze                                                                                                                                 |
+| `base`               | the pull request's base | Branch to compare against                                                                                                                                 |
+| `exclude`            |                         | Paths to ignore, one per line (`.gitignore` syntax)                                                                                                       |
+| `comment`            | `true`                  | Comment on the pull request                                                                                                                               |
+| `github-token`       | `${{ github.token }}`   | Token used to comment on the pull request                                                                                                                 |
+| `comment-author`     | `github-actions[bot]`   | Login that posts the comment (change it with a custom token)                                                                                              |
+| `report`             | `true`                  | Upload the offline HTML report                                                                                                                            |
+| `artifact-name`      | `rastro-report`         | Artifact name (one per call when running the action more than once)                                                                                       |
+| `fail-on-violations` | `true`                  | Fail the job when the pull request introduces a violation of an `error` rule in `rastro.rules.json` (or the file is invalid); the comment is posted first |
+| `lang`               | `en`                    | `en` or `pt`                                                                                                                                              |
+| `version`            | `0.2.0`                 | Version of `@mongeai/rastro` to run                                                                                                                       |
 
-Outputs: `tests` (affected test files, one per line), `changed`, `impacted`, `broken` (references possibly broken by the change), `markdown` and `json` (paths of the reports). To run only the affected tests in a later step, pass the output through an environment variable (never straight into `run:`):
+Outputs: `tests` (affected test files, one per line), `changed`, `impacted`, `broken` (references possibly broken by the change), `violations` (architecture rule violations the pull request introduces), `markdown` and `json` (paths of the reports). To run only the affected tests in a later step, pass the output through an environment variable (never straight into `run:`):
 
 ```yaml
 - id: rastro
@@ -534,6 +609,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) (Portuguese; issues and pull requests in 
 
 ## License
 
-[MIT](LICENSE) © [MongeAI](https://github.com/MongeAI). The Inter and JetBrains Mono fonts bundled with the interface use the SIL Open Font License 1.1.
+[MIT](LICENSE) ™ [MongeAI](https://github.com/MongeAI). The Inter and JetBrains Mono fonts bundled with the interface use the SIL Open Font License 1.1.
 
 <p align="center"><sub>Made in Brazil 🇧🇷 by MongeAI.</sub></p>

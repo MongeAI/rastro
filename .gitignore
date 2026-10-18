@@ -21,6 +21,7 @@ coverage/
 # gerados no prepack do pacote npm
 /apps/cli/README.md
 /apps/cli/LICENSE
+/apps/cli/schema/
 *.tgz
 
 # ferramentas locais (worktrees de agentes, configurações)

@@ -75,9 +75,17 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 ### 11. O Rastro para agentes de IA: `rastro mcp`
 
 - ✅ Servidor do Model Context Protocol pelo stdio, escrito à mão (sem dependência nova): JSON-RPC 2.0 linha a linha, `initialize` respondido na hora (revisões 2024-11-05 a 2025-11-25) e a era sem estado 2026-07-28 (`server/discover`, `_meta` por requisição), `ping`, cancelamento, lotes, erros do protocolo × erros da ferramenta (`isError`), proteção contra linhas enormes.
-- ✅ Sete ferramentas só de leitura: `rastro_overview`, `rastro_search`, `rastro_entity` (com o código, pela mesma leitura segura do servidor), `rastro_references`, `rastro_impact` (alvos, mudanças sem commit ou `since`), `rastro_path` e `rastro_routes`. Respostas em Markdown compacto com `arquivo:linha`, comprovado × externo × possível, listas com limite, nomes ambíguos com candidatos e sugestões para erros de digitação.
+- ✅ Sete ferramentas só de leitura (oito com o `rastro_check`, item 12): `rastro_overview`, `rastro_search`, `rastro_entity` (com o código, pela mesma leitura segura do servidor), `rastro_references`, `rastro_impact` (alvos, mudanças sem commit ou `since`), `rastro_path` e `rastro_routes`. Respostas em Markdown compacto com `arquivo:linha`, comprovado × externo × possível, listas com limite, nomes ambíguos com candidatos e sugestões para erros de digitação.
 - ✅ Grafo sempre fresco: a análise roda numa worker thread com a `AnalysisSession` (o protocolo nunca trava), o observador do `--watch` marca o grafo como desatualizado e a próxima chamada reanalisa (chamadas simultâneas esperam a mesma reanálise; uma falha volta como erro e a chamada seguinte tenta de novo).
 - ✅ Conferido com os clientes oficiais do SDK (v1 e v2, inclusive a sondagem `server/discover`), testes do protocolo, das ferramentas, ao vivo, do git e da CLI empacotada; README e segurança atualizados.
+
+### 12. Regras de arquitetura: `rastro check`
+
+- ✅ `rastro.rules.json` com `deny`, `allow` e `noCycles` sobre padrões de arquivos (`*`, `**`, `?`, `{a,b}`, pasta = tudo dentro, `pkg:` para pacotes), `except`, `severity`, `because` e `ignoreTypeImports`; campo desconhecido é erro; JSON Schema no pacote.
+- ✅ Só relações comprovadas reprovam; chamadas por interface viram violações possíveis. Com `--changes`/`--since`, só o introduzido (evidência em linha alterada) reprova.
+- ✅ `rastro check --init`: as regras que o projeto já cumpre (camadas, ciclos, testes), todas conferidas.
+- ✅ Em todo lugar: `rastro check` (códigos 0/1/2), `rastro impact` e o comentário da Action (reprova o job, saída `violations`), aba **Regras** no mapa (violações em vermelho, ao vivo), ferramenta MCP `rastro_check` (propõe regras quando não há) e avisos no `rastro_impact`/`rastro_overview`.
+- ✅ Seguro com arquivo de regras de um pull request: sem links simbólicos, erro de JSON sem trecho do arquivo, padrões sem expressões regulares (sem ReDoS).
 
 ## Fora desta versão
 

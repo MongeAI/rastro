@@ -12,9 +12,13 @@ import {
 import {
   diagnosticText,
   RASTRO_VERSION,
+  ruleIssueText,
+  RULES_FILE,
   validateGraph,
+  type GraphRules,
   type NodeKind,
   type RastroGraph,
+  type RulesConfig,
 } from '@rastro/core';
 import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { argsErrorMessage } from './args.js';
@@ -34,6 +38,16 @@ import {
   UsageError,
   writeExport,
 } from './export.js';
+import {
+  buildCheckReport,
+  CHECK_FORMATS,
+  failingCount,
+  initialRules,
+  readRules,
+  renderCheck,
+  runRules,
+  type CheckFormat,
+} from './check.js';
 import { checkGit, collectChanges, GitError } from './git.js';
 import { getLang, langArg, parseLang, setLang, t } from './i18n.js';
 import { runMcp } from './mcp.js';
@@ -109,6 +123,14 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
       );
     if (warnings.length > 5) out(dim(`    ${m.moreWarnings(warnings.length - 5)}`));
   }
+  if (graph.rules) {
+    const check = runRules(graph);
+    if (!check) out(`  ${yellow(t().rules.invalid(safeText(graph.rules.source)))}`);
+    else {
+      const line = t().rules.summaryLine(check.errors, check.warnings);
+      out(`  ${check.errors ? red(line) : check.warnings ? yellow(line) : dim(line)}`);
+    }
+  }
   out(dim(`  ${m.duration(stats.durationMs, graph.analyzer.typescriptVersion)}`));
   if (savedTo) out(`  ${m.savedTo} ${cyan(tildify(savedTo))}`);
   out();
@@ -180,6 +202,8 @@ async function main(argv: string[]): Promise<void> {
         json: { type: 'boolean' },
         tests: { type: 'boolean' },
         link: { type: 'string' },
+        rules: { type: 'string' },
+        init: { type: 'boolean' },
         lang: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -193,17 +217,34 @@ async function main(argv: string[]): Promise<void> {
   if (values.help || positionals.length === 0)
     return void process.stdout.write(t().help(RASTRO_VERSION));
 
-  const commands = ['open', 'analyze', 'serve', 'validate', 'export', 'compare', 'impact', 'mcp'];
+  const commands = [
+    'open',
+    'analyze',
+    'serve',
+    'validate',
+    'export',
+    'compare',
+    'impact',
+    'check',
+    'mcp',
+  ];
   const [first, ...rest] = positionals;
   // "rastro analyze" sem caminho, mas existindo uma pasta chamada "analyze": trata como caminho.
   // "rastro mcp" é sempre o comando (o caminho é opcional): um cliente de IA que o configura
-  // nunca deve abrir o navegador porque a pasta atual tem uma subpasta "mcp"
+  // nunca deve abrir o navegador porque a pasta atual tem uma subpasta "mcp". O check também
+  // tem caminho opcional (a pasta atual), como um linter
+  const optionalPath = first === 'mcp' || first === 'check';
   const isCommand =
-    commands.includes(first!) && (rest.length > 0 || first === 'mcp' || !fs.existsSync(first!));
+    commands.includes(first!) && (rest.length > 0 || optionalPath || !fs.existsSync(first!));
   const command = isCommand ? first! : 'open';
   // mcp sem caminho: a pasta do projeto que o Claude Code informa ao servidor, senão a atual
   const target = isCommand
-    ? (rest[0] ?? (command === 'mcp' ? process.env.CLAUDE_PROJECT_DIR?.trim() || '.' : undefined))
+    ? (rest[0] ??
+      (command === 'mcp'
+        ? process.env.CLAUDE_PROJECT_DIR?.trim() || '.'
+        : command === 'check'
+          ? '.'
+          : undefined))
     : first;
   // argumentos a mais falham (o compare recebe dois arquivos; os outros comandos, um)
   const extra = isCommand ? rest.slice(command === 'compare' ? 2 : 1) : rest;
@@ -219,7 +260,18 @@ async function main(argv: string[]): Promise<void> {
 
   // um valor vazio (--since "", -o "") nunca é o que se quis: falha em vez de ser ignorado
   const empty = (
-    ['out', 'since', 'port', 'max-files', 'format', 'level', 'folder', 'edges', 'link'] as const
+    [
+      'out',
+      'since',
+      'port',
+      'max-files',
+      'format',
+      'level',
+      'folder',
+      'edges',
+      'link',
+      'rules',
+    ] as const
   ).find((k) => values[k] === '');
   if (empty) fail(`${u.needsValue(`--${empty}`)}\n${u.seeHelp}`);
   if (values.exclude?.includes('')) fail(`${u.needsValue('--exclude')}\n${u.seeHelp}`);
@@ -237,21 +289,26 @@ async function main(argv: string[]): Promise<void> {
     command !== 'analyze' &&
     command !== 'open' &&
     command !== 'export' &&
-    command !== 'impact'
+    command !== 'impact' &&
+    command !== 'check'
   )
     fail(u.notApplicable('--out', command));
   if (values.json && command !== 'compare') fail(u.onlyWith('--json', 'compare'));
   if (command !== 'export') {
-    // --format também vale para o impact (text, markdown ou json)
+    // --format também vale para o impact e o check (text, markdown ou json)
     const exportOnly = (
       ['format', 'level', 'folder', 'edges', 'external', 'no-unresolved'] as const
-    ).find((k) => values[k] !== undefined && !(k === 'format' && command === 'impact'));
+    ).find(
+      (k) =>
+        values[k] !== undefined &&
+        !(k === 'format' && (command === 'impact' || command === 'check')),
+    );
     if (exportOnly) fail(u.onlyWith(`--${exportOnly}`, 'export'));
   }
-  if (command !== 'impact') {
-    const impactOnly = (['tests', 'link'] as const).find((k) => values[k] !== undefined);
-    if (impactOnly) fail(u.onlyWith(`--${impactOnly}`, 'impact'));
-  }
+  if (command !== 'impact' && values.tests) fail(u.onlyWith('--tests', 'impact'));
+  if (command !== 'impact' && command !== 'check' && values.link !== undefined)
+    fail(u.onlyWith('--link', 'impact'));
+  if (command !== 'check' && values.init) fail(u.onlyWith('--init', 'check'));
   // os links vão para um comentário de PR: só endereços web (nada de javascript: ou file:)
   if (values.link !== undefined && !isWebUrl(values.link)) fail(t().impact.badLink(values.link));
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
@@ -285,6 +342,7 @@ async function main(argv: string[]): Promise<void> {
       ['max-files', '--max-files'],
       ['no-gitignore', '--no-gitignore'],
       ['trust-git-config', '--trust-git-config'],
+      ['rules', '--rules'],
     ] as const
   ).find(([k]) => values[k] !== undefined)?.[1];
   if (analysisFlag && (command === 'validate' || command === 'compare' || command === 'serve'))
@@ -353,7 +411,7 @@ async function main(argv: string[]): Promise<void> {
       const reason = err instanceof GitError ? err.message : (err as Error).message;
       // pedido explícito num comando não interativo (analyze, export): sem as mudanças, o
       // resultado não é o que foi pedido. Ao abrir o mapa, só avisa e segue.
-      if (command === 'analyze' || command === 'export')
+      if (command === 'analyze' || command === 'export' || command === 'check')
         fail(t().impact.gitFailed(safeText(reason)));
       if (warn)
         process.stderr.write(
@@ -361,6 +419,97 @@ async function main(argv: string[]): Promise<void> {
         );
     }
   };
+
+  /**
+   * Anexa as regras de arquitetura ao grafo (`--rules` ou `rastro.rules.json` da raiz). Um
+   * arquivo pedido com --rules que não dá para ler encerra; o padrão só gera um aviso.
+   */
+  const attachRules = (graph: RastroGraph, root: string) => {
+    try {
+      const rules = readRules(root, values.rules);
+      if (rules) graph.rules = rules;
+      else delete graph.rules;
+    } catch (err) {
+      if (values.rules !== undefined) fail((err as Error).message);
+      process.stderr.write(
+        `${yellow(t().warningPrefix)} ${t().rules.ignored(safeText((err as Error).message))}\n`,
+      );
+    }
+  };
+
+  if (command === 'check') {
+    const m = t().rules;
+    const format = (values.format ?? 'text') as CheckFormat;
+    if (!CHECK_FORMATS.includes(format)) fail(m.badFormat(values.format!));
+    if (values.link !== undefined && format !== 'markdown') fail(t().impact.linkNeedsMarkdown);
+    if (values.init && (values.changes || values.since !== undefined)) fail(m.initNotWithChanges);
+    if (values.init && values.format !== undefined) fail(m.initNotWithFormat);
+    if (values.init && values.out !== undefined) fail(u.notTogether('--init', '--out'));
+    const root = path.resolve(target);
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) fail(u.dirNotFound(root));
+
+    if (values.init) {
+      const file =
+        values.rules !== undefined ? path.resolve(values.rules) : path.join(root, RULES_FILE);
+      if (fs.lstatSync(file, { throwIfNoEntry: false })) fail(m.initExists(tildify(file)), 2);
+      const graph = await analyzeProject(root, { ...discover, onProgress: showProgress });
+      const content = initialRules(graph);
+      try {
+        writeExport(file, content);
+      } catch (err) {
+        fail((err as Error).message, 2);
+      }
+      const names = (JSON.parse(content) as RulesConfig).rules.map((r) => r.name);
+      const shown = path.relative(process.cwd(), file);
+      const where = cyan(
+        shown && !shown.startsWith('..') && !path.isAbsolute(shown) ? shown : tildify(file),
+      );
+      process.stderr.write(
+        `${names.length ? m.initWritten(where, names.length) : m.initEmpty(where)}\n`,
+      );
+      for (const name of names) process.stderr.write(`  ${cyan('•')} ${safeText(name)}\n`);
+      process.stderr.write(dim(`${m.initNext}\n`));
+      return;
+    }
+
+    // o arquivo de regras é conferido antes da análise (que pode demorar). Problemas nele
+    // saem com código 2 (como um linter): diferente de violações (código 1)
+    let rules: GraphRules | undefined;
+    try {
+      rules = readRules(root, values.rules);
+    } catch (err) {
+      fail((err as Error).message, 2);
+    }
+    if (!rules) fail(m.noRulesFile(tildify(root)), 2);
+    if (rules.issues) {
+      process.stderr.write(`${red(t().errorPrefix)} ${m.invalid(safeText(rules.source))}\n`);
+      for (const issue of rules.issues)
+        process.stderr.write(`  ${dim('•')} ${safeText(ruleIssueText(issue, getLang()))}\n`);
+      process.exit(2);
+    }
+    if (values.changes || values.since !== undefined) precheckGit(root);
+    const graph = await analyzeProject(root, {
+      ...discover,
+      ...(format === 'text' ? { onProgress: showProgress } : {}),
+    });
+    attachChanges(graph, root, false);
+    graph.rules = rules;
+    const report = buildCheckReport(graph);
+    const content = renderCheck(report, format, {
+      ...(values.link !== undefined ? { link: values.link } : {}),
+    });
+    if (values.out !== undefined) {
+      try {
+        // eslint-disable-next-line no-control-regex
+        const written = writeExport(values.out, content.replace(/\u001b\[[0-9;]*m/g, ''));
+        process.stderr.write(`${t().export.saved(format)} ${cyan(tildify(written))}\n`);
+      } catch (err) {
+        fail((err as Error).message, 2);
+      }
+    } else process.stdout.write(content);
+    process.exitCode = failingCount(report) ? 1 : 0;
+    return;
+  }
 
   if (command === 'compare') {
     const other = rest[1];
@@ -401,6 +550,7 @@ async function main(argv: string[]): Promise<void> {
       if (values.changes || values.since !== undefined) precheckGit(source);
       graph = await analyzeProject(source, { ...discover, onProgress: showProgress });
       attachChanges(graph, source, true);
+      attachRules(graph, source);
     } else {
       try {
         graph = loadGraph(source);
@@ -459,6 +609,7 @@ async function main(argv: string[]): Promise<void> {
       } catch (err) {
         fail(t().impact.gitFailed(safeText((err as Error).message)));
       }
+      attachRules(graph, source);
     } else {
       try {
         graph = loadGraph(source);
@@ -509,6 +660,7 @@ async function main(argv: string[]): Promise<void> {
       discover,
       watch: !values['no-watch'],
       trustGitConfig: !!values['trust-git-config'],
+      ...(values.rules !== undefined ? { rulesFile: values.rules } : {}),
     });
     return;
   }
@@ -551,6 +703,8 @@ async function main(argv: string[]): Promise<void> {
     showingProgress = progress;
     const result = await session.analyze();
     attachChanges(result, root, progress);
+    // relido a cada análise: no modo ao vivo, editar as regras atualiza o mapa
+    attachRules(result, root);
     return result;
   };
   const graph = await runAnalysis(!quiet);

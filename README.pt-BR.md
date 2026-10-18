@@ -146,15 +146,16 @@ Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalh
 
 Qualquer outro cliente MCP: um servidor stdio iniciado com `npx -y @mongeai/rastro@0.2.0 mcp /caminho/do/projeto`.
 
-| Ferramenta          | O que o agente recebe                                                                                                                                                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `rastro_overview`   | Tamanho, contagem de entidades, relações comprovadas e não resolvidas por tipo, pastas principais, rotas, funções mais chamadas, arquivos centrais, código possivelmente sem uso, diagnósticos e quão fresco está o grafo                                          |
-| `rastro_search`     | Funções, classes, métodos, arquivos, pastas, rotas e pacotes por nome, `Classe.metodo` ou caminho, com ids e `arquivo:linha`                                                                                                                                       |
-| `rastro_entity`     | Tudo sobre uma entidade: local, pais, exports, membros, quem chama e o que chama, o que ela sobrescreve, imports e chamadas no topo de um arquivo, herança, detalhes da rota; `source: true` traz o código                                                         |
-| `rastro_references` | Quem chama/o que chama, quem importa/o que importa e subclasses com evidência, em grupos comprovado, externo e possível; `depth` até 3; `limit` e `offset` para paginar                                                                                            |
-| `rastro_impact`     | O que pode quebrar: para entidades que você vai mudar, para as mudanças sem commit ou `since` uma branch; primeiro rotas e testes para rodar, depois referências que a mudança possivelmente quebrou e afetados por distância; `format: "tests"` traz só os testes |
-| `rastro_path`       | Como A chega em B (entidades, arquivos, pastas, ou um pacote externo como destino): as menores cadeias comprovadas com evidência, ou um "não há caminho comprovado" claro (com o inverso, o de arquivos ou o possível, quando existem)                             |
-| `rastro_routes`     | Rotas HTTP com método, caminho completo (ou por que ele não é conhecido), framework, handler e `arquivo:linha`                                                                                                                                                     |
+| Ferramenta          | O que o agente recebe                                                                                                                                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rastro_overview`   | Tamanho, contagem de entidades, relações comprovadas e não resolvidas por tipo, pastas principais, rotas, funções mais chamadas, arquivos centrais, código possivelmente sem uso, diagnósticos e quão fresco está o grafo                                                               |
+| `rastro_search`     | Funções, classes, métodos, arquivos, pastas, rotas e pacotes por nome, `Classe.metodo` ou caminho, com ids e `arquivo:linha`                                                                                                                                                            |
+| `rastro_entity`     | Tudo sobre uma entidade: local, pais, exports, membros, quem chama e o que chama, o que ela sobrescreve, imports e chamadas no topo de um arquivo, herança, detalhes da rota; `source: true` traz o código                                                                              |
+| `rastro_references` | Quem chama/o que chama, quem importa/o que importa e subclasses com evidência, em grupos comprovado, externo e possível; `depth` até 3; `limit` e `offset` para paginar                                                                                                                 |
+| `rastro_impact`     | O que pode quebrar: para entidades que você vai mudar, para as mudanças sem commit ou `since` uma branch; primeiro rotas e testes para rodar, depois referências que a mudança possivelmente quebrou e afetados por distância; `format: "tests"` traz só os testes                      |
+| `rastro_check`      | As regras de arquitetura do projeto (`rastro.rules.json`): cada violação com os arquivos, o tipo (import, chamada, herança) e `arquivo:linha`; com `changes: true` ou `since`, só o que a mudança do próprio agente introduziu; sem arquivo de regras, propõe as que o código já cumpre |
+| `rastro_path`       | Como A chega em B (entidades, arquivos, pastas, ou um pacote externo como destino): as menores cadeias comprovadas com evidência, ou um "não há caminho comprovado" claro (com o inverso, o de arquivos ou o possível, quando existem)                                                  |
+| `rastro_routes`     | Rotas HTTP com método, caminho completo (ou por que ele não é conhecido), framework, handler e `arquivo:linha`                                                                                                                                                                          |
 
 Uma resposta é assim (um método só alcançado por uma interface):
 
@@ -177,9 +178,50 @@ none
 
 ## Novidades da 0.2
 
+### Regras de arquitetura que se conferem sozinhas
+
+Escreva no `rastro.rules.json` quem pode depender de quem, e o Rastro prova cada violação com a linha que a causa:
+
+```json
+{
+  "$schema": "https://unpkg.com/@mongeai/rastro@0.2.0/schema/rastro-rules.schema.json",
+  "rules": [
+    {
+      "name": "A interface não acessa o banco",
+      "from": "src/ui",
+      "deny": ["src/db", "pkg:pg"],
+      "because": "Passe pelos serviços em src/services."
+    },
+    { "name": "Domínio puro", "from": "src/domain", "allow": ["pkg:zod"] },
+    { "name": "Sem ciclos de importação", "noCycles": true }
+  ]
+}
+```
+
+```text
+$ rastro check
+Regras de arquitetura rastro.rules.json · 3 regras
+
+✗ A interface não acessa o banco · 1 violação
+    Passe pelos serviços em src/services.
+    src/ui/page.ts → src/db/client.ts (import, chamada) src/ui/page.ts:2 (2 vezes)
+✓ Domínio puro
+✓ Sem ciclos de importação
+
+✗ 1 violação
+```
+
+**`rastro check --init` escreve as regras que o seu código já cumpre** (as camadas entre as pastas principais, nenhum ciclo de importação, código de produção sem importar testes): a arquitetura de hoje fica travada com um comando. A partir daí:
+
+- no **CI**, a Action comenta as violações que um pull request **introduz** e reprova o job: a dívida que já existe nunca bloqueia ninguém;
+- o mapa ganha a aba **Regras**, que desenha em vermelho as dependências proibidas;
+- **seu agente de IA** chama o `rastro_check` com `changes: true` antes de dizer que terminou, e corrige o que quebrou.
+
+Só relações comprovadas (imports, chamadas e herança resolvidos) violam uma regra; chamadas que só _podem_ chegar a um lugar proibido (por uma interface) aparecem à parte e nunca reprovam. Detalhes em [Regras de arquitetura](#regras-de-arquitetura).
+
 ### Seu agente de IA pode consultar o grafo
 
-`rastro mcp` é um servidor do Model Context Protocol para Claude Code, Cursor, VS Code e outros agentes: sete ferramentas só de leitura respondem quem chama o quê, o que uma mudança pode quebrar, como A chega em B e quais rotas existem, sempre com a evidência `arquivo:linha` e com as relações comprovadas e possíveis separadas. O grafo é reanalisado depois de cada edição. Como configurar em [O Rastro para agentes de IA](#o-rastro-para-agentes-de-ia-mcp).
+`rastro mcp` é um servidor do Model Context Protocol para Claude Code, Cursor, VS Code e outros agentes: oito ferramentas só de leitura respondem quem chama o quê, o que uma mudança pode quebrar, como A chega em B, quais rotas existem e se uma mudança respeita as regras de arquitetura, sempre com a evidência `arquivo:linha` e com as relações comprovadas e possíveis separadas. O grafo é reanalisado depois de cada edição. Como configurar em [O Rastro para agentes de IA](#o-rastro-para-agentes-de-ia-mcp).
 
 ### O Rastro em cada pull request
 
@@ -350,6 +392,8 @@ rastro validate <grafo.json>     # confere se um JSON é um grafo válido
 rastro export <caminho|grafo.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # o que entrou, saiu ou mudou entre duas análises
 rastro impact <caminho|grafo.json>  # o impacto das mudanças do git (texto, markdown ou json)
+rastro check [caminho]           # confere as regras de arquitetura (rastro.rules.json)
+rastro check --init              # escreve as regras que o projeto já cumpre
 rastro mcp [caminho]             # servidor MCP (stdio) para agentes de IA; veja "O Rastro para agentes de IA"
 ```
 
@@ -357,6 +401,7 @@ rastro mcp [caminho]             # servidor MCP (stdio) para agentes de IA; veja
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `--changes`            | Marca o que mudou desde o último commit (git, inclusive arquivos novos) e o impacto                                                 |
 | `--since <ref>`        | Marca o que mudou desde que a branch atual saiu de `<ref>` (ex.: `main`): o impacto de um pull request                              |
+| `--rules <arquivo>`    | Arquivo de regras de arquitetura (padrão: `rastro.rules.json` na pasta analisada)                                                   |
 | `--trust-git-config`   | Roda o git mesmo se a configuração local do repositório definir comandos (veja [Privacidade e segurança](#privacidade-e-segurança)) |
 | `-w, --watch`          | Reanalisa ao salvar arquivos e atualiza o mapa aberto ao vivo                                                                       |
 | `--no-watch`           | (`mcp`) Não observa os arquivos: o grafo fica o da primeira análise                                                                 |
@@ -413,24 +458,54 @@ rastro export . --format html --since main                   # um relatório off
 
 Tudo o que vem do projeto analisado (nomes, caminhos) entra no Markdown como código, então um nome de arquivo não consegue injetar links, imagens, menções ou HTML num comentário de pull request.
 
+### Regras de arquitetura
+
+`rastro check [caminho]` lê o `rastro.rules.json` da pasta analisada (ou o arquivo passado em `--rules`), analisa o projeto e confere cada regra. Cada regra vale para os arquivos de `from` (padrão: todos), menos os de `except`, e tem exatamente um entre:
+
+| Campo      | Significado                                                                                                |
+| ---------- | ---------------------------------------------------------------------------------------------------------- |
+| `deny`     | Esses arquivos não podem depender dos arquivos ou pacotes listados                                         |
+| `allow`    | Esses arquivos só podem depender dos arquivos ou pacotes listados (e uns dos outros)                       |
+| `noCycles` | `true`: nenhum ciclo de importação entre esses arquivos (imports só de tipo não contam: somem na execução) |
+
+Campos opcionais: `name` (obrigatório, único; aparece em cada violação), `severity` (`error`, o padrão, reprova; `warning` só avisa), `because` (por quê, ou o que fazer em vez disso) e `ignoreTypeImports` (`deny`/`allow`: `import type` não conta). Campo desconhecido é erro, então um erro de digitação como `"form"` nunca desliga uma regra em silêncio; o JSON Schema dá autocompletar no editor.
+
+**Padrões** são caminhos relativos à pasta analisada: `*` (qualquer coisa menos `/`), `**` (qualquer número de pastas), `?` e `{a,b}`; colchetes são literais, então `app/[id]/page.tsx` funciona. Um caminho sem curinga é o arquivo ou tudo dentro da pasta (`src/db` = `src/db/**`). Pacotes começam com `pkg:`: `pkg:pg`, `pkg:@aws-sdk/*`, `pkg:node:*` para os módulos nativos do Node.js.
+
+**O que conta.** Uma dependência é toda relação comprovada de um arquivo para outro: imports (inclusive reexportações e `import()`), chamadas e herança, agrupadas por par de arquivos com o `arquivo:linha` de cada ocorrência. Chamadas por interface ou método abstrato que _podem_ chegar a um arquivo proibido aparecem como **possíveis** e nunca reprovam. Uma regra cujo `from` não casa com nenhum arquivo analisado é apontada (o padrão provavelmente está errado).
+
+| Opção              | Para que serve                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `--init`           | Escreve o `rastro.rules.json` com as regras que o projeto já cumpre (nunca sobrescreve um arquivo existente) |
+| `--changes`        | Só as violações introduzidas pelas mudanças sem commit reprovam (as outras contam como já existentes)        |
+| `--since <ref>`    | Só as violações introduzidas desde que a branch saiu de `<ref>` reprovam                                     |
+| `-f, --format <f>` | `text` (padrão), `markdown` ou `json`                                                                        |
+| `--link <url>`     | Transforma `arquivo:linha` em links no Markdown                                                              |
+| `-o, --out <arq>`  | Escreve num arquivo em vez da saída padrão                                                                   |
+
+Uma violação é **introduzida** por uma mudança quando a evidência dela está numa linha que a mudança adicionou ou alterou. Códigos de saída, como um linter: `0` nenhuma violação que reprova, `1` pelo menos uma (só regras `error`), `2` problema no arquivo de regras. O `rastro impact`, o comentário do pull request, o mapa (aba **Regras**, com as violações em vermelho) e o `rastro_check` usam as mesmas regras e o mesmo cálculo.
+
+O arquivo de regras é JSON puro: nada do projeto é executado. No CI ele vem do pull request, então é lido como entrada não confiável: link simbólico é recusado (o `--rules` segue um de propósito), um erro de JSON nunca cita o arquivo, e os padrões são casados sem expressões regulares (um padrão malicioso não trava o job). Como um pull request também pode editar as regras, proteja o `rastro.rules.json` com uma entrada no `CODEOWNERS` se elas importam.
+
 ### GitHub Action
 
-`uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário por `path` analisado, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`. Num monorepo, chame a action uma vez por pacote, com `path` e `artifact-name` diferentes: cada chamada tem o seu comentário, as suas saídas e o seu relatório. Os links do comentário apontam para o commit analisado e para o caminho do arquivo no repositório.
+`uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário por `path` analisado, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`. Num monorepo, chame a action uma vez por pacote, com `path` e `artifact-name` diferentes: cada chamada tem o seu comentário, as suas saídas e o seu relatório. Os links do comentário apontam para o commit analisado e para o caminho do arquivo no repositório. Quando a pasta analisada tem um `rastro.rules.json`, o comentário também lista as violações de [regras de arquitetura](#regras-de-arquitetura) que o pull request introduz, e o job reprova depois de comentar (`fail-on-violations: false` para só avisar).
 
-| Entrada          | Padrão                 | Para que serve                                                      |
-| ---------------- | ---------------------- | ------------------------------------------------------------------- |
-| `path`           | `.`                    | Pasta do projeto a analisar                                         |
-| `base`           | a base do pull request | Branch para comparar                                                |
-| `exclude`        |                        | Caminhos a ignorar, um por linha (sintaxe do `.gitignore`)          |
-| `comment`        | `true`                 | Comenta no pull request                                             |
-| `github-token`   | `${{ github.token }}`  | Token usado para comentar no pull request                           |
-| `comment-author` | `github-actions[bot]`  | Login que publica o comentário (troque se usar outro token)         |
-| `report`         | `true`                 | Envia o relatório HTML offline                                      |
-| `artifact-name`  | `rastro-report`        | Nome do artefato (um por chamada, se usar a action mais de uma vez) |
-| `lang`           | `en`                   | `en` ou `pt`                                                        |
-| `version`        | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                                 |
+| Entrada              | Padrão                 | Para que serve                                                                                                                                          |
+| -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`               | `.`                    | Pasta do projeto a analisar                                                                                                                             |
+| `base`               | a base do pull request | Branch para comparar                                                                                                                                    |
+| `exclude`            |                        | Caminhos a ignorar, um por linha (sintaxe do `.gitignore`)                                                                                              |
+| `comment`            | `true`                 | Comenta no pull request                                                                                                                                 |
+| `github-token`       | `${{ github.token }}`  | Token usado para comentar no pull request                                                                                                               |
+| `comment-author`     | `github-actions[bot]`  | Login que publica o comentário (troque se usar outro token)                                                                                             |
+| `report`             | `true`                 | Envia o relatório HTML offline                                                                                                                          |
+| `artifact-name`      | `rastro-report`        | Nome do artefato (um por chamada, se usar a action mais de uma vez)                                                                                     |
+| `fail-on-violations` | `true`                 | Reprova o job quando o pull request introduz uma violação de uma regra `error` do `rastro.rules.json` (ou o arquivo é inválido); o comentário sai antes |
+| `lang`               | `en`                   | `en` ou `pt`                                                                                                                                            |
+| `version`            | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                                                                                                                     |
 
-Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `broken` (referências possivelmente quebradas pela mudança), `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
+Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `broken` (referências possivelmente quebradas pela mudança), `violations` (violações de regras de arquitetura que o pull request introduz), `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
 
 ```yaml
 - id: rastro
@@ -534,6 +609,6 @@ Veja o [CONTRIBUTING.md](CONTRIBUTING.md). Encontrou um problema de segurança? 
 
 ## Licença
 
-[MIT](LICENSE) © [MongeAI](https://github.com/MongeAI). As fontes Inter e JetBrains Mono incluídas na interface usam a SIL Open Font License 1.1.
+[MIT](LICENSE) ™ [MongeAI](https://github.com/MongeAI). As fontes Inter e JetBrains Mono incluídas na interface usam a SIL Open Font License 1.1.
 
 <p align="center"><sub>Feito no Brasil 🇧🇷 pela MongeAI.</sub></p>

@@ -149,7 +149,7 @@ describe.skipIf(!bundled)('rastro mcp (CLI empacotada)', () => {
     expect(initMs).toBeLessThan(5000);
     // tools/list e ping respondem mesmo com a primeira análise em andamento (worker thread)
     const list = await client.request('tools/list');
-    expect((list.result!.tools as unknown[]).length).toBe(7);
+    expect((list.result!.tools as unknown[]).length).toBe(8);
     expect((await client.request('ping')).result).toEqual({});
 
     const calls: Array<[string, Record<string, unknown>, string]> = [

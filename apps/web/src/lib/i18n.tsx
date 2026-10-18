@@ -107,6 +107,7 @@ const pt = {
     showSummary: 'Abrir o resumo da análise',
     showInsights: 'Abrir os insights',
     showChanges: 'Abrir as mudanças do git',
+    showRules: 'Abrir as regras de arquitetura',
     shortcuts: 'Atalhos do teclado',
     parent: 'Ir para quem contém a seleção',
     toggleOpen: 'Expandir ou recolher a seleção',
@@ -329,6 +330,33 @@ const pt = {
     legendChanged: 'mudou',
     legendImpacted: 'afetado',
   },
+  rules: {
+    tab: 'Regras',
+    eyebrow: 'Regras de arquitetura',
+    allPassed: (count: number) =>
+      count === 1 ? 'A regra é cumprida' : `As ${count} regras são cumpridas`,
+    violations: (count: number) => n(count, 'violação', 'violações'),
+    warnings: (count: number) => n(count, 'aviso', 'avisos'),
+    noRules: 'O arquivo não tem nenhuma regra.',
+    invalid: 'O arquivo de regras tem problemas; nenhuma regra foi conferida:',
+    introduced: (count: number) =>
+      count === 0
+        ? 'Nenhuma violação nova nas mudanças do git.'
+        : `${n(count, 'violação nova', 'violações novas')} nas mudanças do git.`,
+    isNew: 'nova',
+    highlight: 'Destacar no mapa',
+    legend: 'viola uma regra',
+    passed: 'cumprida',
+    warning: 'aviso',
+    noFiles: 'Nenhum arquivo analisado casa com "from"/"except": o padrão está certo?',
+    possible: (count: number) => n(count, 'violação possível', 'violações possíveis'),
+    possibleHint:
+      'Por chamadas não resolvidas (interface ou método abstrato) que podem ir para lá. Nunca reprovam.',
+    kind: { imports: 'import', calls: 'chamada', extends: 'herança' } as Record<string, string>,
+    typeOnly: 'só tipos',
+    cycleOf: (size: number) => `ciclo entre ${size} arquivos`,
+    hint: 'Só relações comprovadas (imports, chamadas e herança resolvidos) contam. Confira no terminal com "rastro check"; no CI, a Action do Rastro reprova as violações novas.',
+  },
   paths: {
     start: 'Traçar caminho a partir daqui',
     startTitle: 'Descobre como esta entidade chega em outra (chamadas, imports e herança)',
@@ -502,6 +530,7 @@ const en: Messages = {
     showSummary: 'Open the analysis summary',
     showInsights: 'Open insights',
     showChanges: 'Open git changes',
+    showRules: 'Open architecture rules',
     shortcuts: 'Keyboard shortcuts',
     parent: 'Go to the parent of the selection',
     toggleOpen: 'Expand or collapse the selection',
@@ -720,6 +749,32 @@ const en: Messages = {
               : 'name not declared in the file',
     legendChanged: 'changed',
     legendImpacted: 'affected',
+  },
+  rules: {
+    tab: 'Rules',
+    eyebrow: 'Architecture rules',
+    allPassed: (count) => (count === 1 ? 'The rule passes' : `All ${count} rules pass`),
+    violations: (count) => n(count, 'violation', 'violations'),
+    warnings: (count) => n(count, 'warning', 'warnings'),
+    noRules: 'The file has no rules.',
+    invalid: 'The rules file has problems; no rule was checked:',
+    introduced: (count) =>
+      count === 0
+        ? 'No new violations in the git changes.'
+        : `${n(count, 'new violation', 'new violations')} in the git changes.`,
+    isNew: 'new',
+    highlight: 'Highlight on the map',
+    legend: 'breaks a rule',
+    passed: 'passes',
+    warning: 'warning',
+    noFiles: 'No analyzed file matches "from"/"except": is the pattern right?',
+    possible: (count) => n(count, 'possible violation', 'possible violations'),
+    possibleHint:
+      'Through unresolved calls (interface or abstract method) that may go there. They never fail.',
+    kind: { imports: 'import', calls: 'call', extends: 'inheritance' },
+    typeOnly: 'types only',
+    cycleOf: (size) => `cycle among ${size} files`,
+    hint: 'Only proven relationships (resolved imports, calls and inheritance) count. Check them in the terminal with "rastro check"; in CI, the Rastro Action fails new violations.',
   },
   paths: {
     start: 'Trace a path from here',

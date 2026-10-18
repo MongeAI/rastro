@@ -63,12 +63,20 @@ Se o sistema não deixar observar as pastas (no Linux, por exemplo, o limite `fs
 O `rastro mcp` é um servidor do Model Context Protocol iniciado pelo cliente de IA (Claude Code, Cursor, VS Code...) como processo filho:
 
 - **Só stdio.** Não abre porta de rede: fala JSON-RPC pelo stdin/stdout com o processo que o iniciou, e mais ninguém. O stdout só carrega mensagens do protocolo (os avisos vão para o stderr, e até um `console.log` acidental é desviado para lá); mensagens acima de 1 MB são recusadas sem derrubar o servidor.
-- **Só leitura.** As sete ferramentas consultam o grafo (anotadas como `readOnlyHint`); nenhuma grava arquivos, executa código do projeto ou instala algo. A análise roda numa worker thread com o mesmo analisador da CLI.
+- **Só leitura.** As oito ferramentas consultam o grafo (anotadas como `readOnlyHint`); nenhuma grava arquivos, executa código do projeto ou instala algo. A análise roda numa worker thread com o mesmo analisador da CLI.
 - **Código só de arquivos analisados.** `rastro_entity` com `source: true` usa a mesma leitura do servidor local (`readSource`): só arquivos JS/TS que estão no grafo como analisados, nada de caminhos absolutos ou com `..`, o caminho real precisa ficar dentro da raiz (links simbólicos recusados), até 2 MB por arquivo e no máximo 120 linhas por resposta.
 - **Git com as mesmas proteções.** O modo git do `rastro_impact` (mudanças sem commit ou `since`) chama o mesmo `collectChanges` do `rastro impact`, com todas as proteções da seção [Mudanças do git](#mudanças-do-git---changes---since). A referência vem do agente: uma que comece com `-` é recusada, e a configuração arriscada do repositório também, a não ser que o servidor tenha sido iniciado com `--trust-git-config` (o agente não consegue ligar isso). A branch mostrada no resumo é lida do `.git/HEAD`, sem rodar o git.
 - **Texto do projeto como dado.** Nomes, caminhos, ids e trechos de código chegam ao agente como código inline, numa linha só: quebras de linha, tabs, caracteres de controle e os separadores U+2028/U+2029/U+0085 viram escapes visíveis (`\n`, `\u2028`), então um arquivo ou um `name` do package.json não consegue escrever títulos ou "instruções" na resposta (e o id escapado continua valendo como alvo). O código-fonte vai num bloco cercado com uma cerca maior que qualquer sequência de crases dele. No stdout, U+2028/U+2029 também saem escapados no JSON. O agente lê código do projeto de qualquer forma; trate comentários e strings de repositórios desconhecidos como dados, não como instruções.
 - **Stderr fechado não derruba.** Se o cliente fechar o pipe do stderr, os avisos são descartados e o servidor continua respondendo; quando a entrada fecha, ele espera no máximo 2 s pelas respostas em andamento e encerra.
 - **Observação de arquivos.** Igual ao modo ao vivo (ver abaixo): só as pastas que o analisador leria, só para marcar o grafo como desatualizado; `--no-watch` desliga.
+
+## Regras de arquitetura (`rastro.rules.json`)
+
+- **Só JSON.** O arquivo de regras nunca é executado (não há configuração em JavaScript).
+- **Entrada não confiável.** No CI, o arquivo vem do pull request. O `rastro.rules.json` padrão precisa ser um arquivo comum de até 1 MB: um link simbólico (que poderia apontar para um arquivo do runner) é recusado; com `--rules`, quem chamou escolheu o arquivo e o link é seguido. Um erro de JSON mostra só a mensagem e a posição, nunca um trecho do arquivo.
+- **Sem travar o CI.** Os padrões são casados por programação dinâmica, não por expressões regulares: um padrão como `*a*a*a*a…` ou `**/**/**/…` não causa backtracking exponencial. As alternativas `{a,b}` são limitadas a 64 por padrão e cada padrão a 500 caracteres.
+- **Nomes como dados.** O nome e o `because` de cada regra chegam ao comentário do pull request como código inline (sem links, menções ou HTML) e às respostas do MCP escapados numa linha só.
+- **Um pull request pode mudar as regras.** Proteja o `rastro.rules.json` com uma entrada no `CODEOWNERS` se as regras importam.
 
 ## Relatório HTML offline
 

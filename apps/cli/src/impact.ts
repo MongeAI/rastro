@@ -14,6 +14,7 @@ import {
   type BrokenReference,
   type ChangeImpact,
 } from '@rastro/graph';
+import { buildCheckReport, rulesMarkdown, rulesText, type CheckReport } from './check.js';
 import { getLang, t } from './i18n.js';
 import { bold, cyan, dim, red, safeText, yellow } from './term.js';
 
@@ -71,6 +72,8 @@ export interface ImpactReport {
     outsideGraph: number;
     /** Referências possivelmente quebradas pela mudança. */
     broken: number;
+    /** Violações de regras de arquitetura introduzidas pela mudança (com `rastro.rules.json`). */
+    violations?: number;
   };
   changed: ImpactItem[];
   impacted: ImpactedItem[];
@@ -84,6 +87,11 @@ export interface ImpactReport {
    * que deixou de ser exportado, membro que sumiu): possivelmente quebradas pela mudança.
    */
   broken: BrokenItem[];
+  /**
+   * As regras de arquitetura conferidas (quando o projeto tem `rastro.rules.json`): só as
+   * violações com `introduced` vieram desta mudança.
+   */
+  rules?: CheckReport;
 }
 
 /** Nomes vêm do código analisado: um literal enorme não pode estourar um comentário. */
@@ -139,6 +147,8 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
     .map(item)
     .sort((a, b) => compareStrings(a.file ?? '', b.file ?? '') || (a.line ?? 0) - (b.line ?? 0));
   const tests = impact.tests.map((f) => f.qualifiedName ?? f.name).sort(compareStrings);
+  const rules = graph.rules ? buildCheckReport(graph, index) : undefined;
+  const introduced = rules?.summary.introduced;
   return {
     tool: { name: 'rastro', version: RASTRO_VERSION },
     project: graph.project.name,
@@ -153,6 +163,7 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
       tests: tests.length,
       outsideGraph: impact.outsideGraph.length,
       broken: impact.broken.length,
+      ...(introduced ? { violations: introduced.errors + introduced.warnings } : {}),
     },
     changed,
     impacted: impact.impacted.map((entry) => ({
@@ -178,6 +189,7 @@ export function buildImpactReport(graph: RastroGraph): ImpactReport {
       ...(b.evidence ? { file: b.evidence.file, line: b.evidence.line } : {}),
       count: b.count,
     })),
+    ...(rules ? { rules } : {}),
   };
 }
 
@@ -230,6 +242,7 @@ function renderText(report: ImpactReport, options: RenderOptions): string {
       lines.push(`  ${cyan('•')} ${safeText(i.name)} ${kind(i)} ${where(i)}`);
     more(report.changed.length);
   }
+  if (report.rules) lines.push('', ...rulesText(report.rules, limit));
   if (report.broken.length) {
     lines.push('', bold(m.broken), `  ${dim(m.brokenHint)}`);
     for (const b of report.broken.slice(0, limit))
@@ -337,6 +350,7 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
     out.push('');
   }
 
+  if (report.rules) out.push(rulesMarkdown(report.rules, options, '####'), '');
   if (report.broken.length) {
     out.push(`#### ${m.broken}`, '', `_${m.brokenHint}_`, '');
     for (const b of report.broken.slice(0, limit))
@@ -417,6 +431,7 @@ function summaryLine(report: ImpactReport): string {
   return [
     m.files(s.files),
     m.changedCount(s.changed),
+    ...(s.violations ? [t().rules.newViolations(s.violations)] : []),
     ...(s.broken ? [m.brokenCount(s.broken)] : []),
     m.impactedCount(s.impacted),
     ...(s.routes ? [m.routesCount(s.routes)] : []),

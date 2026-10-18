@@ -6,6 +6,8 @@
  * Nada aqui depende de Node.js, para que a interface web possa reutilizar os tipos.
  */
 
+import type { RuleIssue, RulesConfig } from './rules.js';
+
 export const SCHEMA_VERSION = '0.1.0';
 
 export const NODE_KINDS = [
@@ -296,4 +298,16 @@ export interface RastroGraph {
   diagnostics: Diagnostic[];
   /** Mudanças do git, quando a análise foi feita com `--changes` ou `--since`. */
   changes?: ChangeSet;
+  /** Regras de arquitetura do projeto (`rastro.rules.json`), quando existem. */
+  rules?: GraphRules;
+}
+
+/** O arquivo de regras de arquitetura lido junto com a análise. */
+export interface GraphRules {
+  /** Caminho do arquivo (relativo à raiz analisada quando está dentro dela). */
+  source: string;
+  /** O conteúdo do arquivo, quando ele é válido. */
+  config?: RulesConfig;
+  /** Problemas no arquivo: enquanto houver algum, nenhuma regra é conferida. */
+  issues?: RuleIssue[];
 }
