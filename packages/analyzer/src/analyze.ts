@@ -2051,9 +2051,8 @@ function receiverFileOf(ctx: Ctx, receiver: ts.Node, name: string): string | und
       !(symbol.flags & kinds) ||
       type.getProperty(name) ||
       ctx.checker.getIndexInfosOfType(type).length ||
-      // base desconhecida (import quebrado, `any`): o membro pode vir dela
-      (type.isClassOrInterface() &&
-        ctx.checker.getBaseTypes(type).some((base) => base.flags & ts.TypeFlags.Any))
+      // base desconhecida (import quebrado, `any`), em qualquer nível: o membro pode vir dela
+      hasUnknownBase(ctx.checker, symbol, new Set())
     )
       return undefined;
   } catch {
@@ -2064,6 +2063,40 @@ function receiverFileOf(ctx: Ctx, receiver: ts.Node, name: string): string | und
     if (known && (known.language === 'ts' || known.language === 'tsx')) return known.relative;
   }
   return undefined;
+}
+
+/**
+ * A classe ou interface herda de algo que o verificador não conhece? O TypeScript descarta
+ * da lista de bases (`getBaseTypes`) as que não resolvem, então a conferência é feita nas
+ * cláusulas `extends` de cada declaração, subindo pela hierarquia.
+ */
+function hasUnknownBase(checker: ts.TypeChecker, symbol: ts.Symbol, seen: Set<ts.Symbol>): boolean {
+  if (seen.has(symbol)) return false;
+  seen.add(symbol);
+  for (const decl of symbol.declarations ?? []) {
+    if (!ts.isClassLike(decl) && !ts.isInterfaceDeclaration(decl)) continue;
+    for (const clause of decl.heritageClauses ?? []) {
+      if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
+      for (const expr of clause.types) {
+        const base = checker.getTypeAtLocation(expr);
+        if (base.flags & ts.TypeFlags.Any) return true;
+        const baseSymbol = base.getSymbol();
+        if (!baseSymbol) {
+          // base sem símbolo próprio (ex.: interseção, mixin): só conhecida se cada parte for
+          const parts = base.isUnionOrIntersection() ? base.types : [];
+          if (!parts.length) return true;
+          for (const part of parts) {
+            const partSymbol = part.getSymbol();
+            if (part.flags & ts.TypeFlags.Any || !partSymbol) return true;
+            if (hasUnknownBase(checker, partSymbol, seen)) return true;
+          }
+          continue;
+        }
+        if (hasUnknownBase(checker, baseSymbol, seen)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** Entidade mais próxima que envolve um nó (ou o próprio arquivo, para código no topo). */

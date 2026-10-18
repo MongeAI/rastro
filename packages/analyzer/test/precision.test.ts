@@ -805,6 +805,37 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
     );
   });
 
+  it('base desconhecida em qualquer nível da herança: o membro pode vir dela', async () => {
+    const root = makeProject({
+      'src/app.ts': [
+        "import type { Base } from 'pacote-que-nao-existe';",
+        'export interface Middle extends Base {',
+        '  listen(): void;',
+        '}',
+        'export interface App extends Middle {',
+        '  use(): void;',
+        '}',
+        'export class Known {',
+        '  run(): void {}',
+        '}',
+        'export class Child extends Known {}',
+      ].join('\n'),
+      'src/use.ts': [
+        "import type { App, Child } from './app';",
+        'export function start(app: App, c: Child) {',
+        '  app.close();',
+        '  c.nope();',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expectValid(g);
+    // Base não resolve: `close` pode existir nela, então nada é atribuído ao arquivo de App
+    expect(node(g, 'unresolved:src/use.ts#call:app.close')?.meta?.receiverFile).toBeUndefined();
+    // hierarquia toda conhecida: o membro comprovadamente não existe
+    expect(node(g, 'unresolved:src/use.ts#call:c.nope')?.meta?.receiverFile).toBe('src/app.ts');
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');
