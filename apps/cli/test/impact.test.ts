@@ -418,6 +418,40 @@ describe('possivelmente quebrado pela mudança', () => {
     expect(await brokenOf(types)).toEqual([]);
   });
 
+  it('arquivo movido: os imports relativos dele que não resolvem mais da pasta nova', async () => {
+    setLang('en');
+    const a =
+      "import { h } from './helper';\nimport { g } from './ghost';\nexport const a = h + g;\n";
+    const root = gitProject(
+      {
+        'src/helper.ts': 'export const h = 1;\n',
+        'src/a.ts':
+          "import { h } from './helper';\nimport { g } from './ghost';\nexport const a = h + g;\n",
+        'src/main.ts': "import { a } from './a';\nexport const m = a;\n",
+      },
+      ({ git, write }) => {
+        // como um `git mv` para uma pasta nova
+        write('src/sub/a.ts', a);
+        git('rm', '-q', 'src/a.ts');
+        git('add', 'src/sub/a.ts');
+        write('src/main.ts', "import { a } from './sub/a';\nexport const m = a;\n");
+      },
+    );
+    // `./ghost` nunca existiu: não tem nada a ver com a mudança
+    expect(await brokenOf(root)).toEqual([
+      ['import', 'a.ts', './helper', 'src/a.ts', 'importer-moved', 'src/sub/a.ts:1'],
+    ]);
+    const report = buildImpactReport(await graphWithChanges(root));
+    expect(renderImpact(report, 'text')).toContain(
+      'imports ./helper, which no longer resolves since this file moved from src/a.ts',
+    );
+    setLang('pt');
+    expect(renderImpact(report, 'text')).toContain(
+      'importa ./helper, que não resolve mais desde que o arquivo saiu de src/a.ts',
+    );
+    setLang('en');
+  });
+
   it('nada quebrado: nenhuma seção nova', async () => {
     setLang('en');
     const report = buildImpactReport(await graphWithChanges(changedProject()));

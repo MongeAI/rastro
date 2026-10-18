@@ -1688,6 +1688,8 @@ const IMPACT_FORMATS = ['full', 'summary', 'tests'] as const;
 const brokenWhy: Record<BrokenReference['why'], string> = {
   'file-deleted': 'the file was deleted',
   'file-renamed': 'the file was renamed or moved',
+  'importer-moved':
+    'the importing file was moved (from this path); the relative import no longer resolves from its new folder',
   'not-exported': 'the changed file does not export that name',
   'member-missing': 'the type, declared in the changed file, has no such member',
   'name-missing': 'the changed file no longer declares or imports that name',

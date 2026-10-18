@@ -26,11 +26,19 @@ export interface BrokenReference {
   target: string;
   /**
    * `file-deleted`/`file-renamed`: o arquivo importado não existe mais nesse caminho;
+   * `importer-moved`: o próprio arquivo foi movido e o import relativo dele, que resolvia a
+   * partir da pasta antiga (`target` é o caminho antigo), não resolve mais da pasta nova;
    * `not-exported`: o arquivo alterado não exporta o nome; `member-missing`: o tipo declarado
    * no arquivo alterado não tem o membro chamado; `name-missing`: o arquivo alterado (TypeScript)
    * chama um nome que não está declarado nem importado nele.
    */
-  why: 'file-deleted' | 'file-renamed' | 'not-exported' | 'member-missing' | 'name-missing';
+  why:
+    | 'file-deleted'
+    | 'file-renamed'
+    | 'importer-moved'
+    | 'not-exported'
+    | 'member-missing'
+    | 'name-missing';
   /** Onde aparece (a primeira ocorrência) e quantas vezes. */
   evidence?: Evidence;
   count: number;
@@ -278,6 +286,32 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
         for (const name of edge.meta?.names ?? []) addName(importer.id, name, target, why);
       }
     }
+
+  // arquivos movidos: o import relativo que resolvia da pasta antiga (para um arquivo que
+  // existe) e não resolve mais da nova
+  for (const f of changes.files) {
+    if (f.status !== 'renamed' || !f.previous || f.previous === f.file) continue;
+    const fileNode = index.node(nodeId.file(f.file));
+    if (!fileNode) continue;
+    for (const edge of index.outgoing(fileNode.id, ['imports'])) {
+      const target = index.node(edge.target);
+      if (target?.kind !== 'unresolved' || target.meta?.reason !== 'module-not-found') continue;
+      const specifier = edge.meta?.specifier ?? target.meta?.reference ?? target.name;
+      const before = specifierCandidates(f.previous, specifier).find(
+        (c) => c !== f.file && index.node(nodeId.file(c)),
+      );
+      if (!before) continue;
+      found.push({
+        from: fileNode,
+        kind: 'import',
+        reference: specifier,
+        target: f.previous,
+        why: 'importer-moved',
+        ...(edge.evidence[0] ? { evidence: edge.evidence[0] } : {}),
+        count: Math.max(edge.meta?.count ?? 0, edge.evidence.length, 1),
+      });
+    }
+  }
 
   // nomes que os arquivos alterados não exportam mais
   for (const file of changed) {
