@@ -76,6 +76,14 @@ const DEFAULT_EDGES: EdgeKind[] = ['imports', 'calls', 'extends'];
 /** Pacotes externos começam ocultos no mapa para não poluir; continuam nos filtros e nos detalhes. */
 const DEFAULT_NODES: NodeKind[] = NODE_KIND_ORDER.filter((k) => k !== 'package');
 const SYMBOL_KINDS: NodeKind[] = ['function', 'class', 'method', 'route'];
+/**
+ * Nível de símbolos em projetos grandes: acima de CONFIRM pede confirmação; acima de SLOW avisa
+ * que pode levar minutos; acima de MAX não é oferecido (no Chrome, ~6 mil símbolos levam uns
+ * 15 s e ~30 mil, vários minutos com a página travada).
+ */
+const SYMBOLS_CONFIRM = 1000;
+const SYMBOLS_SLOW = 5000;
+const SYMBOLS_MAX = 20000;
 
 export function App() {
   // idioma: o escolhido pelo usuário ou o do navegador
@@ -442,7 +450,7 @@ function Explorer({
   /** Muitos símbolos de uma vez: pede confirmação no próprio mapa (sem travar a página). */
   const [confirmSymbols, setConfirmSymbols] = useState(false);
   const requestLevel = (next: Level) => {
-    if (next === 'symbols' && level !== 'symbols' && symbolCount > 1000) {
+    if (next === 'symbols' && level !== 'symbols' && symbolCount > SYMBOLS_CONFIRM) {
       setConfirmSymbols(true);
       return;
     }
@@ -1247,24 +1255,43 @@ function Explorer({
         <div className="stage-top">
           {confirmSymbols && (
             <div className="focus-pill confirm-pill" role="alertdialog" aria-live="polite">
-              <span>{t.sidebar.confirmSymbols(symbolCount)}</span>
-              <button
-                type="button"
-                className="button"
-                onClick={() => {
-                  setConfirmSymbols(false);
-                  setLevel('symbols');
-                }}
-              >
-                {t.sidebar.confirmShow}
-              </button>
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => setConfirmSymbols(false)}
-              >
-                {t.paths.cancel}
-              </button>
+              {symbolCount > SYMBOLS_MAX ? (
+                <>
+                  <span>{t.sidebar.tooManySymbols(symbolCount, SYMBOLS_MAX)}</span>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => setConfirmSymbols(false)}
+                  >
+                    {t.sidebar.understood}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    {symbolCount > SYMBOLS_SLOW
+                      ? t.sidebar.confirmSymbolsSlow(symbolCount)
+                      : t.sidebar.confirmSymbols(symbolCount)}
+                  </span>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      setConfirmSymbols(false);
+                      setLevel('symbols');
+                    }}
+                  >
+                    {t.sidebar.confirmShow}
+                  </button>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => setConfirmSymbols(false)}
+                  >
+                    {t.paths.cancel}
+                  </button>
+                </>
+              )}
             </div>
           )}
           {pathMode && !pathMode.to && (

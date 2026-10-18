@@ -162,7 +162,12 @@ const pt = {
     },
     confirmSymbols: (count: number) =>
       `Mostrar ${count} símbolos de uma vez pode levar vários segundos e deixar o mapa difícil de ler. Dica: use a busca ou dê dois cliques nos arquivos que interessam.`,
+    confirmSymbolsSlow: (count: number) =>
+      `Mostrar ${count} símbolos de uma vez pode levar um minuto ou mais, e a página não responde enquanto isso. Dica: use a busca, o foco ou dê dois cliques nos arquivos que interessam.`,
+    tooManySymbols: (count: number, max: number) =>
+      `São ${count} símbolos, demais para mostrar de uma vez (o limite é ${max}): a página pararia de responder. Use a busca, o foco ou dê dois cliques nos arquivos que interessam.`,
     confirmShow: 'Mostrar mesmo assim',
+    understood: 'Entendi',
     layout: 'Organização',
     hierarchical: 'Hierárquica (fluxo)',
     organic: 'Orgânica (proximidade)',
@@ -585,7 +590,12 @@ const en: Messages = {
     },
     confirmSymbols: (count) =>
       `Showing ${count} symbols at once may take several seconds and make the map hard to read. Tip: use search or double-click only the files you care about.`,
+    confirmSymbolsSlow: (count) =>
+      `Showing ${count} symbols at once may take a minute or more, and the page won't respond meanwhile. Tip: use search, focus, or double-click only the files you care about.`,
+    tooManySymbols: (count, max) =>
+      `There are ${count} symbols, too many to show at once (the limit is ${max}): the page would stop responding. Use search, focus, or double-click only the files you care about.`,
     confirmShow: 'Show anyway',
+    understood: 'Got it',
     layout: 'Layout',
     hierarchical: 'Hierarchical (flow)',
     organic: 'Organic (proximity)',

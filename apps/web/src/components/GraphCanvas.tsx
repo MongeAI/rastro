@@ -7,6 +7,7 @@ import { useI18n } from '../lib/i18n';
 import type { GraphView, ViewNode } from '@rastro/graph';
 import { computeElkPositions, LayoutCancelled, LayoutTimeout } from '../lib/elkLayout';
 import { buildStyle, displayLabel, estimateNodeWidth } from '../lib/graphStyle';
+import { patchStyleCache } from '../lib/cytoscapePatch';
 import type { Palette } from '../lib/theme';
 import { Minimap } from './Minimap';
 
@@ -16,85 +17,6 @@ cytoscape.warnings(false);
 cytoscape.use(fcose);
 // necessário para o fcose empacotar componentes desconectados (packComponents)
 cytoscape.use(layoutUtilities);
-
-/**
- * Propriedades de que dependem os estados derivados que o Cytoscape guarda em cache
- * (`visible`, `takesUpSpace`, `interactive`, `isBundledBezier`).
- */
-const DERIVED_STATE_PROPS = new Set([
-  'display',
-  'visibility',
-  'opacity',
-  'events',
-  'curve-style',
-  'width',
-  'height',
-]);
-
-/**
- * Atalhos para um caminho quente do Cytoscape, com o mesmo resultado:
- *
- * - a cada propriedade de estilo aplicada, `checkTriggers` invalida o cache de estados
- *   derivados do elemento, dos descendentes, dos pais e das linhas conectadas. Isso só é
- *   necessário quando muda uma propriedade da qual esses estados dependem; para cor, fonte,
- *   borda... basta o próprio elemento. Com grupos de milhares de nós, a invalidação ampla a
- *   cada propriedade custava segundos;
- * - para linhas, o conjunto invalidado é sempre só a própria linha, então não é montado.
- */
-function patchStyleCache(cy: Core) {
-  interface Ele {
-    isEdge(): boolean;
-    _private: { styleCache: unknown; parent?: Ele | null; children?: Ele[]; edges?: Ele[] };
-  }
-  type Eles = Ele[] & { dirtyStyleCache(): unknown };
-  const eles = Object.getPrototypeOf(cy.collection()) as {
-    dirtyStyleCache(this: Eles): Eles;
-    __rastroPatched?: boolean;
-  };
-  if (eles.__rastroPatched) return;
-  eles.__rastroPatched = true;
-  // o mesmo conjunto do original (elemento, descendentes, pais e as linhas de todos eles),
-  // percorrido direto na árvore em vez de montar coleções intermediárias a cada chamada
-  const clear = (el: Ele) => {
-    el._private.styleCache = null;
-    for (const edge of el._private.edges ?? []) edge._private.styleCache = null;
-  };
-  eles.dirtyStyleCache = function (this: Eles) {
-    for (let i = 0; i < this.length; i++) {
-      const el = this[i]!;
-      if (el.isEdge()) {
-        el._private.styleCache = null;
-        continue;
-      }
-      clear(el);
-      const stack = [...(el._private.children ?? [])];
-      while (stack.length) {
-        const child = stack.pop()!;
-        clear(child);
-        if (child._private.children?.length) stack.push(...child._private.children);
-      }
-      for (let p = el._private.parent; p; p = p._private.parent) clear(p);
-    }
-    return this;
-  };
-
-  type Check = (ele: Eles & Ele, name: string, from: unknown, to: unknown) => void;
-  const style = Object.getPrototypeOf(cy.style()) as {
-    checkTriggers: Check;
-    checkZOrderTrigger: Check;
-    checkBoundsTrigger: Check;
-    checkConnectedEdgesBoundsTrigger: Check;
-    checkParallelEdgesBoundsTrigger: Check;
-  };
-  style.checkTriggers = function (ele, name, from, to) {
-    if (DERIVED_STATE_PROPS.has(name)) ele.dirtyStyleCache();
-    else ele._private.styleCache = null;
-    this.checkZOrderTrigger(ele, name, from, to);
-    this.checkBoundsTrigger(ele, name, from, to);
-    this.checkConnectedEdgesBoundsTrigger(ele, name, from, to);
-    this.checkParallelEdgesBoundsTrigger(ele, name, from, to);
-  };
-}
 
 export type LayoutMode = 'hierarchical' | 'organic';
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -155,6 +77,19 @@ const FAST_EDGES = 2500;
 // não podem ser apagadas quando a visão é sincronizada
 const NODE_CLASSES = ['cycle', 'expandable', 'collapsed', 'not-analyzed'];
 const EDGE_CLASSES = ['fast', 'type-only', 'aggregated', 'cycle'];
+
+/** Classes do destaque (seleção, caminho, mudanças, regras); `hover` fica de fora. */
+const HIGHLIGHT_CLASSES = [
+  'faded',
+  'highlight',
+  'chosen',
+  'path',
+  'changed',
+  'impacted',
+  'impact-edge',
+  'violation',
+] as const;
+type HighlightClass = (typeof HIGHLIGHT_CLASSES)[number];
 
 /** Liga e desliga só as classes estruturais que mudaram. */
 function syncClasses(
@@ -623,10 +558,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.batch(() => {
-      cy.elements().removeClass(
-        'faded highlight chosen path changed impacted impact-edge violation',
-      );
+    // monta o destaque desejado e depois só liga e desliga as classes que mudaram: com dezenas
+    // de milhares de elementos, tirar e repor `faded` em todos a cada seleção recalculava o
+    // estilo do mapa inteiro
+    const wanted = new Map<HighlightClass, cytoscape.CollectionReturnValue>();
+    const mark = (cls: HighlightClass, eles: cytoscape.CollectionArgument) =>
+      wanted.set(cls, (wanted.get(cls) ?? cy.collection()).union(eles));
+    const compute = () => {
       if (
         props.ruleHighlight &&
         !props.selectedId &&
@@ -642,10 +580,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
           .filter((e) =>
             ((e.data('members') as string[] | undefined) ?? [e.id()]).some((m) => edgeIds.has(m)),
           );
-        nodes.addClass('violation');
-        edges.addClass('violation');
+        mark('violation', nodes);
+        mark('violation', edges);
         const keep = nodes.union(edges).union(edges.connectedNodes());
-        if (keep.nonempty()) cy.elements().not(keep.union(keep.ancestors())).addClass('faded');
+        if (keep.nonempty()) mark('faded', cy.elements().not(keep.union(keep.ancestors())));
         return;
       }
       if (
@@ -658,14 +596,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
         const impacted = new Set(props.changeHighlight.impacted);
         const changedNodes = cy.nodes().filter((n) => changed.has(n.id()));
         const impactedNodes = cy.nodes().filter((n) => impacted.has(n.id()));
-        changedNodes.addClass('changed');
-        impactedNodes.addClass('impacted');
+        mark('changed', changedNodes);
+        mark('impacted', impactedNodes);
         const involved = changedNodes.union(impactedNodes);
         // linhas entre o que mudou e o que é afetado mostram por onde o impacto chega
         const edges = involved.edgesWith(involved);
-        edges.addClass('impact-edge');
+        mark('impact-edge', edges);
         const keep = involved.union(edges).union(involved.ancestors());
-        if (involved.nonempty()) cy.elements().not(keep).addClass('faded');
+        if (involved.nonempty()) mark('faded', cy.elements().not(keep));
         return;
       }
       if (props.pathHighlight) {
@@ -678,33 +616,42 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCa
           .filter((e) =>
             ((e.data('members') as string[] | undefined) ?? [e.id()]).some((m) => edgeIds.has(m)),
           );
-        nodes.addClass('path');
-        edges.addClass('path');
+        mark('path', nodes);
+        mark('path', edges);
         const keep = nodes.union(edges).union(nodes.ancestors());
-        cy.elements().not(keep).addClass('faded');
+        mark('faded', cy.elements().not(keep));
         return;
       }
       if (props.selectedEdgeId) {
         const edge = cy.getElementById(props.selectedEdgeId);
         if (edge.nonempty()) {
-          edge.addClass('chosen');
+          mark('chosen', edge);
           const keep = edge.union(edge.connectedNodes());
           if (props.highlightNeighbors)
-            cy.elements().not(keep.union(keep.ancestors())).addClass('faded');
+            mark('faded', cy.elements().not(keep.union(keep.ancestors())));
         }
         return;
       }
       if (!props.selectedId) return;
       const node = cy.getElementById(props.selectedId);
       if (node.empty()) return;
-      node.addClass('chosen');
+      mark('chosen', node);
       if (!props.highlightNeighbors) return;
       const base = node.union(node.descendants());
       const edges = base.connectedEdges();
       let keep = base.union(edges).union(edges.connectedNodes());
       keep = keep.union(keep.ancestors());
-      edges.addClass('highlight');
-      cy.elements().not(keep).addClass('faded');
+      mark('highlight', edges);
+      mark('faded', cy.elements().not(keep));
+    };
+    compute();
+    cy.batch(() => {
+      for (const cls of HIGHLIGHT_CLASSES) {
+        const next = wanted.get(cls) ?? cy.collection();
+        const current = cy.elements(`.${cls}`);
+        current.difference(next).removeClass(cls);
+        next.difference(current).addClass(cls);
+      }
     });
   }, [
     props.selectedId,

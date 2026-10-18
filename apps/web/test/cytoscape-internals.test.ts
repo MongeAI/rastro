@@ -35,6 +35,29 @@ describe('internos do Cytoscape usados pelo patchStyleCache', () => {
     );
   });
 
+  it('checkTriggers recebe os valores de antes e depois (não os objetos da propriedade)', () => {
+    // o atalho compara esses valores para pular a invalidação ampla quando nada mudou
+    const flat = squash(source);
+    expect(flat).toContain(
+      squash(`var getVal = function getVal(p) {
+    if (p == null) {
+      return null;
+    } else if (p.pfValue != null) {
+      return p.pfValue;
+    } else {
+      return p.value;
+    }
+  };
+  var checkTriggers = function checkTriggers() {
+    var fromVal = getVal(origProp);
+    var toVal = getVal(prop);
+    self.checkTriggers(ele, prop.name, fromVal, toVal);
+  };`),
+    );
+    expect(flat).toContain(squash('this.checkTriggers(ele, name, oldValue, value);'));
+    expect(flat.match(/\.checkTriggers\(/g)).toHaveLength(2);
+  });
+
   it('dirtyStyleCache continua limpando elemento, descendentes, pais e linhas', () => {
     expect(squash(source)).toContain(
       squash(`eles = this.spawnSelf().merge(this.descendants()).merge(this.parents());
