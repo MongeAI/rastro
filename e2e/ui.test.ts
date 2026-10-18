@@ -283,6 +283,31 @@ describe.skipIf(!chrome || !bundled)('interface (Chrome headless)', () => {
     }
   });
 
+  it('chamadas por interface: candidatos "possível", nunca como relação comprovada', async () => {
+    const run = await startRastro([fixture('oop'), '-o', path.join(graphOut, 'oop.json')]);
+    try {
+      const { page, problems } = await openPage(browser, run.url);
+      await pick(page, 'MemoryRepository.save');
+      expect(await text(page, '.details-name')).toBe('MemoryRepository.save');
+      const body = (await text(page, '.details')) ?? '';
+      expect(body).toContain('Possivelmente chamado por');
+      expect(body).toContain('possível');
+      await page.screenshot({ path: path.join(graphOut, 'possible.png') });
+      // a chamada continua não resolvida, com as implementações possíveis listadas
+      await page.goto(
+        `${run.url.split('#')[0]}#n=${encodeURIComponent('unresolved:src/main.ts#call:repo.save')}`,
+      );
+      await waitForMap(page);
+      const unresolved = (await text(page, '.details')) ?? '';
+      expect(unresolved).toContain('Implementações possíveis');
+      expect(unresolved).toContain('SqlRepository.save');
+      expect(problems).toEqual([]);
+      await page.close();
+    } finally {
+      await run.stop();
+    }
+  });
+
   it('projeto grande (1500 arquivos): pastas abertas no início e nível de arquivos rápido', async () => {
     const root = tmp('rastro-e2e-big-');
     // o mesmo gerador dos benchmarks: tudo dentro de src/, pastas que se importam entre si
