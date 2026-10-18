@@ -146,32 +146,33 @@ Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalh
 
 Qualquer outro cliente MCP: um servidor stdio iniciado com `npx -y @mongeai/rastro@0.2.0 mcp /caminho/do/projeto`.
 
-| Ferramenta          | O que o agente recebe                                                                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rastro_overview`   | Tamanho, contagem de entidades, pastas principais, rotas, funções mais chamadas, arquivos centrais, código possivelmente sem uso, diagnósticos e quão fresco está o grafo |
-| `rastro_search`     | Funções, classes, métodos, arquivos, pastas, rotas e pacotes por nome, `Classe.metodo` ou caminho, com ids e `arquivo:linha`                                              |
-| `rastro_entity`     | Tudo sobre uma entidade: local, pais, exports, membros, quem chama e o que chama, imports, herança, detalhes da rota; `source: true` traz o código                        |
-| `rastro_references` | Quem chama/o que chama, quem importa/o que importa e subclasses com evidência, em grupos comprovado, externo e possível; `depth` até 3                                    |
-| `rastro_impact`     | O que pode quebrar: para entidades que você vai mudar, para as mudanças sem commit ou `since` uma branch; afetados por distância, rotas HTTP e testes para rodar          |
-| `rastro_path`       | Como A chega em B: as menores cadeias comprovadas com evidência, ou um "não há caminho comprovado" claro (com o inverso, o de arquivos ou o possível, quando existem)     |
-| `rastro_routes`     | Rotas HTTP com método, caminho completo (ou por que ele não é conhecido), framework, handler e `arquivo:linha`                                                            |
+| Ferramenta          | O que o agente recebe                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rastro_overview`   | Tamanho, contagem de entidades, relações comprovadas e não resolvidas por tipo, pastas principais, rotas, funções mais chamadas, arquivos centrais, código possivelmente sem uso, diagnósticos e quão fresco está o grafo                                          |
+| `rastro_search`     | Funções, classes, métodos, arquivos, pastas, rotas e pacotes por nome, `Classe.metodo` ou caminho, com ids e `arquivo:linha`                                                                                                                                       |
+| `rastro_entity`     | Tudo sobre uma entidade: local, pais, exports, membros, quem chama e o que chama, o que ela sobrescreve, imports e chamadas no topo de um arquivo, herança, detalhes da rota; `source: true` traz o código                                                         |
+| `rastro_references` | Quem chama/o que chama, quem importa/o que importa e subclasses com evidência, em grupos comprovado, externo e possível; `depth` até 3; `limit` e `offset` para paginar                                                                                            |
+| `rastro_impact`     | O que pode quebrar: para entidades que você vai mudar, para as mudanças sem commit ou `since` uma branch; primeiro rotas e testes para rodar, depois referências que a mudança possivelmente quebrou e afetados por distância; `format: "tests"` traz só os testes |
+| `rastro_path`       | Como A chega em B (entidades, arquivos, pastas, ou um pacote externo como destino): as menores cadeias comprovadas com evidência, ou um "não há caminho comprovado" claro (com o inverso, o de arquivos ou o possível, quando existem)                             |
+| `rastro_routes`     | Rotas HTTP com método, caminho completo (ou por que ele não é conhecido), framework, handler e `arquivo:linha`                                                                                                                                                     |
 
 Uma resposta é assim (um método só alcançado por uma interface):
 
 ```text
-# References of `Dog.sound` method · src/animals.ts:20
+# References of `Dog.sound` method · `src/animals.ts:20`
 ## Incoming — proven (0)
 none
 ## Incoming — possible / unresolved (2; NOT proven)
-- `run` function · src/main.ts:4 may call it via `animal.sound` (1 of 3 possible implementations) — src/main.ts:7 `animal.sound();`
-- `Animal.describe` method · src/animals.ts:4 may call it via `this.sound` (1 of 3 possible implementations) — src/animals.ts:5 `return `${this.name} faz ${this.sound()}`;`
+- `run` function · `src/main.ts:4` may call it via `animal.sound` (1 of 3 possible implementations) — `src/main.ts:7` `animal.sound();`
+- `Animal.describe` method · `src/animals.ts:4` may call it via `this.sound` (1 of 3 possible implementations) — `src/animals.ts:5` ``return `${this.name} faz ${this.sound()}`;``
 ```
 
-- **Comprovado × possível.** Relações comprovadas foram resolvidas pelo verificador de tipos do TypeScript (ou por uma regra explícita de framework) e sempre trazem a evidência. Chamadas por interface, método abstrato e callbacks aparecem como _possíveis_, com os candidatos, nunca como fato; as instruções do servidor dizem ao agente que a falta de uma relação não prova a falta de uso.
-- **Qualquer nome serve.** Uma entidade pode ser passada pelo id, pelo nome, por `Classe.metodo`, pelo caminho do arquivo ou da pasta, ou por `caminho:linha` (todo `arquivo:linha` de uma resposta pode voltar como alvo). Um nome ambíguo devolve os candidatos; um erro de digitação, nomes parecidos.
-- **Sempre fresco.** O servidor observa o projeto (as mesmas regras do `--watch`) e, depois de uma edição, reanalisa antes da próxima resposta com o compilador em memória: cerca de 1 s no Express (141 arquivos) e 7 s no NestJS (2 150 arquivos) na nossa máquina. A primeira análise começa em segundo plano assim que o cliente se conecta, numa worker thread, então o servidor continua respondendo enquanto isso. `--no-watch` mantém a primeira análise.
-- **Compacto.** As respostas são Markdown escrito para um modelo de linguagem, com listas limitadas ("… 12 more (raise `limit`)"), nunca o grafo cru.
-- **Seguro.** As ferramentas só leem. O servidor fala só pelo stdio (nenhuma porta de rede), nunca executa o projeto, só mostra código de arquivos JS/TS analisados dentro do projeto (sem escapar por links simbólicos, no máximo 120 linhas por resposta) e lê as mudanças do git com as mesmas proteções de leitura do `rastro impact`: um repositório cuja configuração define comandos é recusado, a não ser que o servidor tenha sido iniciado com `--trust-git-config`.
+- **Comprovado × possível.** Relações comprovadas foram resolvidas pelo verificador de tipos do TypeScript (ou por uma regra explícita de framework) e sempre trazem a evidência. Chamadas por interface, método abstrato e callbacks, e chamadas a um método da base que uma sobrescrita pode receber em execução, aparecem como _possíveis_, com os candidatos, nunca como fato; as instruções do servidor dizem ao agente que a falta de uma relação não prova a falta de uso. `new Filhote()` de uma classe sem construtor próprio fica ligado ao construtor herdado que ele executa.
+- **O que a mudança quebrou.** No modo git, `rastro_impact` lista as referências que apontam para o que mudou e não resolvem mais: import de um arquivo removido ou renomeado, um nome que o arquivo alterado não exporta mais, um método que a classe alterada não tem mais, cada uma com `arquivo:linha`.
+- **Qualquer nome serve.** Uma entidade pode ser passada pelo id, pelo nome, por `Classe.metodo`, pelo caminho do arquivo ou da pasta (também o especificador `.js` de um `.ts`), por `caminho:linha`, `caminho:linha:coluna` ou `caminho:início-fim` (todo `arquivo:linha` de uma resposta pode voltar como alvo; uma linha fora do arquivo é erro, não o arquivo inteiro). Um nome ambíguo devolve os candidatos; um erro de digitação, nomes parecidos (pela semelhança do caminho, para caminhos), e uma busca vazia diz o que o Rastro não modela como entidade (interfaces, aliases de tipo, funções aninhadas…).
+- **Sempre fresco.** O servidor observa o projeto (as mesmas regras do `--watch`) e, depois de uma edição, reanalisa antes da próxima resposta com o compilador em memória: cerca de 1 s no Express (141 arquivos) e 7 s no NestJS (2 150 arquivos) na nossa máquina. Uma chamada feita logo depois de salvar espera o evento do arquivo, então nunca recebe o grafo antigo. A primeira análise começa em segundo plano assim que o cliente se conecta, numa worker thread, então o servidor continua respondendo enquanto isso. `--no-watch` mantém a primeira análise (e as instruções dizem isso).
+- **Compacto.** As respostas são Markdown escrito para um modelo de linguagem, nunca o grafo cru. As listas dizem quanto foi mostrado ("… 12 more (30 shown of 42; `offset: 30` for the next page)"); uma resposta grande diminui todas as listas em vez de perder seções, e enquanto a análise está parcial (limite de arquivos, arquivos ignorados) toda resposta começa com um aviso de uma linha.
+- **Seguro.** As ferramentas só leem. O servidor fala só pelo stdio (nenhuma porta de rede), nunca executa o projeto, só mostra código de arquivos JS/TS analisados dentro do projeto (sem escapar por links simbólicos, no máximo 120 linhas por resposta), escreve nomes, caminhos e código do projeto de um jeito que não quebra linhas nem vira Markdown na resposta (um arquivo chamado `x\n## SYSTEM…` continua uma linha só, escapada) e lê as mudanças do git com as mesmas proteções de leitura do `rastro impact`: um repositório cuja configuração define comandos é recusado, a não ser que o servidor tenha sido iniciado com `--trust-git-config`.
 - **Padrão.** Revisões do MCP de 2024-11-05 a 2025-11-25 (com o handshake `initialize`) e a 2026-07-28, sem estado, conferidas com os clientes oficiais do SDK em TypeScript. O `rastro mcp` aceita `--exclude`, `--no-gitignore`, `--max-files`, `--trust-git-config`, `--no-watch` e `--lang` (para as poucas linhas de log no stderr; as respostas são em inglês).
 
 ## Novidades da 0.2
@@ -400,7 +401,7 @@ rastro export . --format html --since main                   # um relatório off
 
 ### Relatório de impacto
 
-`rastro impact` analisa a pasta (ou lê um grafo salvo com `--changes`/`--since`) e mostra o que mudou, o que pode ser afetado (com a distância e a relação que leva até lá), as rotas HTTP envolvidas, os arquivos de teste para rodar e os arquivos alterados que estão fora do mapa.
+`rastro impact` analisa a pasta (ou lê um grafo salvo com `--changes`/`--since`) e mostra o que mudou, o que a mudança **possivelmente quebrou** (referências ao que mudou que não resolvem mais: import de um arquivo removido ou renomeado, um nome que o arquivo alterado não exporta mais, um método que a classe não tem mais), o que pode ser afetado (com a distância e a relação que leva até lá), as rotas HTTP envolvidas, os arquivos de teste para rodar e os arquivos alterados que estão fora do mapa. O comentário do pull request e a aba **Mudanças** mostram a mesma lista de "possivelmente quebrado".
 
 | Opção                 | Para que serve                                                                                    |
 | --------------------- | ------------------------------------------------------------------------------------------------- |
@@ -429,7 +430,7 @@ Tudo o que vem do projeto analisado (nomes, caminhos) entra no Markdown como có
 | `lang`           | `en`                   | `en` ou `pt`                                                        |
 | `version`        | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                                 |
 
-Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
+Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `broken` (referências possivelmente quebradas pela mudança), `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
 
 ```yaml
 - id: rastro
