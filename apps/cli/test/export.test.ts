@@ -10,6 +10,7 @@ import type { GraphDiff } from '@rastro/graph';
 import { buildHtmlReport, jsonForScript, REPORT_CSP } from '../src/report.js';
 import { parseExportRequest, renderExport, UsageError } from '../src/export.js';
 import { setLang } from '../src/i18n.js';
+import { safeText } from '../src/term.js';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const fixture = path.join(repo, 'fixtures', 'ts-basic');
@@ -92,6 +93,17 @@ describe('relatório HTML', () => {
       'window.__RASTRO_ELK_WORKER_SOURCE__ = "self.onmessage = () =\\u003e {};"',
     );
     expect(embeddedGraph(html)).toEqual(JSON.parse(JSON.stringify(evil)));
+  });
+
+  it('o atributo lang do HTML segue o idioma da CLI', () => {
+    const root = fakeWebRoot();
+    expect(buildHtmlReport(graph, root)).toContain('<html lang="pt-BR">');
+    try {
+      setLang('en');
+      expect(buildHtmlReport(graph, root)).toContain('<html lang="en">');
+    } finally {
+      setLang('pt');
+    }
   });
 
   it('recusa uma interface sem compilar ou dividida em pedaços', () => {
@@ -299,5 +311,128 @@ describe.skipIf(!fs.existsSync(bundled))('rastro export e compare (CLI empacotad
     expect((JSON.parse(run(['export', root, '-f', 'json']).stdout) as RastroGraph).changes).toBe(
       undefined,
     );
+  });
+});
+
+describe.skipIf(!fs.existsSync(bundled))('opções que não teriam efeito (CLI empacotada)', () => {
+  let saved: string;
+  beforeAll(() => {
+    saved = path.join(tmp('rastro-flags-'), 'ts-basic.json');
+    execFileSync(process.execPath, [bin, 'analyze', fixture, '-o', saved], { stdio: 'pipe' });
+  });
+  /** Como `run`, mas com prazo: se a checagem falhasse, `serve` ficaria rodando. */
+  const attempt = (args: string[], lang = 'pt') =>
+    spawnSync(
+      process.execPath,
+      [bin, ...args, ...(args[0] === 'serve' ? ['--no-open', '--port', '0'] : [])],
+      {
+        encoding: 'utf8',
+        cwd: repo,
+        timeout: 20_000,
+        env: { ...process.env, RASTRO_LANG: lang },
+      },
+    );
+
+  it('--watch fora do "rastro <pasta>" falha, inclusive em serve e export', () => {
+    for (const args of [
+      ['serve', saved, '--watch'],
+      ['export', saved, '-f', 'json', '--watch'],
+      ['export', fixture, '-f', 'json', '-w'],
+    ]) {
+      const res = attempt(args);
+      expect(res.status, args.join(' ')).toBe(1);
+      expect(res.stderr).toContain('--watch só funciona ao abrir o mapa');
+    }
+  });
+
+  it('opções de análise em validate, compare e serve falham com uma mensagem clara', () => {
+    const cases: Array<[string[], string]> = [
+      [['validate', saved, '--changes'], '--changes'],
+      [['validate', saved, '--max-files', '3'], '--max-files'],
+      [['compare', saved, saved, '--since', 'main'], '--since'],
+      [['compare', saved, saved, '--no-gitignore'], '--no-gitignore'],
+      [['serve', saved, '-e', 'src/'], '--exclude'],
+      [['serve', saved, '--changes', '--trust-git-config'], '--changes'],
+    ];
+    for (const [args, flag] of cases) {
+      const res = attempt(args);
+      expect(res.status, args.join(' ')).toBe(1);
+      expect(res.stderr).toContain(`${flag} não se aplica a "rastro ${args[0]}" com um JSON salvo`);
+    }
+    const en = attempt(['validate', saved, '--since', 'main'], 'en');
+    expect(en.stderr).toContain(
+      'error: --since does not apply to "rastro validate" with a saved JSON',
+    );
+  });
+
+  it('export: aceita as opções de análise vindas de uma pasta, recusa vindas de um JSON', () => {
+    const fromJson = run(['export', saved, '-f', 'json', '--exclude', 'src/cycle/']);
+    expect(fromJson.status).toBe(1);
+    expect(fromJson.stderr).toContain(
+      '--exclude não se aplica a "rastro export" com um JSON salvo',
+    );
+
+    const fromDir = run([
+      'export',
+      fixture,
+      '-f',
+      'json',
+      '-e',
+      'src/cycle/',
+      '--max-files',
+      '50',
+      '--no-gitignore',
+    ]);
+    expect(fromDir.status).toBe(0);
+    const g = JSON.parse(fromDir.stdout) as RastroGraph;
+    expect(g.nodes.some((n) => n.id.startsWith('file:src/math.ts'))).toBe(true);
+    expect(g.nodes.some((n) => n.id.startsWith('file:src/cycle/'))).toBe(false);
+  });
+
+  it('--trust-git-config sozinho não faria nada e por isso falha', () => {
+    const res = run(['analyze', fixture, '--stdout', '--trust-git-config']);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('--trust-git-config só tem efeito junto com --changes ou --since');
+  });
+});
+
+describe.skipIf(!fs.existsSync(bundled))('nomes com caracteres de controle', () => {
+  const ESC = '\x1b]0;PWNED-TITLE\x07\x1b[2J';
+  // eslint-disable-next-line no-control-regex
+  const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
+
+  it('safeText tira C0, DEL e C1, mas mantém \\n, \\t e acentos', () => {
+    expect(safeText(`a${ESC}b`)).toBe('a]0;PWNED-TITLE[2Jb');
+    expect(safeText('linha\n\tação\r\u0085\u009b31m\u007f')).toBe('linha\n\tação31m');
+  });
+
+  it('compare e o resumo da análise não repassam sequências ESC ao terminal', () => {
+    const root = tmp('rastro-esc-');
+    fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+    const out = tmp('rastro-esc-out-');
+    const before = path.join(out, 'antes.json');
+    expect(run(['analyze', root, '-o', before]).status).toBe(0);
+    // nomes de arquivo com ESC e BEL só existem em sistemas tipo Unix
+    if (process.platform !== 'win32') {
+      fs.writeFileSync(path.join(root, `x${ESC}.ts`), 'export const x = 1;\n');
+      const analyzed = run(['analyze', root, '-o', path.join(out, 'com-esc.json')]);
+      expect(analyzed.status).toBe(0);
+      expect(analyzed.stderr).not.toMatch(CONTROL);
+    }
+    const after = JSON.parse(fs.readFileSync(before, 'utf8')) as RastroGraph;
+    after.project.name = `proj${ESC}`;
+    after.nodes.push({
+      id: `fn:a.ts#evil${ESC}`,
+      kind: 'function',
+      name: `evil${ESC}`,
+      parent: 'file:a.ts',
+      location: { file: 'a.ts', startLine: 1, startColumn: 1, endLine: 1, endColumn: 2 },
+    });
+    const afterFile = path.join(out, 'depois.json');
+    fs.writeFileSync(afterFile, JSON.stringify(after));
+    const res = run(['compare', before, afterFile]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('+ a.ts#evil]0;PWNED-TITLE[2J');
+    expect(res.stdout).not.toMatch(CONTROL);
   });
 });

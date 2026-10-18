@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { languageOf } from '@rastro/analyzer';
 import type { ChangedFile, ChangeSet } from '@rastro/core';
 import { t } from './i18n.js';
 
@@ -8,8 +9,10 @@ import { t } from './i18n.js';
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 /**
- * Configurações locais (`.git/config`) que fazem o git EXECUTAR comandos ao gerar um diff.
- * Um repositório baixado de fonte não confiável (ex.: um .zip com a pasta .git) pode trazê-las.
+ * Configurações do repositório que fazem o git EXECUTAR comandos ao gerar um diff. Um
+ * repositório baixado de fonte não confiável (ex.: um .zip com a pasta .git) pode trazê-las
+ * no `.git/config` ou no `.git/config.worktree` (lido quando `extensions.worktreeConfig` está
+ * ligado), direto ou por `include.path`.
  */
 const RISKY_CONFIG = [
   /^filter\..+\.(clean|smudge|process)$/,
@@ -33,6 +36,31 @@ const SAFE_FLAGS = [
   'core.hooksPath=/dev/null',
   '--no-pager',
 ];
+
+/** Chaves que as próprias opções acima definem (aparecem no escopo `command` da listagem). */
+const OWN_KEYS = new Set(['core.quotepath', 'core.fsmonitor', 'core.hookspath']);
+
+/** Escopos que vêm da máquina do usuário, não do repositório analisado. */
+const TRUSTED_SCOPES = new Set(['global', 'system']);
+
+/**
+ * Opções fixas do diff. Os prefixos explícitos anulam `diff.noprefix`, `diff.mnemonicPrefix`
+ * e `diff.srcPrefix`/`dstPrefix` da configuração do usuário, que mudariam o `a/` e o `b/`.
+ */
+const DIFF_FLAGS = [
+  '--no-color',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--no-relative',
+  '--src-prefix=a/',
+  '--dst-prefix=b/',
+  '--unified=0',
+  '--inter-hunk-context=0',
+  '-M',
+];
+
+/** Limite para contar as linhas de arquivos novos (o mesmo tamanho máximo do analisador). */
+const MAX_UNTRACKED_BYTES = 1_000_000;
 
 export class GitError extends Error {}
 
@@ -59,24 +87,74 @@ function git(cwd: string, args: string[]): string {
   }
 }
 
-/** Configurações locais arriscadas presentes no repositório (vazio = seguro). */
+/**
+ * Configurações arriscadas que o git usaria neste repositório (vazio = seguro). Lista a
+ * configuração efetiva com o escopo de cada chave (já seguindo `include.path`) e considera
+ * todos os escopos menos `global` e `system`: `local` (.git/config), `worktree`
+ * (.git/config.worktree) e `command` (variáveis GIT_CONFIG_*). Se a listagem falhar, o erro
+ * sobe: nunca supõe que está tudo bem.
+ */
 export function riskyGitConfig(repoDir: string): string[] {
-  let listing: string;
-  try {
-    listing = git(repoDir, ['config', '--local', '--list', '--name-only']);
-  } catch {
-    return [];
+  const listing = git(repoDir, ['config', '--list', '--show-scope', '--name-only', '-z']);
+  const found = new Set<string>();
+  // com -z, cada entrada é "escopo\0chave\0"
+  const parts = listing.split('\0');
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const scope = parts[i]!.trim().toLowerCase();
+    const name = parts[i + 1]!.trim().toLowerCase();
+    if (!name || TRUSTED_SCOPES.has(scope)) continue;
+    if (scope === 'command' && OWN_KEYS.has(name)) continue;
+    if (RISKY_CONFIG.some((re) => re.test(name))) found.add(name);
   }
-  return listing
-    .split('\n')
-    .map((l) => l.trim().toLowerCase())
-    .filter((name) => name && RISKY_CONFIG.some((re) => re.test(name)));
+  return [...found];
 }
 
-/** Remove aspas e escapes que o git usa em caminhos com caracteres especiais. */
-function unquote(p: string): string {
-  if (!p.startsWith('"')) return p;
-  return p.slice(1, -1).replace(/\\(.)/g, '$1');
+/** Escapes de um caractere que o git usa em caminhos entre aspas (estilo C). */
+const C_ESCAPES: Record<string, number> = {
+  a: 7,
+  b: 8,
+  t: 9,
+  n: 10,
+  v: 11,
+  f: 12,
+  r: 13,
+  '"': 34,
+  '\\': 92,
+};
+
+/**
+ * Remove as aspas e decodifica os escapes que o git usa em caminhos com caracteres especiais:
+ * `\t`, `\n`, `\"`, `\\` e octais (`\303\251` são os bytes UTF-8 de "é").
+ */
+export function unquote(p: string): string {
+  if (p.length < 2 || !p.startsWith('"') || !p.endsWith('"')) return p;
+  const inner = p.slice(1, -1);
+  const bytes: number[] = [];
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]!;
+    if (ch !== '\\') {
+      const code = inner.codePointAt(i)!;
+      const char = String.fromCodePoint(code);
+      bytes.push(...Buffer.from(char, 'utf8'));
+      i += char.length - 1;
+      continue;
+    }
+    const octal = /^[0-7]{3}/.exec(inner.slice(i + 1, i + 4));
+    const next = inner[i + 1] ?? '';
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8) & 0xff);
+      i += 3;
+    } else {
+      bytes.push(...(next in C_ESCAPES ? [C_ESCAPES[next]!] : Buffer.from(next, 'utf8')));
+      i += 1;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+/** Caminho de uma linha `---`/`+++`, sem o TAB que o git põe depois de nomes com espaço. */
+function headerPath(rest: string): string {
+  return unquote(rest.endsWith('\t') ? rest.slice(0, -1) : rest);
 }
 
 /**
@@ -101,10 +179,10 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
     } else if (line.startsWith('rename to '))
       current.file = unquote(line.slice('rename to '.length));
     else if (line.startsWith('--- ')) {
-      const p = unquote(line.slice(4));
+      const p = headerPath(line.slice(4));
       if (p !== '/dev/null' && !current.file) current.file = p.replace(/^a\//, '');
     } else if (line.startsWith('+++ ')) {
-      const p = unquote(line.slice(4));
+      const p = headerPath(line.slice(4));
       if (p !== '/dev/null') current.file = p.replace(/^b\//, '');
     } else if (line.startsWith('@@')) {
       const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
@@ -133,9 +211,9 @@ export function collectChanges(root: string, options: CollectOptions = {}): Chan
   const top = git(root, ['rev-parse', '--show-toplevel']).trim();
   const prefix = git(root, ['rev-parse', '--show-prefix']).trim();
 
-  const risky = riskyGitConfig(root);
-  if (risky.length && !options.trustConfig) {
-    throw new GitError(t().git.riskyConfig(risky.join(', ')));
+  if (!options.trustConfig) {
+    const risky = riskyGitConfig(root);
+    if (risky.length) throw new GitError(t().git.riskyConfig(risky.join(', ')));
   }
 
   let base: string;
@@ -154,17 +232,7 @@ export function collectChanges(root: string, options: CollectOptions = {}): Chan
   }
 
   const scope = prefix ? prefix : '.';
-  const diff = git(top, [
-    'diff',
-    '--no-color',
-    '--no-ext-diff',
-    '--no-textconv',
-    '--unified=0',
-    '-M',
-    base,
-    '--',
-    scope,
-  ]);
+  const diff = git(top, ['diff', ...DIFF_FLAGS, base, '--', scope]);
   const untracked = git(top, ['ls-files', '--others', '--exclude-standard', '-z', '--', scope])
     .split('\0')
     .filter(Boolean);
@@ -177,16 +245,31 @@ export function collectChanges(root: string, options: CollectOptions = {}): Chan
     ...(f.previous ? { previous: toRoot(f.previous) } : {}),
   }));
   for (const p of untracked) {
-    const abs = path.join(top, p);
-    let lines: number;
-    try {
-      const text = fs.readFileSync(abs, 'utf8');
-      lines = Math.max(1, text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
-    } catch {
-      continue;
-    }
+    const lines = countLines(path.join(top, p));
+    if (lines === undefined) continue;
     files.push({ file: toRoot(p), status: 'added', ranges: [[1, lines]] });
   }
   files.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return { base, baseLabel, includesUntracked: true, files };
+}
+
+/**
+ * Linhas de um arquivo novo (não versionado), lendo só o que o analisador leria: arquivo
+ * regular (sem seguir links simbólicos: nada de /dev/zero ou FIFOs), JS/TS e até o tamanho
+ * máximo. Qualquer outro conta como uma linha. `undefined` se o arquivo sumiu.
+ */
+function countLines(abs: string): number | undefined {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(abs);
+  } catch {
+    return undefined;
+  }
+  if (!stat.isFile() || stat.size > MAX_UNTRACKED_BYTES || !languageOf(abs)) return 1;
+  try {
+    const text = fs.readFileSync(abs, 'utf8');
+    return Math.max(1, text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
+  } catch {
+    return 1;
+  }
 }

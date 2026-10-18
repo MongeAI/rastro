@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { RASTRO_VERSION, type RastroGraph } from '@rastro/core';
-import { t } from './i18n.js';
+import { getLang, t } from './i18n.js';
 
 /**
  * Relatório HTML único e offline: a mesma interface do `rastro <pasta>`, num arquivo só,
@@ -120,7 +120,7 @@ export function buildHtmlReport(graph: RastroGraph, webRoot: string): string {
 
   const title = `${graph.project.name} · Rastro`;
   return `<!doctype html>
-<html lang="pt-BR">
+<html lang="${getLang() === 'pt' ? 'pt-BR' : 'en'}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

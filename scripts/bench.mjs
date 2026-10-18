@@ -44,7 +44,7 @@ export function generateProject(root, files) {
   const pick = (n) => Math.floor(rnd() * n);
   const domains = Math.max(4, Math.round(Math.sqrt(files) / 2));
   const fileAt = (i) => `src/d${i % domains}/m${i}.ts`;
-  fs.rmSync(root, { recursive: true, force: true });
+  // escreve em `root` sem apagá-la antes: quem chama passa uma pasta nova (fs.mkdtempSync)
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(
     path.join(root, 'package.json'),
@@ -124,7 +124,8 @@ async function measure(size) {
   const { GraphIndex, computeView, computeInsights, findPaths, toMermaid } = await import(
     dist('packages/graph/dist/index.js')
   );
-  const root = path.join(os.tmpdir(), `rastro-bench-${size}`);
+  // pasta nova e exclusiva a cada execução (nada de caminho fixo e previsível no /tmp)
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `rastro-bench-${size}-`));
   generateProject(root, size);
 
   const timings = {};

@@ -74,6 +74,9 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     onlyWith: (flag: string, command: string) => `${flag} só funciona com "rastro ${command}".`,
     maxFiles: '--max-files precisa ser um inteiro positivo.',
     watchOnly: '--watch só funciona ao abrir o mapa (rastro <caminho>).',
+    needsFolder: (flag: string, command: string) =>
+      `${flag} não se aplica a "rastro ${command}" com um JSON salvo: só vale ao analisar uma pasta.`,
+    trustNeedsChanges: '--trust-git-config só tem efeito junto com --changes ou --since.',
     dirNotFound: (dir: string) => `diretório não encontrado: ${dir}`,
     pathNotFound: (p: string) => `caminho não encontrado: ${p}`,
     compareNeedsTwo: 'informe dois arquivos JSON. Exemplo: rastro compare antes.json depois.json',
@@ -125,6 +128,12 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
       `· reanalisado em ${ms} ms · ${n(files, 'arquivo', 'arquivos')}`,
     failed: (error: string) => `a reanálise falhou: ${error}`,
     live: 'Modo ao vivo: o mapa se atualiza quando você salva um arquivo.',
+    polling:
+      'Modo ao vivo por varredura: o mapa se atualiza alguns segundos depois de você salvar um arquivo.',
+    fallback: (reason: string) =>
+      `não foi possível observar as pastas do projeto (${reason}); o Rastro vai procurar mudanças a cada 1,5 s.`,
+    limitHint:
+      'No Linux, o limite vem de fs.inotify.max_user_watches e max_user_instances (sysctl); aumentá-los devolve o modo instantâneo.',
   },
   validate: {
     cannotRead: (error: string) => `não foi possível ler o JSON: ${error}`,
@@ -136,7 +145,7 @@ envia nada para a internet. A interface fica disponível apenas em 127.0.0.1.
     notFound: 'o comando "git" não foi encontrado neste sistema',
     failed: 'erro do git',
     riskyConfig: (keys: string) =>
-      `o .git/config deste repositório define comandos que o git executaria (${keys}). ` +
+      `a configuração do git deste repositório (.git/config ou .git/config.worktree) define comandos que o git executaria (${keys}). ` +
       'Por segurança o Rastro não roda o git aqui. Se você confia no repositório, use --trust-git-config.',
     badRef: (ref: string) => `referência inválida: ${ref}`,
   },
@@ -322,6 +331,9 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     onlyWith: (flag, command) => `${flag} only works with "rastro ${command}".`,
     maxFiles: '--max-files must be a positive integer.',
     watchOnly: '--watch only works when opening the map (rastro <path>).',
+    needsFolder: (flag, command) =>
+      `${flag} does not apply to "rastro ${command}" with a saved JSON: it only works when analyzing a folder.`,
+    trustNeedsChanges: '--trust-git-config only has an effect together with --changes or --since.',
     dirNotFound: (dir) => `directory not found: ${dir}`,
     pathNotFound: (p) => `path not found: ${p}`,
     compareNeedsTwo: 'pass two JSON files. Example: rastro compare before.json after.json',
@@ -371,6 +383,11 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     reanalyzed: (ms, files) => `· re-analyzed in ${ms} ms · ${n(files, 'file', 'files')}`,
     failed: (error) => `re-analysis failed: ${error}`,
     live: 'Live mode: the map updates whenever you save a file.',
+    polling: 'Live mode (polling): the map updates a few seconds after you save a file.',
+    fallback: (reason) =>
+      `could not watch the project folders (${reason}); Rastro will check for changes every 1.5 s.`,
+    limitHint:
+      'On Linux, the limit comes from fs.inotify.max_user_watches and max_user_instances (sysctl); raising them restores instant updates.',
   },
   validate: {
     cannotRead: (error) => `could not read the JSON: ${error}`,
@@ -382,7 +399,7 @@ sends anything over the network. The interface is only served on 127.0.0.1.
     notFound: 'the "git" command was not found on this system',
     failed: 'git error',
     riskyConfig: (keys) =>
-      `this repository's .git/config defines commands that git would run (${keys}). ` +
+      `this repository's git configuration (.git/config or .git/config.worktree) defines commands that git would run (${keys}). ` +
       'For safety, Rastro does not run git here. If you trust the repository, use --trust-git-config.',
     badRef: (ref) => `invalid reference: ${ref}`,
   },

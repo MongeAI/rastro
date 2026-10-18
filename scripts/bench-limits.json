@@ -1,5 +1,5 @@
 {
-  "//": "Limites do 'node scripts/bench.mjs --check' (CI). Medido em 2026-10: 100 → 0,4 s; 1000 → 1,0 s / 303 MB; 5000 → 3,3 s / 661 MB. Folga de ~3-5x para máquinas de CI.",
+  "//": "Limites do 'node scripts/bench.mjs --check' (CI). Medido em 2026-10: 100 → 0,4 s; 1000 → 1,0 s / 303 MB; 5000 → 3,3 s / 661 MB. Folga real: tempo de análise ~12-18x (5 s, 15 s, 60 s), memória ~4x (1200 MB, 2500 MB), para máquinas de CI lentas e variáveis.",
   "100": { "analyzeMs": 5000, "peakMb": 600, "queriesMs": 500 },
   "1000": { "analyzeMs": 15000, "peakMb": 1200, "queriesMs": 1000 },
   "5000": { "analyzeMs": 60000, "peakMb": 2500, "queriesMs": 5000 }

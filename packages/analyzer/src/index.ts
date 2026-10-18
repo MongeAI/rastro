@@ -11,5 +11,6 @@ export {
   languageOf,
   type DiscoverOptions,
   type DiscoveredFile,
+  type DiscoverResult,
 } from './discover.js';
 export { loadCompilerOptions, ModuleResolver, packageNameOf, isBuiltinModule } from './resolve.js';

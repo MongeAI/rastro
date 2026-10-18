@@ -3,7 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { AnalysisSession, analyzeProject, type ProgressEvent } from '@rastro/analyzer';
+import {
+  AnalysisSession,
+  analyzeProject,
+  type DiscoverOptions,
+  type ProgressEvent,
+} from '@rastro/analyzer';
 import { RASTRO_VERSION, validateGraph, type NodeKind, type RastroGraph } from '@rastro/core';
 import { compareGraphs, computeChangeImpact, GraphIndex } from '@rastro/graph';
 import { openBrowser } from './browser.js';
@@ -20,7 +25,7 @@ import { langArg, parseLang, setLang, t } from './i18n.js';
 import { startServer, type RunningServer } from './server.js';
 import { watchProject } from './watch.js';
 import { defaultGraphPath, loadGraph, saveGraph } from './storage.js';
-import { bold, cyan, dim, fail, red, tildify, yellow } from './term.js';
+import { bold, cyan, dim, fail, red, safeText, tildify, yellow } from './term.js';
 
 /** Mostra uma etapa da análise no idioma da CLI. */
 function showProgress(_message: string, event: ProgressEvent): void {
@@ -36,7 +41,8 @@ function printChanges(graph: RastroGraph): void {
   const impact = computeChangeImpact(new GraphIndex(graph), changes);
   const out = (s = '') => process.stderr.write(`${s}\n`);
   const m = t().changes;
-  const since = changes.baseLabel === 'HEAD' ? m.sinceLastCommit : m.since(changes.baseLabel);
+  const since =
+    changes.baseLabel === 'HEAD' ? m.sinceLastCommit : m.since(safeText(changes.baseLabel));
   if (!changes.files.length) {
     out(`  ${dim(m.none(since))}`);
     out();
@@ -49,7 +55,7 @@ function printChanges(graph: RastroGraph): void {
       (impact.routes.length ? ` · ${m.routes(impact.routes.length)}` : '') +
       (impact.tests.length ? ` · ${m.tests(impact.tests.length)}` : ''),
   );
-  for (const route of impact.routes.slice(0, 5)) out(`    ${cyan('↳')} ${route.name}`);
+  for (const route of impact.routes.slice(0, 5)) out(`    ${cyan('↳')} ${safeText(route.name)}`);
   out();
 }
 
@@ -57,7 +63,7 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
   const { stats } = graph;
   const out = (s = '') => process.stderr.write(`${s}\n`);
   out();
-  out(`${bold(graph.project.name)} ${dim(tildify(graph.project.root))}`);
+  out(`${bold(safeText(graph.project.name))} ${dim(safeText(tildify(graph.project.root)))}`);
   const m = t().summary;
   const parts = [m.files(stats.files)];
   for (const [kind, label] of Object.entries(m.kinds) as Array<
@@ -76,7 +82,7 @@ function printSummary(graph: RastroGraph, savedTo?: string): void {
     out(`  ${yellow(m.warnings(warnings.length))}`);
     for (const d of warnings.slice(0, 5))
       out(
-        `    ${dim('•')} ${d.file ? `${d.file}${d.line ? `:${d.line}` : ''} — ` : ''}${d.message}`,
+        `    ${dim('•')} ${d.file ? `${safeText(d.file)}${d.line ? `:${d.line}` : ''} — ` : ''}${safeText(d.message)}`,
       );
     if (warnings.length > 5) out(dim(`    ${m.moreWarnings(warnings.length - 5)}`));
   }
@@ -176,6 +182,29 @@ async function main(argv: string[]): Promise<void> {
   }
   const maxFiles = values['max-files'] !== undefined ? Number(values['max-files']) : undefined;
   if (maxFiles !== undefined && (!Number.isInteger(maxFiles) || maxFiles < 1)) fail(u.maxFiles);
+  // opções que nunca teriam efeito falham, em vez de serem ignoradas em silêncio
+  if (values.watch && command !== 'open') fail(u.watchOnly);
+  if (values['trust-git-config'] && !values.changes && values.since === undefined)
+    fail(u.trustNeedsChanges);
+  /** Opções que só valem ao analisar uma pasta (o export confere depois se a fonte é pasta). */
+  const analysisFlag = (
+    [
+      ['changes', '--changes'],
+      ['since', '--since'],
+      ['exclude', '--exclude'],
+      ['max-files', '--max-files'],
+      ['no-gitignore', '--no-gitignore'],
+      ['trust-git-config', '--trust-git-config'],
+    ] as const
+  ).find(([k]) => values[k] !== undefined)?.[1];
+  if (analysisFlag && (command === 'validate' || command === 'compare' || command === 'serve'))
+    fail(u.needsFolder(analysisFlag, command));
+  /** Como descobrir os arquivos do projeto (análise e modo ao vivo usam as mesmas regras). */
+  const discover: DiscoverOptions = {
+    ...(values.exclude ? { exclude: values.exclude } : {}),
+    respectGitignore: !values['no-gitignore'],
+    ...(maxFiles ? { maxFiles } : {}),
+  };
 
   if (command === 'validate') {
     let data: unknown;
@@ -188,13 +217,13 @@ async function main(argv: string[]): Promise<void> {
     if (!result.valid) {
       // os detalhes vêm do validador de @rastro/core (em português, como na interface)
       process.stderr.write(
-        `${red(t().validate.invalid)}\n${result.errors.map((e) => `  • ${e}`).join('\n')}\n`,
+        `${red(t().validate.invalid)}\n${result.errors.map((e) => `  • ${safeText(e)}`).join('\n')}\n`,
       );
       process.exit(1);
     }
     const g = data as RastroGraph;
     process.stdout.write(
-      `${t().validate.valid(g.nodes.length, g.edges.length, g.schemaVersion)}\n`,
+      `${t().validate.valid(g.nodes.length, g.edges.length, safeText(String(g.schemaVersion)))}\n`,
     );
     return;
   }
@@ -210,7 +239,9 @@ async function main(argv: string[]): Promise<void> {
     } catch (err) {
       const reason = err instanceof GitError ? err.message : (err as Error).message;
       if (warn)
-        process.stderr.write(`${yellow(t().warningPrefix)} ${t().changes.skipped(reason)}\n`);
+        process.stderr.write(
+          `${yellow(t().warningPrefix)} ${t().changes.skipped(safeText(reason))}\n`,
+        );
     }
   };
 
@@ -247,13 +278,10 @@ async function main(argv: string[]): Promise<void> {
     const source = path.resolve(target);
     if (!fs.existsSync(source)) fail(u.pathNotFound(source));
     let graph: RastroGraph;
-    if (fs.statSync(source).isDirectory()) {
-      graph = await analyzeProject(source, {
-        ...(values.exclude ? { exclude: values.exclude } : {}),
-        respectGitignore: !values['no-gitignore'],
-        ...(maxFiles ? { maxFiles } : {}),
-        onProgress: showProgress,
-      });
+    const fromFolder = fs.statSync(source).isDirectory();
+    if (!fromFolder && analysisFlag) fail(u.needsFolder(analysisFlag, command));
+    if (fromFolder) {
+      graph = await analyzeProject(source, { ...discover, onProgress: showProgress });
       attachChanges(graph, source, true);
     } else {
       try {
@@ -296,7 +324,7 @@ async function main(argv: string[]): Promise<void> {
     printSummary(graph);
     if (!fs.existsSync(graph.project.root)) {
       process.stderr.write(
-        `${yellow(t().warningPrefix)} ${t().serve.rootMissing(graph.project.root)}\n`,
+        `${yellow(t().warningPrefix)} ${t().serve.rootMissing(safeText(graph.project.root))}\n`,
       );
     }
     await serve(graph, port, !values['no-open']);
@@ -306,7 +334,6 @@ async function main(argv: string[]): Promise<void> {
   const root = path.resolve(target);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) fail(u.dirNotFound(root));
   const quiet = command === 'analyze' && values.stdout;
-  if (values.watch && command !== 'open') fail(u.watchOnly);
 
   /**
    * Analisa o projeto (e as mudanças do git, se pedidas). No modo --watch, a sessão mantém o
@@ -314,9 +341,7 @@ async function main(argv: string[]): Promise<void> {
    */
   let showingProgress = false;
   const session = new AnalysisSession(root, {
-    ...(values.exclude ? { exclude: values.exclude } : {}),
-    respectGitignore: !values['no-gitignore'],
-    ...(maxFiles ? { maxFiles } : {}),
+    ...discover,
     onProgress: (message, event) => {
       if (showingProgress) showProgress(message, event);
     },
@@ -338,7 +363,8 @@ async function main(argv: string[]): Promise<void> {
   if (graph.changes) printChanges(graph);
   if (command === 'analyze') return;
   const server = await serve(graph, port, !values['no-open']);
-  if (values.watch) startWatch(root, server, runAnalysis, values.out ?? defaultGraphPath(graph));
+  if (values.watch)
+    startWatch(root, server, runAnalysis, values.out ?? defaultGraphPath(graph), discover);
 }
 
 /**
@@ -350,6 +376,7 @@ function startWatch(
   server: RunningServer,
   runAnalysis: (progress: boolean) => Promise<RastroGraph>,
   savePath: string,
+  discover: DiscoverOptions,
 ): void {
   let running = false;
   let again: string[] | null = null;
@@ -362,16 +389,18 @@ function startWatch(
     const started = Date.now();
     try {
       const next = await runAnalysis(false);
+      // pastas novas ou removidas, .gitignore alterado: observa o conjunto atual
+      watcher.refresh();
       server.update(next);
       saveGraph(next, savePath);
       const shown =
-        files.slice(0, 3).join(', ') + (files.length > 3 ? ` +${files.length - 3}` : '');
+        safeText(files.slice(0, 3).join(', ')) + (files.length > 3 ? ` +${files.length - 3}` : '');
       process.stderr.write(
         `${cyan('↻')} ${shown} ${dim(t().watch.reanalyzed(Date.now() - started, next.stats.files))}\n`,
       );
     } catch (err) {
       process.stderr.write(
-        `${yellow(t().warningPrefix)} ${t().watch.failed((err as Error).message)}\n`,
+        `${yellow(t().warningPrefix)} ${t().watch.failed(safeText((err as Error).message))}\n`,
       );
     } finally {
       running = false;
@@ -382,8 +411,17 @@ function startWatch(
       }
     }
   };
-  watchProject(root, (files) => void rerun(files));
-  process.stderr.write(dim(`  ${t().watch.live}\n`));
+  const watcher = watchProject(root, (files) => void rerun(files), {
+    ...discover,
+    onFallback: (err) => {
+      const m = t().watch;
+      process.stderr.write(
+        `${yellow(t().warningPrefix)} ${m.fallback(safeText(err.code ?? err.message))}\n` +
+          (err.code === 'ENOSPC' || err.code === 'EMFILE' ? dim(`  ${m.limitHint}\n`) : ''),
+      );
+    },
+  });
+  process.stderr.write(dim(`  ${watcher.mode === 'live' ? t().watch.live : t().watch.polling}\n`));
 }
 
 main(process.argv.slice(2)).catch((err: unknown) =>

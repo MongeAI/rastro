@@ -9,6 +9,9 @@ O Rastro é **local-first** e **somente leitura**. Este documento lista exatamen
 - **Grava um arquivo JSON** na pasta de cache do usuário (ou em `--out`), com permissão `0600`. Nada é gravado dentro do projeto analisado.
 - **Abre um servidor HTTP** em `127.0.0.1` para a interface (quando usa `rastro <caminho>` ou `rastro serve`).
 - **Abre o navegador** com `xdg-open`/`open`/`start` (desative com `--no-open`).
+- **Roda o `git` em modo leitura**, e só com `--changes` ou `--since` (ver [Mudanças do git](#mudanças-do-git---changes---since)).
+- **Observa as pastas do projeto** no modo ao vivo (`--watch`), só para saber quando reanalisar (ver [Modo ao vivo](#modo-ao-vivo---watch)).
+- **Grava um relatório HTML** com `rastro export --format html` (ver [Relatório HTML offline](#relatório-html-offline)).
 
 ## O que o Rastro não faz
 
@@ -24,11 +27,37 @@ O Rastro é **local-first** e **somente leitura**. Este documento lista exatamen
 - Gera um **token aleatório por execução**. A CLI abre `http://127.0.0.1:<porta>/?token=...`; o servidor troca o token por um cookie `HttpOnly; SameSite=Strict` e a API (`/api/*`) recusa quem não o tiver. Assim, outros usuários ou processos da máquina não conseguem ler o código pela porta local.
 - Aceita só `GET` e `HEAD`.
 - Recusa requisições cujo cabeçalho `Host` não seja `127.0.0.1:<porta>`, `localhost:<porta>` ou `[::1]:<porta>`, o que bloqueia ataques de DNS rebinding.
+- `/api/events` (Server-Sent Events, usado pelo modo ao vivo) tem as mesmas proteções do resto da API: o mesmo cookie, a mesma checagem de `Host`, só `GET`. Ele não carrega código nem nomes: cada evento traz apenas o número da versão do grafo (`{"version": n}`); o navegador então busca `/api/graph`, que devolve a versão atual no cabeçalho `X-Rastro-Version`. Um comentário vazio a cada 25 s mantém a conexão aberta.
 - `/api/source` só entrega arquivos JS/TS que estão no grafo como analisados, recusa caminhos absolutos e com `..` (mesmo vindos de um JSON adulterado aberto com `rastro serve`), confirma que o caminho real fica dentro da raiz, recusa links simbólicos e limita o tamanho a 2 MB.
 - Arquivos estáticos são servidos apenas de dentro da pasta da interface (sem _path traversal_).
 - Cabeçalhos: `Content-Security-Policy` restritiva (`default-src 'self'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
 
 Encerre o servidor com `Ctrl+C` quando terminar. Os arquivos estáticos da interface (HTML, JS, CSS) não exigem token, porque não contêm dados do projeto.
+
+## Mudanças do git (`--changes`, `--since`)
+
+Sem essas opções o Rastro não chama o `git`. Com elas, roda apenas comandos de leitura (`rev-parse`, `config --list`, `merge-base`, `diff`, `ls-files`), sem `shell`, com os argumentos passados diretamente ao processo, e:
+
+- com `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` e `--no-pager`, e no `diff` com `--no-ext-diff` e `--no-textconv`, o que desliga as extensões que executariam programas;
+- com `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` e `GIT_OPTIONAL_LOCKS=0`: sem configuração do sistema, sem pedir senha e sem travar o índice do repositório;
+- com prefixos fixos (`--src-prefix=a/ --dst-prefix=b/ --no-relative`), para que opções como `diff.noprefix` ou `diff.mnemonicPrefix` na sua configuração global não confundam a leitura dos caminhos;
+- recusando referências que começam com `-` em `--since` (não viram opções do git).
+
+**Configuração arriscada do repositório.** Um repositório baixado de fonte não confiável (por exemplo, um `.zip` com a pasta `.git`) pode trazer configurações que fazem o próprio git executar comandos ao gerar um diff: filtros (`filter.<nome>.clean`/`smudge`/`process`, ativados por um `.gitattributes`), `diff.<nome>.textconv`/`command`, `diff.external`, `core.fsmonitor`, `core.hooksPath`, `core.pager`, `core.sshCommand`, `include.path` e `includeIf.<condição>.path`. Antes de rodar o diff, o Rastro lista a configuração efetiva com o escopo de cada chave (`git config --list --show-scope`, já seguindo os `include.path`) e **recusa** o repositório se alguma dessas chaves vier de um escopo que não seja o seu (`global`) ou o do sistema (`system`): o `.git/config` (`local`), o `.git/config.worktree` (`worktree`, lido quando `extensions.worktreeConfig` está ligado) ou variáveis `GIT_CONFIG_*` (`command`). Se a listagem falhar, o Rastro também não continua. A mensagem diz quais chaves encontrou.
+
+**`--trust-git-config`** desliga essa recusa. Use só em repositórios em que você confia tanto quanto em rodar `git diff` neles por conta própria: com essa opção, um filtro ou `textconv` definido no repositório **será executado** com as suas permissões. As proteções da lista acima continuam valendo. Sem `--changes` ou `--since` a opção não tem efeito, e a CLI recusa o uso isolado.
+
+Arquivos novos (não versionados) entram como adicionados. O Rastro só lê os que o analisador leria: arquivo regular (sem seguir links simbólicos, então nada de `/dev/zero` ou FIFOs), extensão JS/TS e até 1 MB. Os demais entram como uma linha alterada, sem leitura.
+
+## Modo ao vivo (`--watch`)
+
+O modo ao vivo **só lê**: observa as pastas que o analisador leria (as mesmas exclusões, `.gitignore` e `--exclude`; nunca `node_modules` nem `.git`), com um observador por pasta, e reanalisa quando um arquivo JS/TS ou de configuração muda. Nada é executado e nada é gravado no projeto; o JSON atualizado vai para o mesmo destino da análise inicial.
+
+Se o sistema não deixar observar as pastas (no Linux, por exemplo, o limite `fs.inotify.max_user_watches` esgotado, erro `ENOSPC`), a CLI avisa no terminal e passa a procurar mudanças por varredura a cada 1,5 s, comparando data e tamanho dos arquivos. Ela nunca diz que está ao vivo sem estar observando nada.
+
+## Relatório HTML offline
+
+`rastro export --format html` gera um arquivo único com a interface, o grafo e as fontes tipográficas embutidos. Ele abre direto do disco e não precisa de servidor. O próprio HTML traz uma `Content-Security-Policy` que proíbe qualquer acesso à rede: `default-src 'none'`, `connect-src 'none'`, imagens e fontes só de `data:`, scripts só os embutidos (e o worker do layout, carregado de um `blob:`), `base-uri 'none'` e `form-action 'none'`. Mesmo um nome no grafo que tentasse buscar algo de fora seria bloqueado pelo navegador. Os nomes vindos do grafo são escapados (um `</script>` não fecha a tag) e o caminho da pasta pessoal aparece como `~`. O código-fonte não vai junto, só os trechos de evidência que já estão no JSON.
 
 ## Ao compartilhar um JSON exportado
 
@@ -40,6 +69,8 @@ Analisar um repositório desconhecido é seguro no sentido de que nada dele é e
 
 - Um repositório pode conter arquivos enormes ou muitos arquivos para tornar a análise lenta; use `--max-files` e `--exclude`.
 - Os trechos de código exibidos na interface são tratados como texto (o React escapa o conteúdo); nada é interpretado como HTML.
+- No terminal, nomes de arquivos e entidades, diagnósticos e mensagens de erro saem sem caracteres de controle: um arquivo chamado com sequências ESC não muda o título do terminal nem apaga a tela.
+- Em repositórios git não confiáveis, `--changes` e `--since` recusam configurações que executariam comandos (ver acima); não use `--trust-git-config` neles.
 - Links “abrir no editor” apenas montam uma URL (`vscode://...`) com o caminho do arquivo; o navegador pede confirmação antes de abrir o editor.
 
 ## Reportando vulnerabilidades

@@ -64,6 +64,8 @@ export interface DiscoveredFile {
 export interface DiscoverResult {
   root: string;
   files: DiscoveredFile[];
+  /** Pastas percorridas (relativas à raiz, com `/`; a raiz é `.`), já sem as excluídas. */
+  directories: string[];
   diagnostics: Diagnostic[];
 }
 
@@ -101,6 +103,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
   }
 
   const files: DiscoveredFile[] = [];
+  const directories: string[] = [];
   const stack: string[] = [root];
   let truncated = false;
 
@@ -118,6 +121,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
       });
       continue;
     }
+    directories.push(toPosix(path.relative(root, dir)) || '.');
     entries.sort((a, b) => compareStrings(a.name, b.name));
     const subdirs: string[] = [];
     for (const entry of entries) {
@@ -168,5 +172,6 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
   }
 
   files.sort((a, b) => compareStrings(a.relative, b.relative));
-  return { root: toPosix(root), files, diagnostics };
+  directories.sort(compareStrings);
+  return { root: toPosix(root), files, directories, diagnostics };
 }

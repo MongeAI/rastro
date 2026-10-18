@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzeProject } from '@rastro/analyzer';
 import { validateGraph } from '@rastro/core';
 import { computeChangeImpact, GraphIndex } from '@rastro/graph';
-import { collectChanges, GitError, parseUnifiedDiff } from '../src/git.js';
+import { collectChanges, GitError, parseUnifiedDiff, riskyGitConfig, unquote } from '../src/git.js';
 
 const run = (cwd: string, ...args: string[]) =>
   execFileSync(
@@ -69,6 +69,46 @@ describe('parseUnifiedDiff', () => {
       { file: 'src/y.ts', status: 'renamed', previous: 'src/x.ts', ranges: [[5, 5]] },
     ]);
   });
+
+  it('tira o TAB que o git põe depois de caminhos com espaço', () => {
+    const diff = [
+      'diff --git a/src/meu arquivo.ts b/src/meu arquivo.ts',
+      '--- a/src/meu arquivo.ts\t',
+      '+++ b/src/meu arquivo.ts\t',
+      '@@ -1 +1 @@',
+    ].join('\n');
+    expect(parseUnifiedDiff(diff)).toEqual([
+      { file: 'src/meu arquivo.ts', status: 'modified', ranges: [[1, 1]] },
+    ]);
+  });
+
+  it('decodifica caminhos entre aspas (escapes do git e octais UTF-8)', () => {
+    const diff = [
+      'diff --git "a/src/a\\tb.ts" "b/src/a\\tb.ts"',
+      '--- "a/src/a\\tb.ts"',
+      '+++ "b/src/a\\tb.ts"',
+      '@@ -2 +2 @@',
+      'diff --git "a/x\\"y.ts" "b/z\\\\w.ts"',
+      'rename from "x\\"y.ts"',
+      'rename to "z\\\\w.ts"',
+    ].join('\n');
+    expect(parseUnifiedDiff(diff)).toEqual([
+      { file: 'src/a\tb.ts', status: 'modified', ranges: [[2, 2]] },
+      { file: 'z\\w.ts', status: 'renamed', previous: 'x"y.ts', ranges: [] },
+    ]);
+  });
+});
+
+describe('unquote', () => {
+  it('trata \\t, \\n, \\", \\\\ e bytes em octal', () => {
+    expect(unquote('"a\\tb"')).toBe('a\tb');
+    expect(unquote('"linha\\nquebrada.ts"')).toBe('linha\nquebrada.ts');
+    expect(unquote('"diz \\"oi\\".ts"')).toBe('diz "oi".ts');
+    expect(unquote('"barra\\\\.ts"')).toBe('barra\\.ts');
+    expect(unquote('"src/a\\303\\247\\303\\243o.ts"')).toBe('src/ação.ts');
+    expect(unquote('"já-é-utf8.ts"')).toBe('já-é-utf8.ts');
+    expect(unquote('sem/aspas.ts')).toBe('sem/aspas.ts');
+  });
 });
 
 describe('collectChanges + impacto', () => {
@@ -130,6 +170,102 @@ describe('collectChanges + impacto', () => {
     expect(() => collectChanges(root)).toThrow(GitError);
     expect(() => collectChanges(root)).toThrow(/trust-git-config/);
     expect(fs.existsSync(path.join(root, 'FSMONITOR_RODOU'))).toBe(false);
+  });
+
+  it('recusa filtros no .git/config.worktree (extensions.worktreeConfig): o comando nunca roda', () => {
+    const root = repo({ ...base, '.gitattributes': '*.ts filter=evil\n' });
+    run(root, 'config', 'extensions.worktreeConfig', 'true');
+    run(root, 'config', '--worktree', 'filter.evil.clean', "sh -c 'touch PWNED; cat'");
+    // `git config --local --list` não mostra essa chave
+    expect(String(run(root, 'config', '--local', '--list', '--name-only'))).not.toContain(
+      'filter.evil',
+    );
+    fs.appendFileSync(path.join(root, 'src/main.ts'), '// mudança\n');
+    expect(() => collectChanges(root)).toThrow(/filter\.evil\.clean/);
+    expect(fs.existsSync(path.join(root, 'PWNED'))).toBe(false);
+    // prova de que o vetor é real: confiando na configuração, o git roda o filtro
+    collectChanges(root, { trustConfig: true });
+    expect(fs.existsSync(path.join(root, 'PWNED'))).toBe(true);
+  });
+
+  it('recusa include.path no config.worktree e chaves vindas de GIT_CONFIG_*', () => {
+    const root = repo(base);
+    run(root, 'config', 'extensions.worktreeConfig', 'true');
+    run(root, 'config', '--worktree', 'include.path', '../outro.config');
+    expect(riskyGitConfig(root)).toEqual(['include.path']);
+    expect(() => collectChanges(root)).toThrow(GitError);
+
+    const clean = repo(base);
+    expect(riskyGitConfig(clean)).toEqual([]);
+    const saved = { ...process.env };
+    try {
+      Object.assign(process.env, {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'core.pager',
+        GIT_CONFIG_VALUE_0: 'touch PAGER_RODOU',
+      });
+      expect(riskyGitConfig(clean)).toEqual(['core.pager']);
+    } finally {
+      for (const key of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0'])
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+    }
+  });
+
+  it('caminhos com espaço, aspas e acento, mesmo com prefixos trocados na config global', () => {
+    const root = repo({ ...base, 'src/meu arquivo.ts': 'export const a = 1;\n' });
+    fs.writeFileSync(path.join(root, 'src/meu arquivo.ts'), 'export const a = 2;\n');
+    fs.writeFileSync(path.join(root, 'src/ação "x".ts'), 'export const b = 1;\n');
+    run(root, 'add', '-A');
+    run(root, 'commit', '-q', '-m', 'nomes');
+    fs.writeFileSync(path.join(root, 'src/meu arquivo.ts'), 'export const a = 3;\n');
+    fs.writeFileSync(path.join(root, 'src/ação "x".ts'), 'export const b = 2;\n');
+
+    const expected = [
+      ['src/ação "x".ts', 'modified'],
+      ['src/meu arquivo.ts', 'modified'],
+    ];
+    const globalConfig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rastro-gcfg-')), 'cfg');
+    const before = process.env.GIT_CONFIG_GLOBAL;
+    try {
+      for (const config of [
+        '[diff]\n\tnoprefix = true\n',
+        '[diff]\n\tmnemonicPrefix = true\n',
+        '[diff]\n\tsrcPrefix = x/\n\tdstPrefix = y/\n\trelative = true\n',
+      ]) {
+        fs.writeFileSync(globalConfig, config);
+        process.env.GIT_CONFIG_GLOBAL = globalConfig;
+        const changes = collectChanges(root);
+        expect(
+          changes.files.map((f) => [f.file, f.status]),
+          config,
+        ).toEqual(expected);
+      }
+    } finally {
+      if (before === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = before;
+    }
+  });
+
+  it('arquivos novos: não segue links, não lê o que o analisador não lê, limita o tamanho', () => {
+    const root = repo(base);
+    fs.writeFileSync(path.join(root, 'src/novo.ts'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(root, 'notas.txt'), 'x\n'.repeat(50));
+    fs.writeFileSync(path.join(root, 'src/enorme.ts'), '// x\n'.repeat(400_000));
+    if (process.platform === 'linux') {
+      fs.symlinkSync('/dev/zero', path.join(root, 'zero.ts'));
+      execFileSync('mkfifo', [path.join(root, 'fila.ts')]);
+    }
+    const changes = collectChanges(root);
+    const byFile = Object.fromEntries(changes.files.map((f) => [f.file, f]));
+    expect(byFile['src/novo.ts']).toEqual({
+      file: 'src/novo.ts',
+      status: 'added',
+      ranges: [[1, 3]],
+    });
+    expect(byFile['notas.txt']?.ranges).toEqual([[1, 1]]);
+    expect(byFile['src/enorme.ts']?.ranges).toEqual([[1, 1]]);
+    if (process.platform === 'linux') expect(byFile['zero.ts']?.ranges).toEqual([[1, 1]]);
   });
 
   it('aceita uma subpasta do repositório como raiz', () => {
