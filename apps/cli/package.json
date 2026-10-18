@@ -6,7 +6,7 @@
   "author": "MongeAI",
   "type": "module",
   "bin": {
-    "rastro": "./bin/rastro.js"
+    "rastro": "bin/rastro.js"
   },
   "files": [
     "bin",
