@@ -40,6 +40,7 @@ Você acabou de cair num projeto desconhecido, ou alguém acabou de abrir um pul
 - 🧭 **Como A chega em B?**
 - 🔥 **Por onde começar? O que parece sem uso?**
 - 🛣️ **Quais rotas HTTP existem, e qual função atende cada uma?**
+- 🤖 **Meu agente de IA consegue responder isso sem grep?** Sim: [`rastro mcp`](#o-rastro-para-agentes-de-ia-mcp).
 
 O Rastro responde tudo isso num mapa explorável, com uma regra de ouro:
 
@@ -92,7 +93,92 @@ Para usar esse build como comando global: `npm link -w apps/cli` (para desfazer,
 
 </details>
 
+## O Rastro para agentes de IA (MCP)
+
+`rastro mcp` serve o mesmo grafo com evidências pelo [Model Context Protocol](https://modelcontextprotocol.io), para que agentes de programação (Claude Code, Cursor, Copilot no VS Code, qualquer cliente MCP) perguntem **quem chama isto, o que quebra se eu mudar e como A chega em B** em vez de procurar com grep e adivinhar. Toda resposta aponta para `arquivo:linha` e separa o que é **comprovado** do que é só **possível**.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport stdio rastro -- npx -y @mongeai/rastro@0.2.0 mcp
+```
+
+Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalhando (o Claude Code o informa em `CLAUDE_PROJECT_DIR`) e, fora dele, a pasta atual. Acrescente `--scope project` para compartilhar o servidor com o time por um `.mcp.json` na raiz do repositório:
+
+```json
+{
+  "mcpServers": {
+    "rastro": {
+      "command": "npx",
+      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp"]
+    }
+  }
+}
+```
+
+**Cursor**: `.cursor/mcp.json` no projeto (ou `~/.cursor/mcp.json` para todos os projetos):
+
+```json
+{
+  "mcpServers": {
+    "rastro": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+**VS Code** (modo agente do Copilot): `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "rastro": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+Qualquer outro cliente MCP: um servidor stdio iniciado com `npx -y @mongeai/rastro@0.2.0 mcp /caminho/do/projeto`.
+
+| Ferramenta          | O que o agente recebe                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rastro_overview`   | Tamanho, contagem de entidades, pastas principais, rotas, funções mais chamadas, arquivos centrais, código possivelmente sem uso, diagnósticos e quão fresco está o grafo |
+| `rastro_search`     | Funções, classes, métodos, arquivos, pastas, rotas e pacotes por nome, `Classe.metodo` ou caminho, com ids e `arquivo:linha`                                              |
+| `rastro_entity`     | Tudo sobre uma entidade: local, pais, exports, membros, quem chama e o que chama, imports, herança, detalhes da rota; `source: true` traz o código                        |
+| `rastro_references` | Quem chama/o que chama, quem importa/o que importa e subclasses com evidência, em grupos comprovado, externo e possível; `depth` até 3                                    |
+| `rastro_impact`     | O que pode quebrar: para entidades que você vai mudar, para as mudanças sem commit ou `since` uma branch; afetados por distância, rotas HTTP e testes para rodar          |
+| `rastro_path`       | Como A chega em B: as menores cadeias comprovadas com evidência, ou um "não há caminho comprovado" claro (com o inverso, o de arquivos ou o possível, quando existem)     |
+| `rastro_routes`     | Rotas HTTP com método, caminho completo (ou por que ele não é conhecido), framework, handler e `arquivo:linha`                                                            |
+
+Uma resposta é assim (um método só alcançado por uma interface):
+
+```text
+# References of `Dog.sound` method · src/animals.ts:20
+## Incoming — proven (0)
+none
+## Incoming — possible / unresolved (2; NOT proven)
+- `run` function · src/main.ts:4 may call it via `animal.sound` (1 of 3 possible implementations) — src/main.ts:7 `animal.sound();`
+- `Animal.describe` method · src/animals.ts:4 may call it via `this.sound` (1 of 3 possible implementations) — src/animals.ts:5 `return `${this.name} faz ${this.sound()}`;`
+```
+
+- **Comprovado × possível.** Relações comprovadas foram resolvidas pelo verificador de tipos do TypeScript (ou por uma regra explícita de framework) e sempre trazem a evidência. Chamadas por interface, método abstrato e callbacks aparecem como _possíveis_, com os candidatos, nunca como fato; as instruções do servidor dizem ao agente que a falta de uma relação não prova a falta de uso.
+- **Qualquer nome serve.** Uma entidade pode ser passada pelo id, pelo nome, por `Classe.metodo`, pelo caminho do arquivo ou da pasta, ou por `caminho:linha` (todo `arquivo:linha` de uma resposta pode voltar como alvo). Um nome ambíguo devolve os candidatos; um erro de digitação, nomes parecidos.
+- **Sempre fresco.** O servidor observa o projeto (as mesmas regras do `--watch`) e, depois de uma edição, reanalisa antes da próxima resposta com o compilador em memória: cerca de 1 s no Express (141 arquivos) e 7 s no NestJS (2 150 arquivos) na nossa máquina. A primeira análise começa em segundo plano assim que o cliente se conecta, numa worker thread, então o servidor continua respondendo enquanto isso. `--no-watch` mantém a primeira análise.
+- **Compacto.** As respostas são Markdown escrito para um modelo de linguagem, com listas limitadas ("… 12 more (raise `limit`)"), nunca o grafo cru.
+- **Seguro.** As ferramentas só leem. O servidor fala só pelo stdio (nenhuma porta de rede), nunca executa o projeto, só mostra código de arquivos JS/TS analisados dentro do projeto (sem escapar por links simbólicos, no máximo 120 linhas por resposta) e lê as mudanças do git com as mesmas proteções de leitura do `rastro impact`: um repositório cuja configuração define comandos é recusado, a não ser que o servidor tenha sido iniciado com `--trust-git-config`.
+- **Padrão.** Revisões do MCP de 2024-11-05 a 2025-11-25 (com o handshake `initialize`) e a 2026-07-28, sem estado, conferidas com os clientes oficiais do SDK em TypeScript. O `rastro mcp` aceita `--exclude`, `--no-gitignore`, `--max-files`, `--trust-git-config`, `--no-watch` e `--lang` (para as poucas linhas de log no stderr; as respostas são em inglês).
+
 ## Novidades da 0.2
+
+### Seu agente de IA pode consultar o grafo
+
+`rastro mcp` é um servidor do Model Context Protocol para Claude Code, Cursor, VS Code e outros agentes: sete ferramentas só de leitura respondem quem chama o quê, o que uma mudança pode quebrar, como A chega em B e quais rotas existem, sempre com a evidência `arquivo:linha` e com as relações comprovadas e possíveis separadas. O grafo é reanalisado depois de cada edição. Como configurar em [O Rastro para agentes de IA](#o-rastro-para-agentes-de-ia-mcp).
 
 ### O Rastro em cada pull request
 
@@ -263,6 +349,7 @@ rastro validate <grafo.json>     # confere se um JSON é um grafo válido
 rastro export <caminho|grafo.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # o que entrou, saiu ou mudou entre duas análises
 rastro impact <caminho|grafo.json>  # o impacto das mudanças do git (texto, markdown ou json)
+rastro mcp [caminho]             # servidor MCP (stdio) para agentes de IA; veja "O Rastro para agentes de IA"
 ```
 
 | Opção                  | Para que serve                                                                                                                      |
@@ -271,6 +358,7 @@ rastro impact <caminho|grafo.json>  # o impacto das mudanças do git (texto, mar
 | `--since <ref>`        | Marca o que mudou desde que a branch atual saiu de `<ref>` (ex.: `main`): o impacto de um pull request                              |
 | `--trust-git-config`   | Roda o git mesmo se a configuração local do repositório definir comandos (veja [Privacidade e segurança](#privacidade-e-segurança)) |
 | `-w, --watch`          | Reanalisa ao salvar arquivos e atualiza o mapa aberto ao vivo                                                                       |
+| `--no-watch`           | (`mcp`) Não observa os arquivos: o grafo fica o da primeira análise                                                                 |
 | `-o, --out <arquivo>`  | Onde salvar o JSON (padrão: o cache do usuário, ex.: `~/.cache/rastro`)                                                             |
 | `-p, --port <n>`       | Porta da interface (padrão 4321; se estiver ocupada, usa a próxima livre)                                                           |
 | `--no-open`            | Não abre o navegador automaticamente                                                                                                |
@@ -393,6 +481,7 @@ No modo `--watch`, reanalisar um projeto de 5 000 arquivos depois de salvar leva
 - 📖 **Só leitura.** O Rastro **nunca executa** o projeto analisado, nunca roda os scripts do `package.json` e nunca instala as dependências dele. A suíte de testes confere isso.
 - 🌿 **Cuidado com o git.** `--changes` e `--since` só rodam comandos de leitura do git, com ferramentas externas de diff, conversão de texto, hooks, pagers e fsmonitor desligados. O git nunca entra em submódulos, e a pasta analisada é sempre lida como caminho literal. Se a configuração local ou do worktree do repositório definir comandos que o git executaria (filtros, por exemplo), o Rastro se recusa, a não ser que você passe `--trust-git-config`. Use só em repositórios em que você confia.
 - 🛡️ **Servidor trancado.** Ele só escuta em `127.0.0.1`, exige um **token aleatório por execução**, só aceita `GET`/`HEAD`, bloqueia DNS rebinding e só entrega o código-fonte de arquivos que fazem parte do grafo. As atualizações ao vivo usam as mesmas proteções.
+- 🤖 **Servidor MCP para agentes.** O `rastro mcp` só fala pelo stdio (nenhuma porta de rede), as ferramentas dele só leem e ele só mostra código de arquivos analisados dentro do projeto. As mudanças do git usam as mesmas proteções de leitura, inclusive a recusa de configuração arriscada do repositório.
 - 🧭 **Nada é gravado no seu repositório.** Os resultados vão para a pasta de cache do usuário (ou para `--out`).
 
 O JSON exportado contém o caminho absoluto do projeto e trechos de código. Revise antes de compartilhar. Mais em [docs/seguranca.md](docs/seguranca.md) e [SECURITY.md](SECURITY.md).

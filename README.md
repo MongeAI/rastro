@@ -42,6 +42,7 @@ You just landed in an unfamiliar project, or someone just opened a pull request.
 - 🧭 **How does A reach B?**
 - 🔥 **Where should I look first? What looks unused?**
 - 🛣️ **Which HTTP routes exist, and which function handles each one?**
+- 🤖 **Can my AI agent answer these without grepping?** Yes: [`rastro mcp`](#rastro-for-ai-agents-mcp).
 
 Rastro answers all of that in an explorable map, with one golden rule:
 
@@ -94,7 +95,92 @@ To use this build as a global command: `npm link -w apps/cli` (undo with `npm un
 
 </details>
 
+## Rastro for AI agents (MCP)
+
+`rastro mcp` serves the same evidence-backed graph over the [Model Context Protocol](https://modelcontextprotocol.io), so coding agents (Claude Code, Cursor, VS Code Copilot, any MCP client) can ask **who calls this, what breaks if I change it and how does A reach B** instead of grepping and guessing. Every answer points to `file:line` and keeps what is **proven** apart from what is only **possible**.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport stdio rastro -- npx -y @mongeai/rastro@0.2.0 mcp
+```
+
+Without a path, `rastro mcp` analyzes the project Claude Code is working on (Claude Code passes it in `CLAUDE_PROJECT_DIR`) and otherwise the current folder. Add `--scope project` to share the server with your team through a `.mcp.json` at the root of the repository:
+
+```json
+{
+  "mcpServers": {
+    "rastro": {
+      "command": "npx",
+      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp"]
+    }
+  }
+}
+```
+
+**Cursor**: `.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` for all projects):
+
+```json
+{
+  "mcpServers": {
+    "rastro": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+**VS Code** (Copilot agent mode): `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "rastro": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+Any other MCP client: a stdio server started with `npx -y @mongeai/rastro@0.2.0 mcp /path/to/project`.
+
+| Tool                | What the agent gets                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rastro_overview`   | Size, entity counts, main folders, routes, most called functions, central files, possibly unused code, diagnostics and how fresh the graph is                   |
+| `rastro_search`     | Functions, classes, methods, files, folders, routes and packages by name, `Class.method` or path, with ids and `file:line`                                      |
+| `rastro_entity`     | Everything about one entity: location, parents, exports, members, callers and callees, imports, inheritance, route details; `source: true` adds its code        |
+| `rastro_references` | Callers/callees, importers/imports and subclasses with evidence, grouped into proven, external and possible; `depth` up to 3                                    |
+| `rastro_impact`     | What could break: for entities you plan to change, for the uncommitted changes or `since` a branch; affected entities by distance, HTTP routes and tests to run |
+| `rastro_path`       | How A reaches B: the shortest proven chains with evidence, or a clear "no proven path" (with the reverse, file-level or possible paths when they exist)         |
+| `rastro_routes`     | HTTP routes with method, full path (or why it is unknown), framework, handler and `file:line`                                                                   |
+
+An answer looks like this (a method only reachable through an interface):
+
+```text
+# References of `Dog.sound` method · src/animals.ts:20
+## Incoming — proven (0)
+none
+## Incoming — possible / unresolved (2; NOT proven)
+- `run` function · src/main.ts:4 may call it via `animal.sound` (1 of 3 possible implementations) — src/main.ts:7 `animal.sound();`
+- `Animal.describe` method · src/animals.ts:4 may call it via `this.sound` (1 of 3 possible implementations) — src/animals.ts:5 `return `${this.name} faz ${this.sound()}`;`
+```
+
+- **Proven vs. possible.** Proven relationships were resolved by the TypeScript checker (or an explicit framework rule) and always carry evidence. Calls through interfaces, abstract methods and callbacks are listed as _possible_, with their candidates, never as facts; the server's instructions tell the agent that a missing relationship does not prove a missing use.
+- **Any name works.** Entities can be passed as an id, a name, `Class.method`, a file or folder path, or `path:line` (every `file:line` in an answer can be passed back). An ambiguous name returns the candidates; a typo returns close matches.
+- **Always fresh.** The server watches the project (the same rules as `--watch`) and, after an edit, re-analyzes before the next answer with the compiler kept in memory: about 1 s for Express (141 files) and 7 s for NestJS (2,150 files) on our machine. The first analysis starts in the background as soon as the client connects, in a worker thread, so the server keeps answering meanwhile. `--no-watch` keeps the first analysis.
+- **Compact.** Answers are Markdown written for a language model, with capped lists (“… 12 more (raise `limit`)”), never the raw graph.
+- **Safe.** The tools only read. The server talks over stdio only (no network port), never runs the project, only shows code of analyzed JS/TS files inside the project (no symlink escapes, at most 120 lines per answer), and reads git changes with the same read-only protections as `rastro impact`: a repository whose config defines commands is refused unless the server was started with `--trust-git-config`.
+- **Standard.** MCP revisions 2024-11-05 to 2025-11-25 (with the `initialize` handshake) and the stateless 2026-07-28, checked against the official TypeScript SDK clients. `rastro mcp` accepts `--exclude`, `--no-gitignore`, `--max-files`, `--trust-git-config`, `--no-watch` and `--lang` (for its few log lines on stderr; the answers are in English).
+
 ## What's new in 0.2
+
+### Your AI agent can ask the graph
+
+`rastro mcp` is a Model Context Protocol server for Claude Code, Cursor, VS Code and other agents: seven read-only tools answer who calls what, what a change can break, how A reaches B and which routes exist, always with `file:line` evidence and with proven and possible relationships kept apart. The graph is re-analyzed after every edit. Setup in [Rastro for AI agents](#rastro-for-ai-agents-mcp).
 
 ### Rastro in every pull request
 
@@ -263,6 +349,7 @@ rastro validate <graph.json>     # check that a JSON file is a valid graph
 rastro export <path|graph.json> --format mermaid|dot|graphml|json|html
 rastro compare <a.json> <b.json> # what was added, removed or changed between two analyses
 rastro impact <path|graph.json>  # the impact of the git changes (text, markdown or json)
+rastro mcp [path]                # MCP server (stdio) for AI agents; see "Rastro for AI agents"
 ```
 
 | Option                 | Purpose                                                                                                            |
@@ -271,6 +358,7 @@ rastro impact <path|graph.json>  # the impact of the git changes (text, markdown
 | `--since <ref>`        | Mark what changed since the current branch forked from `<ref>` (e.g. `main`): the impact of a pull request         |
 | `--trust-git-config`   | Run git even if the repository's local config defines commands (see [Privacy and security](#privacy-and-security)) |
 | `-w, --watch`          | Re-analyze when files are saved and update the open map live                                                       |
+| `--no-watch`           | (`mcp`) Do not watch files: the graph stays as first analyzed                                                      |
 | `-o, --out <file>`     | Where to save the JSON (default: the user cache, e.g. `~/.cache/rastro`)                                           |
 | `-p, --port <n>`       | Interface port (default 4321; if busy, the next free one is used)                                                  |
 | `--no-open`            | Do not open the browser automatically                                                                              |
@@ -393,6 +481,7 @@ In `--watch` mode, re-analyzing a 5,000-file project after a save takes about 2.
 - 📖 **Read-only.** Rastro **never executes** the analyzed project, never runs its `package.json` scripts and never installs its dependencies. The test suite checks this.
 - 🌿 **Careful with git.** `--changes` and `--since` only run read-only git commands, with external diff tools, text conversion, hooks, pagers and fsmonitor disabled. Git never enters submodules, and the analyzed folder is always taken as a literal path. If the repository's local or worktree config defines commands git would run (filters, for example), Rastro refuses unless you pass `--trust-git-config`. Use it only on repositories you trust.
 - 🛡️ **Locked-down server.** It only listens on `127.0.0.1`, requires a **random per-run token**, only accepts `GET`/`HEAD`, blocks DNS rebinding and only serves source code of files that are part of the graph. Live updates use the same protections.
+- 🤖 **MCP server for agents.** `rastro mcp` only talks over stdio (no network port), its tools only read, and it only shows code of analyzed files inside the project. Git changes use the same read-only protections, including the refusal of risky repository config.
 - 🧭 **Nothing written to your repository.** Results go to the user cache folder (or to `--out`).
 
 The exported JSON contains the absolute path of the project and code snippets. Review it before sharing. More in [docs/seguranca.md](docs/seguranca.md) (Portuguese) and [SECURITY.md](SECURITY.md).

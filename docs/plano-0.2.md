@@ -72,6 +72,13 @@ Legenda: ⬜ a fazer · 🟨 em andamento · ✅ pronto e testado
 - ✅ Revisão de código independente (analisador, interface e segurança): 5 problemas altos (inclusive um desvio da verificação de configuração do git via `config.worktree`), 12 médios e vários baixos — todos corrigidos com testes que reproduzem cada caso.
 - ✅ Novas capturas e GIF em EN e PT (`docs/assets/en`, `docs/assets/pt`), README e README.pt-BR reescritos, CHANGELOG e ROADMAP atualizados, versão 0.2.0.
 
+### 11. O Rastro para agentes de IA: `rastro mcp`
+
+- ✅ Servidor do Model Context Protocol pelo stdio, escrito à mão (sem dependência nova): JSON-RPC 2.0 linha a linha, `initialize` respondido na hora (revisões 2024-11-05 a 2025-11-25) e a era sem estado 2026-07-28 (`server/discover`, `_meta` por requisição), `ping`, cancelamento, lotes, erros do protocolo × erros da ferramenta (`isError`), proteção contra linhas enormes.
+- ✅ Sete ferramentas só de leitura: `rastro_overview`, `rastro_search`, `rastro_entity` (com o código, pela mesma leitura segura do servidor), `rastro_references`, `rastro_impact` (alvos, mudanças sem commit ou `since`), `rastro_path` e `rastro_routes`. Respostas em Markdown compacto com `arquivo:linha`, comprovado × externo × possível, listas com limite, nomes ambíguos com candidatos e sugestões para erros de digitação.
+- ✅ Grafo sempre fresco: a análise roda numa worker thread com a `AnalysisSession` (o protocolo nunca trava), o observador do `--watch` marca o grafo como desatualizado e a próxima chamada reanalisa (chamadas simultâneas esperam a mesma reanálise; uma falha volta como erro e a chamada seguinte tenta de novo).
+- ✅ Conferido com os clientes oficiais do SDK (v1 e v2, inclusive a sondagem `server/discover`), testes do protocolo, das ferramentas, ao vivo, do git e da CLI empacotada; README e segurança atualizados.
+
 ## Fora desta versão
 
 Outras linguagens (Python/Go) e extensões de editor ficam para a 0.3, para a 0.2 sair impecável.

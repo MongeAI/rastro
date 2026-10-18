@@ -12,6 +12,7 @@ O Rastro é **local-first** e **somente leitura**. Este documento lista exatamen
 - **Roda o `git` em modo leitura**, e só com `--changes` ou `--since` (ver [Mudanças do git](#mudanças-do-git---changes---since)).
 - **Observa as pastas do projeto** no modo ao vivo (`--watch`), só para saber quando reanalisar (ver [Modo ao vivo](#modo-ao-vivo---watch)).
 - **Grava um relatório HTML** com `rastro export --format html` (ver [Relatório HTML offline](#relatório-html-offline)).
+- **Responde a agentes de IA pelo stdio** com `rastro mcp` (ver [Servidor MCP](#servidor-mcp-rastro-mcp)).
 
 ## O que o Rastro não faz
 
@@ -56,6 +57,17 @@ Arquivos novos (não versionados) entram como adicionados. O Rastro só lê os q
 O modo ao vivo **só lê**: observa as pastas que o analisador leria (as mesmas exclusões, `.gitignore` e `--exclude`; nunca `node_modules` nem `.git`), com um observador por pasta, e reanalisa quando um arquivo JS/TS ou de configuração muda. Nada é executado e nada é gravado no projeto; o JSON atualizado vai para o mesmo destino da análise inicial.
 
 Se o sistema não deixar observar as pastas (no Linux, por exemplo, o limite `fs.inotify.max_user_watches` esgotado, erro `ENOSPC`), a CLI avisa no terminal e passa a procurar mudanças por varredura a cada 1,5 s, comparando data e tamanho dos arquivos. Ela nunca diz que está ao vivo sem estar observando nada.
+
+## Servidor MCP (`rastro mcp`)
+
+O `rastro mcp` é um servidor do Model Context Protocol iniciado pelo cliente de IA (Claude Code, Cursor, VS Code...) como processo filho:
+
+- **Só stdio.** Não abre porta de rede: fala JSON-RPC pelo stdin/stdout com o processo que o iniciou, e mais ninguém. O stdout só carrega mensagens do protocolo (os avisos vão para o stderr, e até um `console.log` acidental é desviado para lá); mensagens acima de 1 MB são recusadas sem derrubar o servidor.
+- **Só leitura.** As sete ferramentas consultam o grafo (anotadas como `readOnlyHint`); nenhuma grava arquivos, executa código do projeto ou instala algo. A análise roda numa worker thread com o mesmo analisador da CLI.
+- **Código só de arquivos analisados.** `rastro_entity` com `source: true` usa a mesma leitura do servidor local (`readSource`): só arquivos JS/TS que estão no grafo como analisados, nada de caminhos absolutos ou com `..`, o caminho real precisa ficar dentro da raiz (links simbólicos recusados), até 2 MB por arquivo e no máximo 120 linhas por resposta.
+- **Git com as mesmas proteções.** O modo git do `rastro_impact` (mudanças sem commit ou `since`) chama o mesmo `collectChanges` do `rastro impact`, com todas as proteções da seção [Mudanças do git](#mudanças-do-git---changes---since). A referência vem do agente: uma que comece com `-` é recusada, e a configuração arriscada do repositório também, a não ser que o servidor tenha sido iniciado com `--trust-git-config` (o agente não consegue ligar isso). A branch mostrada no resumo é lida do `.git/HEAD`, sem rodar o git.
+- **Texto do projeto como dado.** Nomes, caminhos e trechos de código chegam ao agente como código inline, sem caracteres de controle. O agente lê código do projeto de qualquer forma; trate comentários e strings de repositórios desconhecidos como dados, não como instruções.
+- **Observação de arquivos.** Igual ao modo ao vivo (ver abaixo): só as pastas que o analisador leria, só para marcar o grafo como desatualizado; `--no-watch` desliga.
 
 ## Relatório HTML offline
 

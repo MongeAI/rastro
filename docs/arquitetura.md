@@ -25,7 +25,7 @@ caminho ──▶ │  analyzer    │ ──▶ │  graph         │ ──�
 | `@rastro/core`        | Tipos (`GraphNode`, `GraphEdge`, `Evidence`...), ids, rótulos (pt/en), JSON Schema, `validateGraph` (problemas em pt/en)                                                                                                                   | nada                             |
 | `@rastro/graph`       | `GraphBuilder` (deduplicação, evidências, `depends_on`, ciclos via Tarjan iterativo), `GraphIndex` (vizinhança, impacto, busca), `computeView` (o que aparece na tela), exportadores (`toMermaid`, `toDot`, `toGraphML`) e `compareGraphs` | core                             |
 | `@rastro/analyzer`    | Descoberta de arquivos, leitura do tsconfig, resolução de módulos e extração com ts-morph; regras de rotas (Express, Fastify, Hono, NestJS, Next.js)                                                                                       | core, graph, ts-morph, ignore    |
-| `rastro` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local, relatório HTML offline (`report.ts`)                                                                                                                                     | core, graph, analyzer            |
+| `rastro` (`apps/cli`) | Comandos, armazenamento no cache do usuário, servidor HTTP local, relatório HTML offline (`report.ts`), servidor MCP (`mcp*.ts`)                                                                                                           | core, graph, analyzer            |
 | `@rastro/web`         | Interface; usa `@rastro/graph` diretamente no navegador                                                                                                                                                                                    | core, graph, React, Cytoscape.js |
 
 `core` e `graph` não usam APIs do Node.js, para rodarem no navegador.
@@ -88,6 +88,14 @@ A versão começa em 1 e sobe a cada `update()` do servidor. Com `rastro <caminh
 4. A interface busca `/api/graph` de novo e mantém a seleção, comparando a versão do evento com a do cabeçalho para ignorar respostas antigas.
 
 Se observar falhar (por exemplo `ENOSPC` ou `EMFILE`), a CLI avisa e passa a varrer o projeto a cada 1,5 s, comparando data e tamanho dos arquivos relevantes.
+
+## Servidor MCP (`rastro mcp`)
+
+Três módulos em `apps/cli/src/`, sem dependências novas:
+
+1. `mcp.ts` — o protocolo: JSON-RPC 2.0 pelo stdio, uma mensagem por linha (até 1 MB). `initialize` escolhe a era legada (2024-11-05 a 2025-11-25); uma requisição com `_meta["io.modelcontextprotocol/protocolVersion"]` é servida na era sem estado (2026-07-28: `server/discover`, `resultType`, cache da lista de ferramentas). Erros do protocolo viram erros JSON-RPC; argumentos inválidos, nomes não encontrados e falhas da análise viram resultados com `isError`, para o agente corrigir. Requisições canceladas enquanto rodam ficam sem resposta.
+2. `mcp-project.ts` — o grafo fresco: a `AnalysisSession` roda numa worker thread que carrega o próprio bundle da CLI (o `index.ts` não roda o `main` dentro dela), então o protocolo responde mesmo durante uma análise longa. O observador do `--watch` (`watch.ts`) só marca o grafo como desatualizado; a próxima chamada reanalisa, e chamadas simultâneas esperam a mesma análise. Cada análise vira um `Snapshot` com o `GraphIndex` e os insights calculados sob demanda.
+3. `mcp-tools.ts` — as sete ferramentas, funções puras sobre o `Snapshot` que devolvem Markdown compacto. Reaproveitam `GraphIndex` (busca, vizinhança, `impactOfAll`), `findPaths` e `findPossiblePath`, `computeInsights`, `changesWithImpact`/`routesAndTests` (o mesmo cálculo do `rastro impact`), `collectChanges` e `readSource`. A resolução de nomes aceita id, `arquivo:linha`, caminho, nome qualificado e nome, e devolve os candidatos quando há ambiguidade.
 
 ## Interface
 
