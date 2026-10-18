@@ -58,11 +58,21 @@ export function computeChangeImpact(index: GraphIndex, changes: ChangeSet): Chan
       const moreSpecific = index.descendants(node.id).some((d) => hit.includes(d));
       if (!moreSpecific) changed.add(node.id);
     }
-    // código no topo do arquivo (fora de qualquer entidade) também muda o arquivo
-    const outsideSymbols = file.ranges.some(
-      ([a, b]) =>
-        !symbols.some((n) => n.location && a >= n.location.startLine && b <= n.location.endLine),
-    );
+    // código no topo do arquivo (fora de qualquer entidade) também muda o arquivo: linhas
+    // alteradas ou trechos removidos (ex.: um `export const` apagado) fora das entidades
+    const outsideSymbols =
+      file.ranges.some(
+        ([a, b]) =>
+          !symbols.some((n) => n.location && a >= n.location.startLine && b <= n.location.endLine),
+      ) ||
+      (file.deletionsAt ?? []).some(
+        // o trecho removido ficava entre as linhas `line - 1` e `line`: dentro de uma entidade
+        // só se as duas são dela
+        (line) =>
+          !symbols.some(
+            (n) => n.location && line > n.location.startLine && line <= n.location.endLine,
+          ),
+      );
     if (outsideSymbols || file.status === 'added') changed.add(fileNode.id);
   }
 

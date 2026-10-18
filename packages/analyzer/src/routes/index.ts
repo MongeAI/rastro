@@ -26,16 +26,16 @@ export class RouteDetector {
 
   /** Passo preparatório: registros de plugins do Fastify (podem estar em qualquer arquivo). */
   prepare(file: DiscoveredFile, sf: SourceFile): void {
-    safely(this.ctx, file, 'rotas (Fastify)', () => collectFastifyRegistrations(this.state, sf));
+    safely(this.ctx, file, 'routes-fastify', () => collectFastifyRegistrations(this.state, sf));
   }
 
   detect(file: DiscoveredFile, sf: SourceFile): void {
     const { ctx, state } = this;
-    safely(ctx, file, 'rotas (Express)', () => detectExpressRoutes(state, file, sf));
-    safely(ctx, file, 'rotas (Fastify)', () => detectFastifyRoutes(state, file, sf));
-    safely(ctx, file, 'rotas (Hono)', () => detectHonoRoutes(state, file, sf));
-    safely(ctx, file, 'rotas (NestJS)', () => detectNestRoutes(state, file, sf));
-    safely(ctx, file, 'rotas (Next.js)', () => detectNextRoutes(state, file, sf));
+    safely(ctx, file, 'routes-express', () => detectExpressRoutes(state, file, sf));
+    safely(ctx, file, 'routes-fastify', () => detectFastifyRoutes(state, file, sf));
+    safely(ctx, file, 'routes-hono', () => detectHonoRoutes(state, file, sf));
+    safely(ctx, file, 'routes-nestjs', () => detectNestRoutes(state, file, sf));
+    safely(ctx, file, 'routes-next', () => detectNextRoutes(state, file, sf));
   }
 
   /** Caminhos completos (prefixos de montagem compostos entre arquivos). */

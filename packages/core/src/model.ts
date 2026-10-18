@@ -192,9 +192,15 @@ export interface GraphEdge {
 export interface Diagnostic {
   level: 'info' | 'warning' | 'error';
   code: string;
+  /** Texto em português (mantido por compatibilidade); para outro idioma, use `diagnosticText`. */
   message: string;
   file?: string;
   line?: number;
+  /**
+   * Partes variáveis da mensagem (arquivo de configuração, limite, texto do erro...), para
+   * montar o texto em outro idioma a partir do `code` (ver `diagnosticText`).
+   */
+  params?: Record<string, string | number>;
 }
 
 export interface GraphStats {

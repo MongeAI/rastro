@@ -477,6 +477,201 @@ describe('regra da casa: nenhuma rota inventada', () => {
     expect(node(g, 'route:a.ts#A GET /users')?.meta?.fullPath).toBe('/users');
   });
 
+  it('NestJS: controller de biblioteca do monorepo não herda o prefixo global de outro app', async () => {
+    const root = makeProject({
+      'package.json': '{"private":true,"workspaces":["apps/*","libs/*"]}',
+      'apps/api/package.json': '{"dependencies":{"@nestjs/core":"11","@nestjs/common":"11"}}',
+      'apps/api/src/main.ts': [
+        "import { NestFactory } from '@nestjs/core';",
+        'async function boot() {',
+        '  const app = await NestFactory.create({});',
+        "  app.setGlobalPrefix('api');",
+        '}',
+      ].join('\n'),
+      'apps/api/src/health.controller.ts': [
+        "import { Controller, Get } from '@nestjs/common';",
+        "@Controller('health')",
+        'export class HealthController {',
+        '  @Get()',
+        '  ok() {}',
+        '}',
+      ].join('\n'),
+      'libs/users/package.json': '{"peerDependencies":{"@nestjs/common":"11"}}',
+      'libs/users/src/users.controller.ts': [
+        "import { Controller, Get } from '@nestjs/common';",
+        "@Controller('users')",
+        'export class UsersController {',
+        '  @Get()',
+        '  list() {}',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    // mesmo app do setGlobalPrefix: comprovado
+    expect(
+      node(g, 'route:apps/api/src/health.controller.ts#HealthController GET /health')?.meta
+        ?.fullPath,
+    ).toBe('/api/health');
+    // a biblioteca pode ser usada pelo app com prefixo: o caminho completo não é afirmado
+    const users = node(g, 'route:libs/users/src/users.controller.ts#UsersController GET /users');
+    expect(users?.meta?.routePath).toBe('/users');
+    expect(users?.meta?.fullPath).toBeUndefined();
+    expect(users?.name).toBe('GET /users');
+  });
+
+  it('NestJS: RouterModule, enableVersioning e @Version deixam o caminho completo desconhecido', async () => {
+    const controller = [
+      "import { Controller, Get } from '@nestjs/common';",
+      "@Controller('stats')",
+      'export class AdminController {',
+      '  @Get()',
+      '  list() {}',
+      '}',
+    ].join('\n');
+    const variants: Record<string, string> = {
+      'app.module.ts': [
+        "import { Module } from '@nestjs/common';",
+        "import { RouterModule } from '@nestjs/core';",
+        "@Module({ imports: [RouterModule.register([{ path: 'admin', module: AppModule }])] })",
+        'export class AppModule {}',
+      ].join('\n'),
+      'main.ts': [
+        "import { NestFactory } from '@nestjs/core';",
+        'async function boot() {',
+        '  const app = await NestFactory.create({});',
+        "  app.enableVersioning({ type: 1, defaultVersion: '1' });",
+        '}',
+      ].join('\n'),
+      'other.controller.ts': [
+        "import { Controller, Get, Version } from '@nestjs/common';",
+        "@Controller('other')",
+        'export class OtherController {',
+        "  @Version('2')",
+        '  @Get()',
+        '  get() {}',
+        '}',
+      ].join('\n'),
+    };
+    for (const [name, content] of Object.entries(variants)) {
+      const root = makeProject({
+        'package.json': '{"dependencies":{"@nestjs/common":"11","@nestjs/core":"11"}}',
+        'admin.controller.ts': controller,
+        [name]: content,
+      });
+      const g = await analyzeProject(root);
+      const stats = node(g, 'route:admin.controller.ts#AdminController GET /stats');
+      expect(stats?.meta?.routePath, name).toBe('/stats');
+      expect(stats?.meta?.fullPath, name).toBeUndefined();
+    }
+  });
+
+  it('NestJS: setGlobalPrefix num app que não dá para comprovar deixa o prefixo desconhecido', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"@nestjs/common":"11","@nestjs/core":"11"}}',
+      'main.ts': [
+        "import { createApp } from './factory';",
+        'async function boot() {',
+        '  const app = await createApp();',
+        "  app.setGlobalPrefix('api');",
+        '}',
+      ].join('\n'),
+      'factory.js': 'export async function createApp() { return globalThis.app; }',
+      'a.ts': [
+        "import { Controller, Get } from '@nestjs/common';",
+        "@Controller('users')",
+        'export class A {',
+        '  @Get()',
+        '  list() {}',
+        '}',
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    expect(node(g, 'route:a.ts#A GET /users')?.meta?.fullPath).toBeUndefined();
+  });
+
+  it('Next.js: pageExtensions literal do next.config é respeitado', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"next":"16"}}',
+      'next.config.js': "module.exports = { pageExtensions: ['page.tsx', 'api.ts'] };",
+      'pages/index.page.tsx': 'export default function Home() { return null; }',
+      'pages/Button.tsx': 'export default function Button() { return null; }',
+      'pages/api/hello.api.ts': 'export default function hello(req: any, res: any) {}',
+      'pages/api/util.ts': 'export default function util() {}',
+    });
+    const g = await analyzeProject(root);
+    expect(routeNames(g)).toEqual(['ALL /api/hello', 'GET /']);
+    expect(g.diagnostics.filter((d) => d.code === 'next-routes-skipped')).toEqual([]);
+  });
+
+  it('Next.js: pageExtensions que só seria conhecido executando o config não gera rotas', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"next":"16"}}',
+      'next.config.mjs': [
+        "const extra = process.env.MDX ? ['mdx'] : [];",
+        "export default { pageExtensions: ['tsx', ...extra] };",
+      ].join('\n'),
+      'pages/index.tsx': 'export default function Home() { return null; }',
+    });
+    const g = await analyzeProject(root);
+    expect(routeIds(g)).toEqual([]);
+    const diag = g.diagnostics.find((d) => d.code === 'next-routes-skipped');
+    expect(diag?.file).toBe('next.config.mjs');
+    expect(diag?.params).toEqual({ config: 'next.config.mjs', option: 'pageExtensions' });
+  });
+
+  it('Next.js: pages/ na raiz faz o Next ignorar src/app', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"next":"16"}}',
+      'pages/about.tsx': 'export default function About() { return null; }',
+      'src/app/page.tsx': 'export default function Ignored() { return null; }',
+    });
+    const g = await analyzeProject(root);
+    expect(routeIds(g)).toEqual(['route:pages/about.tsx#next GET /about']);
+  });
+
+  it('Fastify: com três argumentos o handler é o último (as opções não são handler)', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"fastify":"5"}}',
+      'server.ts': [
+        "import Fastify from 'fastify';",
+        'const app = Fastify();',
+        'const opts = { schema: {} };',
+        'function handler() { return 1; }',
+        "app.get('/x', opts, handler);",
+        "app.get('/y', { handler });",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const fromX = g.edges.filter((e) => e.source === 'route:server.ts#app GET /x');
+    expect(fromX.map((e) => `${e.target} ${e.resolution}`)).toEqual([
+      'fn:server.ts#handler resolved',
+    ]);
+    expect(handler(g, 'route:server.ts#app GET /y', 'fn:server.ts#handler')).toEqual(ROUTE_HANDLER);
+  });
+
+  it('Hono: app com basePath montado por route() tem o basePath depois do prefixo', async () => {
+    const root = makeProject({
+      'package.json': '{"dependencies":{"hono":"4"}}',
+      'a.ts': [
+        "import { Hono } from 'hono';",
+        "const api = new Hono().basePath('/api');",
+        "api.get('/users', (c) => c.text('ok'));",
+        'const root = new Hono();',
+        "root.route('/v1', api);",
+        'const app = new Hono();',
+        "const v2 = app.basePath('/v2');",
+        "v2.get('/items', (c) => c.text('ok'));",
+      ].join('\n'),
+    });
+    const g = await analyzeProject(root);
+    const users = node(g, 'route:a.ts#api GET /users');
+    expect(users?.meta?.routePath).toBe('/users');
+    expect(users?.meta?.fullPath).toBe('/v1/api/users');
+    expect(users?.meta?.mountedAt).toEqual(['/v1/api']);
+    // app nunca montado: as rotas do derivado ficam em /v2 (o roteador é o mesmo do app)
+    expect(node(g, 'route:a.ts#v2 GET /items')?.meta?.fullPath).toBe('/v2/items');
+  });
+
   it('Next.js: sem a dependência next, app/ e pages/ não geram rotas', async () => {
     const root = makeProject({
       'package.json': '{"dependencies":{"react":"19"}}',

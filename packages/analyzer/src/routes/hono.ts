@@ -5,6 +5,7 @@ import {
   addRoute,
   frameworkExport,
   isHandlerLike,
+  joinPath,
   linkHandlers,
   normalizePrefix,
   resolveOwner,
@@ -21,9 +22,32 @@ const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'options', 'patch'
 /** Métodos que devolvem a própria instância (permitem encadear). */
 const CHAINABLE = new Set([...HTTP_METHODS, 'on', 'use', 'route', 'notFound', 'onError']);
 
+/** Um app do Hono: o dono das rotas e o prefixo de `basePath` dentro dele. */
+interface HonoApp {
+  /** App de origem (`new Hono()`): os derivados por `basePath` dividem as rotas com ele. */
+  owner: OwnerKey;
+  /** Prefixo acumulado de `basePath` (`''` sem); `undefined` quando não é literal. */
+  inner: string | undefined;
+}
+
+/** App derivado por `basePath` → app de origem e prefixo. */
+const derivedApps = new WeakMap<RouteState, Map<OwnerKey, HonoApp>>();
+
+/**
+ * App do Hono de uma expressão. `x.basePath('/api')` não é uma montagem: devolve um app que
+ * divide as rotas (e o roteador) com `x` e registra cada uma com o prefixo na frente. Então a
+ * rota fica em `<onde x (ou o derivado) é servido> + /api + caminho`.
+ */
+function honoApp(state: RouteState, expr: ts.Expression): HonoApp | undefined {
+  const key = honoOwner(state, expr);
+  if (key === undefined) return undefined;
+  return derivedApps.get(state)?.get(key) ?? { owner: key, inner: '' };
+}
+
 /**
  * Dono (app) comprovadamente do Hono: `new Hono()` (import de `hono`), `x.basePath('/api')`
- * sobre um app comprovado e encadeamentos (`app.get(...).post(...)`).
+ * sobre um app comprovado e encadeamentos (`app.get(...).post(...)`). Para um app derivado por
+ * `basePath`, a chave é a do próprio derivado (ver `honoApp` para o app de origem).
  */
 export function honoOwner(state: RouteState, expr: ts.Expression): OwnerKey | undefined {
   return resolveOwner(state.ctx, expr, (e, key) => {
@@ -35,12 +59,16 @@ export function honoOwner(state: RouteState, expr: ts.Expression): OwnerKey | un
     if (!ts.isCallExpression(e) || !ts.isPropertyAccessExpression(e.expression)) return undefined;
     const name = e.expression.name.text;
     if (name === 'basePath') {
-      // basePath devolve um app novo, que responde sob o prefixo
-      const parent = honoOwner(state, e.expression.expression);
+      const parent = honoApp(state, e.expression.expression);
       if (parent === undefined) return undefined;
       const prefix = stringLiteral(e.arguments[0]);
-      state.owner(key);
-      state.mount(key, parent, prefix === undefined ? undefined : normalizePrefix(prefix));
+      const inner =
+        prefix === undefined || parent.inner === undefined
+          ? undefined
+          : normalizePrefix(joinPath(parent.inner, normalizePrefix(prefix)));
+      let derived = derivedApps.get(state);
+      if (!derived) derivedApps.set(state, (derived = new Map()));
+      derived.set(key, { owner: parent.owner, inner });
       return key;
     }
     return CHAINABLE.has(name) ? honoOwner(state, e.expression.expression) : undefined;
@@ -82,8 +110,9 @@ export function detectHonoRoutes(state: RouteState, file: DiscoveredFile, sf: So
     const routePath = pathArg && stringLiteral(pathArg.compilerNode);
     if (routePath === undefined || !routePath.startsWith('/')) continue;
     if (!handlers.some(isHandlerLike) || !methods.every((m) => /^[A-Z]+$/.test(m))) continue;
-    const owner = honoOwner(state, receiver);
-    if (owner === undefined) continue;
+    const identity = honoOwner(state, receiver);
+    const app = identity === undefined ? undefined : honoApp(state, receiver);
+    if (identity === undefined || !app) continue;
 
     const receiverText = receiverName(receiver);
     for (const httpMethod of methods) {
@@ -93,8 +122,9 @@ export function detectHonoRoutes(state: RouteState, file: DiscoveredFile, sf: So
         receiver: receiverText,
         httpMethod,
         routePath,
-        identity: owner,
-        owner,
+        identity,
+        owner: app.owner,
+        innerPrefix: app.inner ?? null,
         at: call,
         qualifiedName: `${receiverText}.${name}('${routePath}')`,
       });
@@ -103,14 +133,23 @@ export function detectHonoRoutes(state: RouteState, file: DiscoveredFile, sf: So
   }
 }
 
-/** `app.route('/users', users)`: monta o sub-app no prefixo (só entre apps comprovados). */
+/**
+ * `app.route('/users', users)`: monta o sub-app no prefixo (só entre apps comprovados). As rotas
+ * do sub-app já levam o `basePath` dele; o `basePath` de quem monta entra antes do prefixo.
+ */
 function detectMount(state: RouteState, receiver: ts.Expression, call: ts.CallExpression): void {
   const [pathArg, childArg] = call.arguments;
   if (!pathArg || !childArg) return;
-  const child = honoOwner(state, childArg);
-  if (child === undefined) return;
-  const parent = honoOwner(state, receiver);
-  if (parent === undefined || parent === child) return;
+  const child = honoApp(state, childArg);
+  if (!child) return;
+  const parent = honoApp(state, receiver);
+  if (!parent || parent.owner === child.owner) return;
   const prefix = stringLiteral(pathArg);
-  state.mount(child, parent, prefix === undefined ? undefined : normalizePrefix(prefix));
+  state.mount(
+    child.owner,
+    parent.owner,
+    prefix === undefined || parent.inner === undefined
+      ? undefined
+      : normalizePrefix(joinPath(parent.inner, normalizePrefix(prefix))),
+  );
 }

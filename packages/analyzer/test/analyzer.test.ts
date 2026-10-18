@@ -4,7 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
-import { validateGraph, type GraphEdge, type RastroGraph } from '@rastro/core';
+import {
+  DIAGNOSTIC_CODES,
+  diagnosticText,
+  validateGraph,
+  type GraphEdge,
+  type RastroGraph,
+} from '@rastro/core';
 import { analyzeProject, discoverFiles } from '@rastro/analyzer';
 import { computeInsights, GraphIndex } from '@rastro/graph';
 
@@ -749,5 +755,46 @@ describe('insights (0.2)', () => {
     expect(insights.mostImported.map((r) => r.node.id)).toContain('file:src/lib/strings.ts');
     expect(insights.largestFiles[0]!.value).toBeGreaterThan(0);
     expect(insights.coupledModules.length).toBeGreaterThan(0);
+  });
+});
+
+describe('diagnósticos com parâmetros (textos em outros idiomas)', () => {
+  it('cada diagnóstico traz os params do código, e o texto em pt é o da mensagem', async () => {
+    const root = makeProject({
+      'package.json': '{"name":"diag"}',
+      'tsconfig.json': '{ "compilerOptions": ',
+      'src/broken.ts': 'export function x( {\n',
+      'src/big.ts': `export const big = '${'x'.repeat(3000)}';\n`,
+      'src/a.ts': 'export function a() {}\n',
+      'src/b.ts': 'export function b() {}\n',
+    });
+    const g = await analyzeProject(root, { maxFileSizeBytes: 2000, maxFiles: 2 });
+    const byCode = new Map(g.diagnostics.map((d) => [d.code, d]));
+    expect(byCode.get('invalid-config')?.params).toMatchObject({ config: 'tsconfig.json' });
+    expect(byCode.get('file-too-large')?.params).toEqual({ limitKb: 2 });
+    expect(byCode.get('max-files-reached')?.params).toEqual({ limit: 2 });
+    for (const d of g.diagnostics) {
+      expect(d.params, d.code).toBeDefined();
+      expect(DIAGNOSTIC_CODES, d.code).toContain(d.code);
+      expect(diagnosticText(d, 'pt'), d.code).toBe(d.message);
+      expect(diagnosticText(d, 'en'), d.code).not.toBe(d.message);
+    }
+  });
+
+  it('erro de sintaxe e arquivo com barra invertida no nome (sem expor o caminho absoluto)', async () => {
+    const root = makeProject({
+      'src/broken.ts': 'export function x( {\n',
+      'src/ok.ts': 'export function ok() {}\n',
+      'src/a\\b.ts': 'export function weird() {}\n',
+    });
+    const g = await analyzeProject(root);
+    const syntax = g.diagnostics.find((d) => d.code === 'syntax-error');
+    expect(syntax?.params?.error).toBeTypeOf('string');
+    expect(diagnosticText(syntax!, 'en')).toMatch(/^Syntax error: /);
+    const skipped = g.diagnostics.find((d) => d.code === 'parse-failed');
+    expect(skipped).toMatchObject({ file: 'src/a\\b.ts', params: { reason: 'backslash-name' } });
+    for (const d of g.diagnostics) expect(JSON.stringify(d)).not.toContain(root);
+    expect(node(g, 'fn:src/ok.ts#ok')).toBeDefined();
+    expect(validateGraph(g).valid).toBe(true);
   });
 });

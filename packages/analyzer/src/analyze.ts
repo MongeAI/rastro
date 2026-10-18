@@ -2,7 +2,6 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { Node, Project, SyntaxKind, ts, type KindToNodeMappings, type SourceFile } from 'ts-morph';
 import {
-  compareStrings,
   nodeId,
   SCHEMA_VERSION,
   RASTRO_VERSION,
@@ -17,8 +16,14 @@ import {
 } from '@rastro/core';
 import { GraphBuilder } from '@rastro/graph';
 import { discoverFiles, toPosix, type DiscoverOptions, type DiscoveredFile } from './discover.js';
-import { loadCompilerOptions, ModuleResolver, packageNameOf } from './resolve.js';
-import { ImplementationIndex, MAX_CANDIDATES } from './implementations.js';
+import {
+  fileStamp,
+  loadCompilerOptions,
+  ModuleResolver,
+  packageNameOf,
+  type InputStamps,
+} from './resolve.js';
+import { ImplementationIndex } from './implementations.js';
 import { RouteDetector } from './routes/index.js';
 import { progressMessage, type ProgressEvent } from './progress.js';
 
@@ -65,7 +70,11 @@ export async function analyzeProject(
   rootInput: string,
   options: AnalyzeOptions = {},
 ): Promise<RastroGraph> {
-  return runAnalysis(rootInput, options, { stamps: new Map() });
+  return runAnalysis(rootInput, options, {
+    stamps: new Map(),
+    inputs: new Map(),
+    external: new Map(),
+  });
 }
 
 /**
@@ -75,7 +84,11 @@ export async function analyzeProject(
  * recalculado do zero: o resultado é idêntico ao de uma análise nova.
  */
 export class AnalysisSession {
-  private readonly cache: CompilerCache = { stamps: new Map() };
+  private readonly cache: CompilerCache = {
+    stamps: new Map(),
+    inputs: new Map(),
+    external: new Map(),
+  };
 
   constructor(
     private readonly rootInput: string,
@@ -106,6 +119,17 @@ interface CompilerCache {
   resolver?: ModuleResolver;
   /** Caminho absoluto → `mtime:tamanho` de quando o arquivo foi lido. */
   stamps: Map<string, string>;
+  /**
+   * Configurações e package.json usados na resolução de módulos (inclusive tsconfig de
+   * subpacotes, lidos sob demanda, e os procurados que não existiam) → carimbo da leitura.
+   * Se algum muda, o compilador é recriado: as resoluções guardadas podem ter mudado.
+   */
+  inputs: InputStamps;
+  /**
+   * Arquivos que o compilador leu por conta própria, sem terem sido descobertos (`.d.ts`
+   * escritos à mão, JSON, tipos em node_modules, arquivos excluídos) → carimbo da leitura.
+   */
+  external: Map<string, string>;
 }
 
 async function runAnalysis(
@@ -133,10 +157,19 @@ async function runAnalysis(
       return 0;
     }
   });
-  const fingerprint = JSON.stringify([config.options, config.scopes, manifests]);
-  if (!cache.project || cache.fingerprint !== fingerprint) {
+  // os arquivos de cada escopo (tsconfig referenciado) são um Set: viram lista ordenada
+  const scopes = config.scopes.map((s) => ({
+    name: s.name,
+    files: [...s.files].sort(),
+    options: s.options,
+  }));
+  const fingerprint = JSON.stringify([config.options, scopes, manifests]);
+  const inputsChanged = [...cache.inputs].some(([file, stamp]) => fileStamp(file) !== stamp);
+  if (!cache.project || cache.fingerprint !== fingerprint || inputsChanged) {
     cache.fingerprint = fingerprint;
     cache.stamps.clear();
+    cache.inputs.clear();
+    cache.external.clear();
     cache.project = new Project({
       compilerOptions: config.options,
       skipAddingFilesFromTsConfig: true,
@@ -153,34 +186,61 @@ async function runAnalysis(
   const project = cache.project;
   // arquivos que saíram da análise (removidos, excluídos) saem do compilador
   const wanted = new Set(discovered.files.map((f) => f.absolute));
+  const inProject = new Set<string>();
   for (const sf of project.getSourceFiles()) {
     const absolute = path.normalize(sf.getFilePath());
     if (!wanted.has(absolute)) {
       project.removeSourceFile(sf);
       cache.stamps.delete(absolute);
+    } else {
+      inProject.add(absolute);
     }
+  }
+  // `.d.ts` escritos à mão e outros arquivos que o compilador leu sozinho: relidos se mudaram
+  for (const [absolute, stamp] of cache.external) {
+    if (wanted.has(absolute)) {
+      cache.external.delete(absolute); // agora é um arquivo descoberto (tratado abaixo)
+      continue;
+    }
+    const current = fileStamp(absolute);
+    if (current === stamp) continue;
+    try {
+      project.getSourceFile(absolute)?.refreshFromFileSystemSync();
+    } catch {
+      const stale = project.getSourceFile(absolute);
+      if (stale) project.removeSourceFile(stale);
+    }
+    cache.external.delete(absolute);
   }
   // o parse acontece aqui: um arquivo extremo (aninhamento profundo, sem permissão de leitura)
   // vira um aviso e sai da análise, em vez de derrubar tudo
   const readable: DiscoveredFile[] = [];
   for (const file of discovered.files) {
     try {
+      // o compilador trata a barra invertida como separador de pastas: o arquivo seria outro (ou nenhum)
+      if (file.relative.includes('\\')) throw new BackslashNameError();
       const stat = fs.statSync(file.absolute);
       const stamp = `${stat.mtimeMs}:${stat.size}`;
       const existing = project.getSourceFile(file.absolute);
       if (!existing) project.addSourceFileAtPath(file.absolute);
-      else if (cache.stamps.get(file.absolute) !== stamp) existing.refreshFromFileSystemSync();
+      else {
+        if (cache.stamps.get(file.absolute) !== stamp) existing.refreshFromFileSystemSync();
+        // lido antes só como dependência de outro arquivo: passa a fazer parte do projeto
+        if (!inProject.has(file.absolute)) project.addSourceFileAtPath(file.absolute);
+      }
       cache.stamps.set(file.absolute, stamp);
       readable.push(file);
     } catch (err) {
       const stale = project.getSourceFile(file.absolute);
       if (stale) project.removeSourceFile(stale);
       cache.stamps.delete(file.absolute);
+      const failure = describeFailure(err, root);
       diagnostics.push({
         level: 'warning',
         code: 'parse-failed',
-        message: `Arquivo ignorado: não foi possível ler ou interpretar (${describeError(err)}).`,
+        message: `Arquivo ignorado: não foi possível ler ou interpretar (${failure.text}).`,
         file: file.relative,
+        params: failure.params,
       });
     }
   }
@@ -196,6 +256,14 @@ async function runAnalysis(
         'Tente excluir pastas geradas com --exclude.',
       { cause: err },
     );
+  }
+  // o que o compilador leu além dos arquivos descobertos, para relermos se mudar
+  for (const sf of program.getSourceFiles()) {
+    const absolute = toPosix(path.resolve(sf.fileName));
+    if (wanted.has(absolute) || cache.external.has(absolute)) continue;
+    const stamp = fileStamp(absolute);
+    // bibliotecas padrão do TypeScript ficam em memória (não existem no disco)
+    if (stamp !== '-') cache.external.set(absolute, stamp);
   }
   const ctx: Ctx = {
     root,
@@ -221,7 +289,7 @@ async function runAnalysis(
     // mesmas quebras de linha que o TypeScript usa para numerar linhas
     ctx.lines.set(file.relative, sf.getFullText().split(/\r\n|[\r\n\u2028\u2029]/));
     addFileNode(ctx, file, sf);
-    safely(ctx, file, 'entidades', () => extractEntities(ctx, file, sf));
+    safely(ctx, file, 'entities', () => extractEntities(ctx, file, sf));
     routes.prepare(file, sf);
     for (const diag of program.getSyntacticDiagnostics(sf.compilerNode)) {
       if (syntaxErrors++ >= MAX_SYNTAX_DIAGNOSTICS) break;
@@ -229,12 +297,14 @@ async function runAnalysis(
         diag.start !== undefined
           ? sf.compilerNode.getLineAndCharacterOfPosition(diag.start).line + 1
           : undefined;
+      const error = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
       ctx.diagnostics.push({
         level: 'warning',
         code: 'syntax-error',
-        message: `Erro de sintaxe: ${ts.flattenDiagnosticMessageText(diag.messageText, ' ')}`,
+        message: `Erro de sintaxe: ${error}`,
         file: file.relative,
         ...(line ? { line } : {}),
+        params: { error },
       });
     }
   }
@@ -245,10 +315,12 @@ async function runAnalysis(
   try {
     routes.finish();
   } catch (err) {
+    const failure = describeFailure(err, root);
     ctx.diagnostics.push({
       level: 'warning',
       code: 'analysis-failed',
-      message: `Não foi possível compor os caminhos completos das rotas: ${describeError(err)}.`,
+      message: `Não foi possível compor os caminhos completos das rotas: ${failure.text}.`,
+      params: { step: 'route-paths', ...failure.params },
     });
   }
 
@@ -257,14 +329,19 @@ async function runAnalysis(
   for (const [file, sf] of sourceFiles) {
     safely(ctx, file, 'imports', () => extractImports(ctx, file, sf));
     safely(ctx, file, 'exports', () => extractExports(ctx, file, sf));
-    safely(ctx, file, 'chamadas', () => extractCalls(ctx, file, sf));
-    safely(ctx, file, 'JSX', () => extractJsxUsages(ctx, file, sf));
-    safely(ctx, file, 'herança', () => extractHeritage(ctx, file, sf));
+    safely(ctx, file, 'calls', () => extractCalls(ctx, file, sf));
+    safely(ctx, file, 'jsx', () => extractJsxUsages(ctx, file, sf));
+    safely(ctx, file, 'heritage', () => extractHeritage(ctx, file, sf));
     release(sf);
   }
   routes.afterCalls();
 
   countMentions(ctx);
+
+  // o que a resolução de módulos leu nesta análise (o carimbo mais antigo vale: se o arquivo
+  // mudou durante a análise, a próxima recria o compilador)
+  for (const [file, stamp] of [...config.inputs, ...resolver.inputs])
+    if (!cache.inputs.has(file)) cache.inputs.set(file, stamp);
 
   progress({ code: 'building-graph' });
   const finalized = ctx.builder.finalize();
@@ -309,6 +386,7 @@ async function runAnalysis(
       level: 'warning',
       code: 'no-source-files',
       message: 'Nenhum arquivo .js/.jsx/.ts/.tsx foi encontrado (após aplicar as exclusões).',
+      params: {},
     });
   }
   progress({ code: 'done', durationMs: graph.stats.durationMs });
@@ -326,30 +404,78 @@ function tsconfigInfo(rootConfig: string | undefined, nested: string[]): { tscon
   return { tsconfig: `${listed.join(', ')}${more}` };
 }
 
+/** Etapas da análise de um arquivo (códigos estáveis em `params.step` de `analysis-failed`). */
+export type AnalysisStep =
+  | 'entities'
+  | 'imports'
+  | 'exports'
+  | 'calls'
+  | 'jsx'
+  | 'heritage'
+  | 'routes-express'
+  | 'routes-fastify'
+  | 'routes-hono'
+  | 'routes-nestjs'
+  | 'routes-next';
+
+/** Nome de cada etapa na mensagem em português (`message`). */
+const STEP_LABELS: Record<AnalysisStep, string> = {
+  entities: 'entidades',
+  imports: 'imports',
+  exports: 'exports',
+  calls: 'chamadas',
+  jsx: 'JSX',
+  heritage: 'herança',
+  'routes-express': 'rotas (Express)',
+  'routes-fastify': 'rotas (Fastify)',
+  'routes-hono': 'rotas (Hono)',
+  'routes-nestjs': 'rotas (NestJS)',
+  'routes-next': 'rotas (Next.js)',
+};
+
 /**
  * Executa uma etapa da análise de um arquivo sem derrubar a análise inteira:
  * arquivos patológicos (ex.: expressões aninhadas milhares de vezes) viram um aviso.
  */
-export function safely(ctx: Ctx, file: DiscoveredFile, step: string, run: () => void): void {
+export function safely(ctx: Ctx, file: DiscoveredFile, step: AnalysisStep, run: () => void): void {
   try {
     run();
   } catch (err) {
-    const reason = describeError(err);
+    const failure = describeFailure(err, ctx.root);
     ctx.diagnostics.push({
       level: 'warning',
       code: 'analysis-failed',
-      message: `Parte da análise (${step}) falhou neste arquivo: ${reason}. As relações dele podem estar incompletas.`,
+      message: `Parte da análise (${STEP_LABELS[step]}) falhou neste arquivo: ${failure.text}. As relações dele podem estar incompletas.`,
       file: file.relative,
+      params: { step, ...failure.params },
     });
   }
 }
 
-function describeError(err: unknown): string {
+/** Nome de arquivo com barra invertida, que o compilador entende como separador de pastas. */
+class BackslashNameError extends Error {}
+
+/**
+ * Motivo de uma falha: o texto em português para `message` e os `params` (motivo conhecido
+ * em `reason`, senão o erro em `error`). Caminhos absolutos viram relativos à raiz, para não
+ * expor a pasta do usuário.
+ */
+function describeFailure(
+  err: unknown,
+  root: string,
+): { text: string; params: { reason: string } | { error: string } } {
+  if (err instanceof BackslashNameError)
+    return {
+      text: 'o nome contém "\\", que o compilador trata como separador de pastas',
+      params: { reason: 'backslash-name' },
+    };
   const message = err instanceof Error ? err.message : String(err);
   if (err instanceof RangeError && /call stack/i.test(message))
-    return 'estrutura aninhada demais para analisar';
-  if ((err as NodeJS.ErrnoException)?.code === 'EACCES') return 'sem permissão de leitura';
-  return message;
+    return { text: 'estrutura aninhada demais para analisar', params: { reason: 'too-deep' } };
+  if ((err as NodeJS.ErrnoException)?.code === 'EACCES')
+    return { text: 'sem permissão de leitura', params: { reason: 'no-permission' } };
+  const error = message.split(`${root}/`).join('').split(root).join('.');
+  return { text: error, params: { error } };
 }
 
 /**
@@ -889,8 +1015,22 @@ export function addUnresolvedNode(
   reference: string,
   reason: UnresolvedReason,
   at: Node | ts.Node,
+  /** Implementações possíveis (chamadas por interface), já ordenadas. */
+  candidates: string[] = [],
 ): string {
-  const id = nodeId.unresolved(file, kind, reference);
+  const base = nodeId.unresolved(file, kind, reference);
+  let id = base;
+  if (kind === 'call') {
+    // os candidatos são de cada chamada: o mesmo texto com candidatos diferentes (ex.:
+    // `repo.save()` com `repo: UserRepo` e com `repo: OrderRepo`) vira outro nó (`~2`), ou
+    // quem chama uma interface pareceria chamar as implementações da outra
+    const key = candidates.join('\n');
+    for (let i = 2; ; i++) {
+      const existing = ctx.builder.getNode(id);
+      if (!existing || (existing.meta?.candidates ?? []).join('\n') === key) break;
+      id = `${base}~${i}`;
+    }
+  }
   if (!ctx.builder.hasNode(id)) {
     const fileId = nodeId.file(file);
     ctx.builder.addNode({
@@ -900,7 +1040,7 @@ export function addUnresolvedNode(
       // não resolvidos de chamada/herança ficam dentro do arquivo; os de import ficam soltos
       ...(kind === 'import' ? {} : { parent: fileId }),
       location: rangeOf(file, at),
-      meta: { reason, reference },
+      meta: { reason, reference, ...(candidates.length ? { candidates } : {}) },
     });
     if (kind !== 'import') {
       ctx.builder.addEdge({
@@ -1528,7 +1668,30 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
     const entities = targets.filter(
       (t): t is Extract<SymbolTarget, { kind: 'entity' }> => t.kind === 'entity',
     );
-    if (entities.length) {
+    const indirect = targets.some((t) => t.kind === 'indirect')
+      ? implementationsOf(ctx).indirectTargets(nameNode.compilerNode, symbol)
+      : undefined;
+    const indirectEdge = (candidates: string[], reason: UnresolvedReason) => {
+      const target = addUnresolvedNode(
+        ctx,
+        file.relative,
+        'call',
+        reference,
+        reason,
+        call,
+        candidates,
+      );
+      ctx.builder.addEdge({
+        kind: 'calls',
+        source: sourceId,
+        target,
+        resolution: 'unresolved',
+        discovery: 'static-typecheck',
+        evidence,
+        meta,
+      });
+    };
+    if (entities.length || targets.some((t) => t.kind === 'external')) {
       for (const target of entities) {
         ctx.builder.addEdge({
           kind: 'calls',
@@ -1540,10 +1703,10 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           meta: { ...meta, ...(target.mapped ? { viaDeclaration: true } : {}) },
         });
       }
-      continue;
-    }
-    if (targets.some((t) => t.kind === 'external')) {
-      ctx.counters.externalCallsSkipped++;
+      if (!entities.length) ctx.counters.externalCallsSkipped++;
+      // receptor de tipo união (`r: UserRepo | SqlRepo`): a parte da interface (ou do método
+      // abstrato) continua não resolvida, com as implementações possíveis
+      if (indirect) indirectEdge(indirect.candidates, 'indirect-call');
       continue;
     }
     if (targets.every((t) => t.kind === 'local')) {
@@ -1556,22 +1719,7 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
       ctx.counters.unknownReceiverCalls++;
       continue;
     }
-    const target = addUnresolvedNode(ctx, file.relative, 'call', reference, reason, call);
-    if (reason === 'indirect-call')
-      addCandidates(
-        ctx,
-        target,
-        implementationsOf(ctx).candidatesFor(nameNode.compilerNode, symbol),
-      );
-    ctx.builder.addEdge({
-      kind: 'calls',
-      source: sourceId,
-      target,
-      resolution: 'unresolved',
-      discovery: 'static-typecheck',
-      evidence,
-      meta,
-    });
+    indirectEdge(reason === 'indirect-call' ? (indirect?.candidates ?? []) : [], reason);
   }
 }
 
@@ -1581,20 +1729,6 @@ function implementationsOf(ctx: Ctx): ImplementationIndex {
   let index = implementationIndexes.get(ctx);
   if (!index) implementationIndexes.set(ctx, (index = new ImplementationIndex(ctx)));
   return index;
-}
-
-/**
- * Guarda no nó não resolvido as implementações _possíveis_ de uma chamada por interface ou
- * método abstrato. Não cria relação: o alvo continua não comprovado.
- */
-function addCandidates(ctx: Ctx, unresolvedId: string, candidates: string[]): void {
-  if (!candidates.length) return;
-  const node = ctx.builder.getNode(unresolvedId);
-  if (!node) return;
-  const merged = [...new Set([...(node.meta?.candidates ?? []), ...candidates])]
-    .sort(compareStrings)
-    .slice(0, MAX_CANDIDATES);
-  node.meta = { ...node.meta, candidates: merged };
 }
 
 /**

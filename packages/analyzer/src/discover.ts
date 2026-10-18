@@ -118,6 +118,8 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
         code: 'unreadable-directory',
         message: `Não foi possível ler o diretório: ${(err as Error).message}`,
         file: toPosix(path.relative(root, dir)) || '.',
+        // só o código do erro (ex.: EACCES): a mensagem do sistema traz o caminho absoluto
+        params: { error: (err as NodeJS.ErrnoException).code ?? (err as Error).message },
       });
       continue;
     }
@@ -134,6 +136,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
             code: 'symlink-skipped',
             message: 'Link simbólico ignorado (o Rastro não segue links simbólicos).',
             file: rel,
+            params: {},
           });
         }
         continue;
@@ -153,6 +156,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
           code: 'file-too-large',
           message: `Arquivo ignorado por ser maior que ${Math.round(maxSize / 1000)} KB (provavelmente gerado).`,
           file: rel,
+          params: { limitKb: Math.round(maxSize / 1000) },
         });
         continue;
       }
@@ -162,6 +166,7 @@ export function discoverFiles(rootInput: string, options: DiscoverOptions = {}):
           level: 'warning',
           code: 'max-files-reached',
           message: `Limite de ${maxFiles} arquivos atingido; o restante do projeto não foi analisado.`,
+          params: { limit: maxFiles },
         });
         break;
       }

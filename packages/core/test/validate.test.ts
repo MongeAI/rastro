@@ -124,6 +124,51 @@ describe('validateGraph — integridade extra', () => {
     (g.nodes[2]!.meta as { candidates: unknown }).candidates = 'x';
     expect(validateGraph(g).errors.join()).toContain('meta.candidates deve ser uma lista');
   });
+
+  it('mudanças do git: as mesmas regras do JSON Schema, e início ≤ fim nos intervalos', () => {
+    const ok = (): RastroGraph => ({
+      ...minimalGraph(),
+      changes: {
+        base: 'abc123',
+        baseLabel: 'main',
+        includesUntracked: true,
+        files: [
+          { file: 'src/a.ts', status: 'modified', ranges: [[1, 3]], deletionsAt: [5] },
+          { file: 'src/b.ts', status: 'renamed', previous: 'src/old.ts', ranges: [] },
+        ],
+      },
+    });
+    expect(validateGraph(ok())).toEqual({ valid: true, errors: [] });
+    const broken: Array<(g: RastroGraph) => void> = [
+      (g) => delete (g.changes as Partial<NonNullable<RastroGraph['changes']>>).baseLabel,
+      (g) => ((g.changes as unknown as { includesUntracked: unknown }).includesUntracked = 'sim'),
+      (g) => ((g.changes!.files[0] as unknown as { status: string }).status = 'mexido'),
+      (g) => (g.changes!.files[0]!.ranges = [[3, 1]]),
+      (g) => (g.changes!.files[0]!.deletionsAt = [0]),
+      (g) => ((g.changes!.files[1] as unknown as { previous: unknown }).previous = 7),
+    ];
+    for (const breakIt of broken) {
+      const g = ok();
+      breakIt(g);
+      expect(validateGraph(g).errors.join(), breakIt.toString()).toMatch(/changes/);
+    }
+  });
+
+  it('diagnósticos: nível conhecido e params só com textos e números', () => {
+    const g = minimalGraph();
+    g.diagnostics.push({
+      level: 'warning',
+      code: 'file-too-large',
+      message: 'Arquivo ignorado',
+      params: { limitKb: 1000, file: 'a.ts' },
+    });
+    expect(validateGraph(g)).toEqual({ valid: true, errors: [] });
+    (g.diagnostics[0]!.params as Record<string, unknown>).nested = { x: 1 };
+    expect(validateGraph(g).errors.join()).toContain('diagnostics[0]');
+    const badLevel = minimalGraph();
+    badLevel.diagnostics.push({ level: 'fatal' as 'error', code: 'x', message: 'y' });
+    expect(validateGraph(badLevel).errors.join()).toContain('diagnostics[0]');
+  });
 });
 
 describe('parseGraph', () => {

@@ -42,6 +42,8 @@ interface RouteRecord {
   owner?: OwnerKey;
   /** Caminho completo já conhecido (Next.js); `null` quando ele não pode ser comprovado. */
   fullPath?: string | null;
+  /** Prefixo entre a montagem e o caminho local (`basePath` do Hono); `null` = desconhecido. */
+  innerPrefix?: string | null;
 }
 
 /** Registro de `instancia.register(plugin, { prefix })` encontrado no código (Fastify). */
@@ -67,6 +69,11 @@ export class RouteState {
   readonly sharedHandlers = new Map<string, Set<string>>();
   /** pasta do app NestJS → prefixos globais (`app.setGlobalPrefix`), `undefined` = não literal. */
   readonly nestPrefixes = new Map<string, Array<string | undefined>>();
+  /**
+   * O projeto usa algo que muda os caminhos do NestJS fora do controller (`RouterModule`,
+   * `enableVersioning`, `@Version`): nenhum caminho completo do NestJS é comprovado.
+   */
+  nestPathsUncertain = false;
 
   constructor(readonly ctx: AnalyzerContext) {}
 
@@ -412,6 +419,8 @@ export interface RouteInput {
   owner?: OwnerKey;
   /** Caminho completo já conhecido (`null` se não pode ser comprovado). */
   fullPath?: string | null;
+  /** Prefixo entre a montagem e o caminho local (`basePath` do Hono); `null` = desconhecido. */
+  innerPrefix?: string | null;
   at: Node | ts.Node;
   qualifiedName: string;
   meta?: NodeMeta;
@@ -456,6 +465,7 @@ export function addRoute(state: RouteState, input: RouteInput): string {
     routePath: input.routePath,
     ...(input.owner !== undefined ? { owner: input.owner } : {}),
     ...(input.fullPath !== undefined ? { fullPath: input.fullPath } : {}),
+    ...(input.innerPrefix !== undefined ? { innerPrefix: input.innerPrefix } : {}),
   });
   return id;
 }
@@ -468,7 +478,18 @@ export function finishRoutes(state: RouteState): void {
     let fullPath: string | undefined;
     let mountedAt: string[] | undefined;
     if (route.owner !== undefined) {
-      const prefixes = prefixesOf(state, route.owner);
+      const outer = prefixesOf(state, route.owner);
+      const inner = route.innerPrefix;
+      // prefixo interno desconhecido: nem o caminho completo nem as montagens são comprovados
+      const prefixes: PrefixSet =
+        inner === null
+          ? { known: [], unknown: true }
+          : inner
+            ? {
+                known: [...new Set(outer.known.map((p) => normalizePrefix(joinPath(p, inner))))],
+                unknown: outer.unknown,
+              }
+            : outer;
       if (!prefixes.unknown && prefixes.known.length === 1)
         fullPath = joinPath(prefixes.known[0]!, route.routePath);
       const onlyRoot = !prefixes.unknown && prefixes.known.length === 1 && prefixes.known[0] === '';

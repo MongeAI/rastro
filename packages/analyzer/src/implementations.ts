@@ -25,14 +25,22 @@ export class ImplementationIndex {
   constructor(private readonly ctx: AnalyzerContext) {}
 
   /**
-   * Ids das implementações possíveis de um membro chamado (`nameNode` é o nome em `obj.nome()`),
-   * ou lista vazia quando a declaração não é de interface nem abstrata.
+   * Parte "por interface" de uma chamada (`nameNode` é o nome em `obj.nome()`): `undefined`
+   * quando nenhuma parte do tipo do receptor declara o membro só como assinatura (interface,
+   * alias de tipo ou método abstrato). Senão, os ids das implementações possíveis (talvez
+   * nenhuma). Com `r: UserRepo | SqlRepo`, só `UserRepo` conta: `SqlRepo.save` é comprovado.
    */
-  candidatesFor(nameNode: ts.Node, member: ts.Symbol): string[] {
-    const declarations = member.declarations ?? [];
-    if (!declarations.length || !declarations.every(isSignatureWithoutBody)) return [];
-    const owners = this.receiverOwners(nameNode);
-    if (!owners.length) owners.push(...declarations.flatMap((d) => this.declaringOwner(d)));
+  indirectTargets(nameNode: ts.Node, member: ts.Symbol): { candidates: string[] } | undefined {
+    const bodyless = (member.declarations ?? []).filter(isSignatureWithoutBody);
+    if (!bodyless.length) return undefined;
+    const parts = this.receiverParts(nameNode, member.name);
+    let owners: ts.Symbol[];
+    if (parts.length) {
+      owners = parts.filter((p) => p.bodyless).map((p) => p.symbol);
+      if (!owners.length) return undefined;
+    } else {
+      owners = bodyless.flatMap((d) => this.declaringOwner(d));
+    }
     const byType = this.index();
     const found = new Set<string>();
     for (const owner of owners) {
@@ -40,11 +48,17 @@ export class ImplementationIndex {
         for (const id of this.implementationsIn(cls, member.name)) found.add(id);
       }
     }
-    return [...found].sort(compareStrings).slice(0, MAX_CANDIDATES);
+    return { candidates: [...found].sort(compareStrings).slice(0, MAX_CANDIDATES) };
   }
 
-  /** Tipo estático do receptor (`repo` em `repo.save()`), quando é interface, alias ou classe. */
-  private receiverOwners(nameNode: ts.Node): ts.Symbol[] {
+  /**
+   * Partes do tipo estático do receptor (`repo` em `repo.save()`) que são interface, alias ou
+   * classe, e se o membro chamado é, nelas, só uma assinatura sem corpo.
+   */
+  private receiverParts(
+    nameNode: ts.Node,
+    name: string,
+  ): Array<{ symbol: ts.Symbol; bodyless: boolean }> {
     const access = nameNode.parent;
     if (!access || !ts.isPropertyAccessExpression(access) || access.name !== nameNode) return [];
     const { checker } = this.ctx;
@@ -58,10 +72,20 @@ export class ImplementationIndex {
     if (type.flags & ts.TypeFlags.TypeParameter)
       type = checker.getBaseConstraintOfType(type) ?? type;
     const parts = type.isUnion() ? type.types : [type];
-    const owners: ts.Symbol[] = [];
+    const owners: Array<{ symbol: ts.Symbol; bodyless: boolean }> = [];
     for (const part of parts) {
       const symbol = part.aliasSymbol ?? part.getSymbol();
-      if (symbol && isTypeOwner(symbol)) owners.push(symbol);
+      if (!symbol || !isTypeOwner(symbol)) continue;
+      let declarations: ts.Declaration[];
+      try {
+        declarations = checker.getPropertyOfType(part, name)?.declarations ?? [];
+      } catch {
+        declarations = [];
+      }
+      owners.push({
+        symbol,
+        bodyless: declarations.length > 0 && declarations.every(isSignatureWithoutBody),
+      });
     }
     return owners;
   }

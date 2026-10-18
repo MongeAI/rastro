@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  diagnosticText,
   nodeId,
   SCHEMA_VERSION,
   validateGraph,
@@ -209,6 +210,10 @@ describe('filtro de pasta', () => {
     expect(g.nodes.map((n) => n.id)).toContain('pkg:react');
     expect(g.nodes.map((n) => n.id)).toContain('module:.');
     expect(g.diagnostics.at(-1)?.code).toBe('folder-filter');
+    expect(g.diagnostics.at(-1)?.params).toEqual({ folder: 'src' });
+    expect(diagnosticText(g.diagnostics.at(-1)!, 'en')).toMatch(
+      /^Graph restricted to the folder "src"/,
+    );
   });
 });
 
@@ -262,6 +267,25 @@ describe('toMermaid', () => {
     expect(labels).toContain('diz #34;olá#34; #60;b#62;#38;\\ #35;1 ação');
     for (const label of labels) expect(label).not.toMatch(/["<>]/);
     expect(mermaidLabel('a\nb`c')).toBe('a b#96;c');
+  });
+
+  it('nomes de arquivo e de projeto não viram diretivas (%%{init}%%) nem quebram o diagrama', () => {
+    const b = new GraphBuilder();
+    addFile(b, "src/%%{init: {'theme':'forest'}}%%.ts");
+    addFile(b, 'src/%%{aberto.ts');
+    const graph = wrap(b, 2);
+    graph.project.name = "x\n%%{init: {'theme':'dark'}}%%\ny";
+    const out = toMermaid(graph, { level: 'files' });
+    expect(mermaidLabel("%%{init: {'theme':'forest'}}%%")).toBe(
+      '#37;#37;#123;init: #123;#39;theme#39;:#39;forest#39;#125;#125;#37;#37;',
+    );
+    const [header, ...rest] = out.split('\n');
+    expect(header).toMatch(/^%% /);
+    expect(header!.slice(3)).not.toMatch(/[%{}]/);
+    // fora do comentário do título, nenhum %, { ou } cru dentro dos rótulos
+    for (const label of rest.join('\n').matchAll(/"([^"]*)"/g))
+      expect(label[1]).not.toMatch(/[%{}']/);
+    expect(rest.some((l) => /^\s*%%/.test(l))).toBe(false);
   });
 
   it('recusa diagramas grandes demais com uma dica de como reduzir', () => {

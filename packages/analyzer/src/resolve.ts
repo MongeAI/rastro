@@ -14,6 +14,30 @@ export interface ConfigScope {
   options: ts.CompilerOptions;
 }
 
+/**
+ * Arquivos que influenciam a resolução de módulos (tsconfig/jsconfig, inclusive os procurados e
+ * ausentes, `extends`, package.json lidos pelo compilador) → carimbo de quando foram lidos.
+ * O modo `--watch` recria o compilador quando algum deles muda.
+ */
+export type InputStamps = Map<string, string>;
+
+/** `mtime:tamanho:tipo` do arquivo (sem seguir o link no último nível), ou `-` se não existe. */
+export function fileStamp(file: string): string {
+  try {
+    const stat = fs.lstatSync(file);
+    return `${stat.mtimeMs}:${stat.size}:${stat.isFile() ? 'f' : 'o'}`;
+  } catch {
+    return '-';
+  }
+}
+
+/** Registra um arquivo lido (o carimbo é o do primeiro acesso). */
+function track(inputs: InputStamps | undefined, file: string): void {
+  if (!inputs) return;
+  const key = toPosix(path.resolve(file));
+  if (!inputs.has(key)) inputs.set(key, fileStamp(key));
+}
+
 export interface LoadedCompilerOptions {
   options: ts.CompilerOptions;
   /** tsconfig referenciados (ex.: tsconfig.app.json): cada um resolve os imports dos seus arquivos. */
@@ -21,6 +45,8 @@ export interface LoadedCompilerOptions {
   /** Arquivo de configuração usado (relativo à raiz), se houver. */
   configFile?: string;
   diagnostics: Diagnostic[];
+  /** Arquivos de configuração procurados ou lidos (com carimbo). */
+  inputs: InputStamps;
 }
 
 const CONFIG_NAMES = ['tsconfig.json', 'jsconfig.json'];
@@ -59,24 +85,27 @@ interface ParsedConfig {
  */
 export function loadCompilerOptions(root: string): LoadedCompilerOptions {
   const diagnostics: Diagnostic[] = [];
+  const inputs: InputStamps = new Map();
   for (const name of CONFIG_NAMES) {
     const file = path.join(root, name);
+    track(inputs, file);
     if (!isConfigFile(file)) continue;
-    const parsed = parseConfigFile(root, file);
+    const parsed = parseConfigFile(root, file, inputs);
     if ('error' in parsed) {
       diagnostics.push({
         level: 'warning',
         code: 'invalid-config',
         message: `Não foi possível ler ${name}: ${parsed.error}`,
         file: name,
+        params: { config: name, error: parsed.error },
       });
       continue;
     }
     const { options, scopes, referenced } = parsed;
     const configFile = referenced.length ? `${name} (+ ${referenced.join(', ')})` : name;
-    return { options, scopes, configFile, diagnostics };
+    return { options, scopes, configFile, diagnostics, inputs };
   }
-  return { options: { ...DEFAULT_OPTIONS, ...ENFORCED_OPTIONS }, scopes: [], diagnostics };
+  return { options: { ...DEFAULT_OPTIONS, ...ENFORCED_OPTIONS }, scopes: [], diagnostics, inputs };
 }
 
 /** Arquivo de configuração existente e que não é link simbólico. */
@@ -89,11 +118,20 @@ function isConfigFile(file: string): boolean {
 }
 
 /** Lê um tsconfig/jsconfig (seguindo `extends` e `references`) só pelas opções de resolução. */
-function parseConfigFile(root: string, file: string): ParsedConfig | { error: string } {
-  const read = ts.readConfigFile(file, ts.sys.readFile);
+function parseConfigFile(
+  root: string,
+  file: string,
+  inputs?: InputStamps,
+): ParsedConfig | { error: string } {
+  // cada arquivo lido (o próprio, `extends`, referências) é registrado para o modo --watch
+  const readFile = (f: string) => {
+    track(inputs, f);
+    return ts.sys.readFile(f);
+  };
+  const read = ts.readConfigFile(file, readFile);
   if (read.error) return { error: ts.flattenDiagnosticMessageText(read.error.messageText, ' ') };
   // readDirectory vazio: não precisamos que o TypeScript expanda "include"
-  const host: ts.ParseConfigHost = { ...ts.sys, readDirectory: () => [] };
+  const host: ts.ParseConfigHost = { ...ts.sys, readFile, readDirectory: () => [] };
   const parsed = ts.parseJsonConfigFileContent(
     read.config,
     host,
@@ -119,13 +157,14 @@ function parseConfigFile(root: string, file: string): ParsedConfig | { error: st
   for (const ref of parsed.projectReferences ?? []) {
     const refFile = ts.resolveProjectReferencePath(ref);
     if (!refFile.startsWith(`${root}${path.sep}`) && !refFile.startsWith(`${root}/`)) continue;
+    track(inputs, refFile);
     if (!isConfigFile(refFile)) continue;
-    const refRead = ts.readConfigFile(refFile, ts.sys.readFile);
+    const refRead = ts.readConfigFile(refFile, readFile);
     if (refRead.error) continue;
     // aqui sim expandimos "include" para saber quais arquivos pertencem a cada referência
     const refParsed = ts.parseJsonConfigFileContent(
       refRead.config,
-      ts.sys,
+      { ...ts.sys, readFile },
       path.dirname(refFile),
       undefined,
       refFile,
@@ -236,6 +275,24 @@ export class ModuleResolver {
   private readonly configByDir = new Map<string, DirConfig>();
   /** tsconfig de subpastas efetivamente usados (relativos à raiz). */
   private readonly nested: string[] = [];
+  /**
+   * Configurações procuradas (inclusive ausentes) e package.json lidos pelo compilador ao
+   * resolver módulos, com o carimbo da leitura: se mudarem, a resolução feita pode mudar.
+   */
+  readonly inputs: InputStamps = new Map();
+  /** Mesmo sistema de arquivos do TypeScript, registrando os arquivos lidos. */
+  private readonly host: ts.ModuleResolutionHost = {
+    fileExists: (f) => ts.sys.fileExists(f),
+    directoryExists: (d) => ts.sys.directoryExists(d),
+    realpath: ts.sys.realpath && ((p) => ts.sys.realpath!(p)),
+    getCurrentDirectory: () => ts.sys.getCurrentDirectory(),
+    getDirectories: (d) => ts.sys.getDirectories(d),
+    useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
+    readFile: (f) => {
+      track(this.inputs, f);
+      return ts.sys.readFile(f);
+    },
+  };
 
   constructor(
     private readonly root: string,
@@ -302,15 +359,17 @@ export class ModuleResolver {
   private readDirConfig(dir: string): DirConfig | undefined {
     for (const name of CONFIG_NAMES) {
       const file = path.join(dir, name);
+      track(this.inputs, file);
       if (!isConfigFile(file)) continue;
       const rel = toPosix(path.relative(this.root, file));
-      const parsed = parseConfigFile(this.root, file);
+      const parsed = parseConfigFile(this.root, file, this.inputs);
       if ('error' in parsed) {
         this.diagnostics.push({
           level: 'warning',
           code: 'invalid-config',
           message: `Não foi possível ler ${rel}: ${parsed.error}`,
           file: rel,
+          params: { config: rel, error: parsed.error },
         });
         continue;
       }
@@ -338,7 +397,7 @@ export class ModuleResolver {
       specifier,
       containingFile,
       config.options,
-      ts.sys,
+      this.host,
       config.cache,
       undefined,
       mode,
@@ -359,7 +418,7 @@ export class ModuleResolver {
       specifier,
       fromAbsolute,
       config.options,
-      ts.sys,
+      this.host,
       config.cache,
     );
     const resolved = result.resolvedModule;
