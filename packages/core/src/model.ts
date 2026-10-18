@@ -286,6 +286,11 @@ export interface ChangedFile {
   ranges: Array<[number, number]>;
   /** Linhas (no arquivo atual) logo após trechos apenas removidos. */
   deletionsAt?: number[];
+  /**
+   * Nomes que aparecem nas linhas removidas (fora de chamadas `nome(...)`): pistas de
+   * declarações e imports que a mudança tirou do arquivo. Até 500 por arquivo.
+   */
+  removedNames?: string[];
 }
 
 /** Mudanças em relação a uma referência do git (opcional: só com `rastro --changes`/`--since`). */

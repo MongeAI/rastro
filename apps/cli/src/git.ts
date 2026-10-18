@@ -237,6 +237,35 @@ function headerPath(rest: string): string {
   return unquote(rest.endsWith('\t') ? rest.slice(0, -1) : rest);
 }
 
+/** Máximo de nomes guardados por arquivo (uma remoção enorme não incha o grafo). */
+const MAX_REMOVED_NAMES = 500;
+const IDENTIFIER = /(?<![\p{L}\p{N}_$.])[\p{L}_$][\p{L}\p{N}_$]*/gu;
+/** Palavras-chave e afins: nunca são o nome de uma declaração. */
+const KEYWORDS = new Set(
+  (
+    'abstract as async await break case catch class const continue debugger declare default ' +
+    'delete do else enum export extends false finally for from function get if implements ' +
+    'import in instanceof interface let new null of private protected public readonly return ' +
+    'set static super switch this throw true try type typeof undefined var void while yield'
+  ).split(' '),
+);
+
+/**
+ * Nomes de uma linha removida que podem ser declarações (`function sum`, `const fmt =`,
+ * `import { fmt }`), não chamadas: `gtag(...)` sozinho não declara `gtag`.
+ */
+function addRemovedNames(line: string, into: Set<string>): void {
+  for (const m of line.matchAll(IDENTIFIER)) {
+    if (into.size >= MAX_REMOVED_NAMES) return;
+    const name = m[0];
+    if (KEYWORDS.has(name)) continue;
+    const after = line.slice(m.index + name.length);
+    const before = line.slice(0, m.index);
+    if (/^\s*(?:<[^>]*>\s*)?\(/.test(after) && !/\bfunction\s*\*?\s*$/.test(before)) continue;
+    into.add(name);
+  }
+}
+
 /**
  * Lê a saída de `git diff --unified=0` e devolve, por arquivo, as linhas alteradas no
  * arquivo atual. Trechos só removidos viram `deletionsAt` (a linha onde estavam).
@@ -244,6 +273,7 @@ function headerPath(rest: string): string {
 export function parseUnifiedDiff(text: string): ChangedFile[] {
   const files: ChangedFile[] = [];
   let current: ChangedFile | null = null;
+  const removed = new Map<ChangedFile, Set<string>>();
   // depois do primeiro @@ de um arquivo, tudo é conteúdo (linhas com +, -, espaço ou \) até o
   // próximo "diff --git": uma linha adicionada "++ n;" aparece como "+++ n;" e não é cabeçalho
   let inHunk = false;
@@ -255,7 +285,13 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
       continue;
     }
     if (!current) continue;
-    if (inHunk && !line.startsWith('@@')) continue;
+    if (inHunk && !line.startsWith('@@')) {
+      if (line.startsWith('-') && current.status !== 'deleted') {
+        if (!removed.has(current)) removed.set(current, new Set());
+        addRemovedNames(line.slice(1), removed.get(current)!);
+      }
+      continue;
+    }
     if (line.startsWith('new file mode')) current.status = 'added';
     else if (line.startsWith('deleted file mode')) current.status = 'deleted';
     else if (line.startsWith('rename from ')) {
@@ -279,6 +315,7 @@ export function parseUnifiedDiff(text: string): ChangedFile[] {
       else (current.deletionsAt ??= []).push(Math.max(1, start + 1));
     }
   }
+  for (const [file, names] of removed) if (names.size) file.removedNames = [...names];
   return files.filter((f) => f.file);
 }
 

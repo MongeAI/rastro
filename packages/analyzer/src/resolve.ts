@@ -52,6 +52,12 @@ export interface LoadedCompilerOptions {
   diagnostics: Diagnostic[];
   /** Arquivos de configuração procurados ou lidos (com carimbo). */
   inputs: InputStamps;
+  /**
+   * `.d.ts` de declarações globais do projeto (sem import/export no topo, ou com
+   * `declare global`) que o "include" do tsconfig da raiz (e das referências) traz. O
+   * compilador os carrega como o `tsc`: os globais deles (ex.: `declare function gtag()`) existem.
+   */
+  ambient: string[];
 }
 
 const CONFIG_NAMES = ['tsconfig.json', 'jsconfig.json'];
@@ -108,9 +114,74 @@ export function loadCompilerOptions(root: string): LoadedCompilerOptions {
     }
     const { options, scopes, referenced } = parsed;
     const configFile = referenced.length ? `${name} (+ ${referenced.join(', ')})` : name;
-    return { options, scopes, configFile, diagnostics, inputs };
+    const ambient = ambientDeclarations(root, [file, ...referenced.map((r) => path.join(root, r))]);
+    return { options, scopes, configFile, diagnostics, inputs, ambient };
   }
-  return { options: { ...DEFAULT_OPTIONS, ...ENFORCED_OPTIONS }, scopes: [], diagnostics, inputs };
+  return {
+    options: { ...DEFAULT_OPTIONS, ...ENFORCED_OPTIONS },
+    scopes: [],
+    diagnostics,
+    inputs,
+    ambient: [],
+  };
+}
+
+/** Limites dos `.d.ts` globais carregados: quantidade e tamanho de cada um. */
+const MAX_AMBIENT_FILES = 200;
+const MAX_AMBIENT_BYTES = 1_000_000;
+
+/**
+ * `.d.ts` de declarações globais que o "include"/"files" dos tsconfig trazem (fora de
+ * node_modules e da raiz não). Só os globais: sem import/export no topo (script) ou com
+ * `declare global`; os de módulo só importam quando importados (e aí o compilador os lê).
+ */
+function ambientDeclarations(root: string, configs: string[]): string[] {
+  const found = new Set<string>();
+  for (const file of configs) {
+    const read = ts.readConfigFile(file, (f) => ts.sys.readFile(f));
+    if (read.error) continue;
+    const host: ts.ParseConfigHost = {
+      ...ts.sys,
+      readDirectory: (dir, _extensions, excludes, includes, depth) =>
+        ts.sys.readDirectory(dir, ['.d.ts'], excludes, includes, depth),
+    };
+    let names: readonly string[];
+    try {
+      names = ts.parseJsonConfigFileContent(
+        read.config,
+        host,
+        path.dirname(file),
+        undefined,
+        file,
+      ).fileNames;
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const abs = toPosix(path.resolve(name));
+      if (
+        !abs.endsWith('.d.ts') ||
+        !abs.startsWith(`${root}/`) ||
+        NODE_MODULES_SEGMENT.test(abs.slice(root.length))
+      )
+        continue;
+      found.add(abs);
+    }
+  }
+  const ambient: string[] = [];
+  for (const abs of [...found].sort()) {
+    if (ambient.length >= MAX_AMBIENT_FILES) break;
+    try {
+      const stat = fs.lstatSync(abs);
+      if (!stat.isFile() || stat.size > MAX_AMBIENT_BYTES) continue;
+      const text = fs.readFileSync(abs, 'utf8');
+      if (/^\s*(?:import|export)\b/m.test(text) && !/\bdeclare\s+global\b/.test(text)) continue;
+      ambient.push(abs);
+    } catch {
+      continue;
+    }
+  }
+  return ambient;
 }
 
 /** Arquivo de configuração existente e que não é link simbólico. */
@@ -583,6 +654,41 @@ export class ModuleResolver {
   }
 
   /** O pacote está declarado no package.json mais próximo do arquivo (ou em algum acima, até a raiz)? */
+  /** Configuração → pasta → falta algum pacote de tipos globais (ver `missingGlobalTypes`). */
+  private readonly missingTypes = new WeakMap<ResolutionConfig, Map<string, boolean>>();
+
+  /**
+   * Algum pacote de tipos globais do arquivo não está instalado? Os de `types` do tsconfig
+   * dele ou, sem `types`, os `@types/*` declarados nos package.json (o compilador inclui todos
+   * sozinho). Sem eles, os globais (`describe`, `setTimeout` do Node...) são desconhecidos: um
+   * nome sem declaração não prova nada.
+   */
+  missingGlobalTypes(fromAbsolute: string): boolean {
+    const config = this.configFor(fromAbsolute);
+    const dir = path.posix.dirname(fromAbsolute);
+    let byDir = this.missingTypes.get(config);
+    if (!byDir) this.missingTypes.set(config, (byDir = new Map()));
+    const cached = byDir.get(dir);
+    if (cached !== undefined) return cached;
+    let names: string[] = config.options.types ?? [];
+    if (!config.options.types) {
+      const declared = new Set<string>();
+      this.findPackageDir(fromAbsolute, (pkg) => {
+        for (const dep of pkg.deps) if (dep.startsWith('@types/')) declared.add(dep.slice(7));
+        return false;
+      });
+      names = [...declared];
+    }
+    const containing = path.join(dir, '__inferred type names__.ts');
+    const missing = names.some(
+      (name) =>
+        !ts.resolveTypeReferenceDirective(name, containing, config.options, this.host)
+          .resolvedTypeReferenceDirective,
+    );
+    byDir.set(dir, missing);
+    return missing;
+  }
+
   private isDeclared(name: string, fromAbsolute: string): boolean {
     return (
       this.findPackageDir(fromAbsolute, (pkg) => pkg.deps.has(name) || pkg.name === name) !==

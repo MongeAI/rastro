@@ -167,12 +167,13 @@ async function runAnalysis(
     files: [...s.files].sort(),
     options: s.options,
   }));
-  const fingerprint = JSON.stringify([config.options, scopes, manifests]);
+  const fingerprint = JSON.stringify([config.options, scopes, manifests, config.ambient]);
   const inputsChanged = [...cache.inputs].some(([file, stamp]) => fileStamp(file) !== stamp);
   let loaded = loadProgram(
     cache,
     config.options,
     discovered.files,
+    config.ambient,
     root,
     !cache.project || cache.fingerprint !== fingerprint || inputsChanged,
     () => progress({ code: 'loading-compiler' }),
@@ -183,7 +184,15 @@ async function runAnalysis(
   // uma resolução nova e, se alguma mudou, o compilador é recriado (o resultado tem de ser o de
   // uma análise nova)
   if (loaded.reused && hasStaleResolutions(loaded.program, resolver, root)) {
-    loaded = loadProgram(cache, config.options, discovered.files, root, true, () => {});
+    loaded = loadProgram(
+      cache,
+      config.options,
+      discovered.files,
+      config.ambient,
+      root,
+      true,
+      () => {},
+    );
   }
   cache.fingerprint = fingerprint;
   const { program } = loaded;
@@ -335,6 +344,8 @@ function loadProgram(
   cache: CompilerCache,
   compilerOptions: ts.CompilerOptions,
   files: DiscoveredFile[],
+  /** `.d.ts` globais do projeto: entram no compilador, mas não na análise (ver `ambient`). */
+  ambient: string[],
   root: string,
   fresh: boolean,
   beforeProgram: () => void,
@@ -359,7 +370,7 @@ function loadProgram(
   }
   const project = cache.project!;
   // arquivos que saíram da análise (removidos, excluídos) saem do compilador
-  const wanted = new Set(files.map((f) => f.absolute));
+  const wanted = new Set([...files.map((f) => f.absolute), ...ambient]);
   const inProject = new Set<string>();
   for (const sf of project.getSourceFiles()) {
     const absolute = path.normalize(sf.getFilePath());
@@ -416,6 +427,24 @@ function loadProgram(
         file: file.relative,
         params: failure.params,
       });
+    }
+  }
+
+  // `.d.ts` globais: um que não dá para ler só fica de fora (é só uma ajuda aos nomes globais)
+  for (const absolute of ambient) {
+    try {
+      const stamp = fileStamp(absolute);
+      const existing = project.getSourceFile(absolute);
+      if (!existing) project.addSourceFileAtPath(absolute);
+      else {
+        if (cache.stamps.get(absolute) !== stamp) existing.refreshFromFileSystemSync();
+        if (!inProject.has(absolute)) project.addSourceFileAtPath(absolute);
+      }
+      cache.stamps.set(absolute, stamp);
+    } catch {
+      const stale = project.getSourceFile(absolute);
+      if (stale) project.removeSourceFile(stale);
+      cache.stamps.delete(absolute);
     }
   }
 
@@ -2273,7 +2302,8 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
           : undefined;
       if (Node.isIdentifier(callee) || receiverIsThis || receiverFile) {
         // `nome()` sem nada com esse nome no escopo: nem declarado, nem importado (um import de
-        // pacote não instalado ainda declara o nome), nem global
+        // pacote não instalado ainda declara o nome), nem global. Com um pacote de tipos globais
+        // faltando (`types` do tsconfig, `@types/*` declarados), os globais são desconhecidos
         const undeclared =
           Node.isIdentifier(callee) &&
           (file.language === 'ts' || file.language === 'tsx') &&
@@ -2282,7 +2312,8 @@ function extractCalls(ctx: Ctx, file: DiscoveredFile, sf: SourceFile): void {
             callee.compilerNode,
             ts.SymbolFlags.Value | ts.SymbolFlags.Alias,
             false,
-          );
+          ) &&
+          !ctx.resolver.missingGlobalTypes(file.absolute);
         const target = addUnresolvedNode(
           ctx,
           file.relative,

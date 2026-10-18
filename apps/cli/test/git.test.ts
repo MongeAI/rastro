@@ -124,8 +124,32 @@ describe('parseUnifiedDiff', () => {
           [2, 3],
           [10, 10],
         ],
+        removedNames: ['comentário', 'removido'],
       },
-      { file: 'src/b.ts', status: 'modified', ranges: [[1, 1]] },
+      { file: 'src/b.ts', status: 'modified', ranges: [[1, 1]], removedNames: ['x'] },
+    ]);
+  });
+
+  it('nomes das linhas removidas (fora de chamadas): pistas do que a mudança tirou', () => {
+    const diff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,3 +1,2 @@',
+      '-export function sum(a: number) {',
+      "-  gtag('evento'); return a",
+      "-import { fmt, type Opt } from './fmt';",
+      '+export function add(a: number) {',
+      'diff --git a/src/velho.ts b/src/velho.ts',
+      'deleted file mode 100644',
+      '--- a/src/velho.ts',
+      '+++ /dev/null',
+      '@@ -1 +0,0 @@',
+      '-export const velho = 1;',
+    ].join('\n');
+    expect(parseUnifiedDiff(diff).map((f) => f.removedNames)).toEqual([
+      ['sum', 'a', 'number', 'evento', 'fmt', 'Opt'],
+      undefined,
     ]);
   });
 });

@@ -279,6 +279,13 @@
                   "type": "integer",
                   "minimum": 1
                 }
+              },
+              "removedNames": {
+                "description": "Nomes das linhas removidas (fora de chamadas): pistas de declarações e imports que a mudança tirou.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             }
           }

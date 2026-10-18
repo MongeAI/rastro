@@ -30,6 +30,8 @@ Caminhos dentro de `nodes`/`edges` são **relativos à raiz** e sempre usam `/`.
 
 `project.tsconfig` lista as configurações usadas na resolução de módulos: a da raiz (com as `references`, entre parênteses) e, em monorepos, os `tsconfig.json`/`jsconfig.json` de subpacotes que resolveram imports (ex.: `tsconfig.json, packages/web/tsconfig.json`). Cada arquivo usa o tsconfig referenciado pela raiz que o inclui ou, senão, o mais próximo subindo as pastas (com `extends`), para imports **e** chamadas.
 
+Com `--changes`/`--since` (e no `rastro impact`), o grafo ganha `changes`: a base comparada (`base`, `baseLabel`), `includesUntracked` e `files`, um item por arquivo alterado com `file`, `status` (`added`/`modified`/`deleted`/`renamed`), `previous` (renomeados), `ranges` (intervalos de linhas alteradas no arquivo atual), `deletionsAt` (linhas logo após trechos só removidos) e `removedNames` (nomes que aparecem nas linhas removidas, fora de chamadas `nome(...)`: pistas de declarações e imports que a mudança tirou; até 500 por arquivo).
+
 ## Nós (`nodes`)
 
 | Campo           | Descrição                                                                         |

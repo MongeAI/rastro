@@ -229,6 +229,7 @@ function evidenceFor(edge: GraphEdge, name?: string): Evidence | undefined {
 export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenReference[] {
   const gone = new Map<string, BrokenReference['why']>();
   const changed = new Set<string>();
+  const changedByPath = new Map(changes.files.map((f) => [f.file, f]));
   for (const f of changes.files) {
     if (f.status === 'deleted') gone.set(f.file, 'file-deleted');
     else {
@@ -374,17 +375,34 @@ export function brokenReferences(index: GraphIndex, changes: ChangeSet): BrokenR
       }
     }
     if (!target || !why) continue;
+    // nome não declarado no arquivo alterado: só o que se liga à mudança. A chamada está numa
+    // linha alterada, ou a mudança tirou o nome do arquivo (ele aparece numa linha removida,
+    // fora de chamadas). Uma chamada intocada a um global que a análise não vê (`.d.ts` fora
+    // dela, tipos não instalados) já estava assim antes
+    const file = why === 'name-missing' ? changedByPath.get(target) : undefined;
+    const removedName = !!file?.removedNames?.includes(reference);
     for (const edge of index.incoming(node.id, ['calls'])) {
       const from = index.node(edge.source);
       if (!from) continue;
+      const evidence =
+        file && !removedName
+          ? edge.evidence.filter(
+              (ev) =>
+                ev.file === target && file.ranges.some(([a, b]) => ev.line >= a && ev.line <= b),
+            )
+          : edge.evidence;
+      if (file && !removedName && !evidence.length) continue;
       found.push({
         from,
         kind: 'call',
         reference,
         target,
         why,
-        ...(edge.evidence[0] ? { evidence: edge.evidence[0] } : {}),
-        count: Math.max(edge.meta?.count ?? 0, edge.evidence.length, 1),
+        ...(evidence[0] ? { evidence: evidence[0] } : {}),
+        count:
+          file && !removedName
+            ? evidence.length
+            : Math.max(edge.meta?.count ?? 0, edge.evidence.length, 1),
       });
     }
   }

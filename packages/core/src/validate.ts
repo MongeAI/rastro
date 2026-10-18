@@ -279,7 +279,9 @@ export function graphIssues(
               (r[0] as number) <= (r[1] as number),
           ) ||
           (f.deletionsAt !== undefined &&
-            (!Array.isArray(f.deletionsAt) || !f.deletionsAt.every(isPositiveInt)))
+            (!Array.isArray(f.deletionsAt) || !f.deletionsAt.every(isPositiveInt))) ||
+          (f.removedNames !== undefined &&
+            (!Array.isArray(f.removedNames) || !f.removedNames.every((n) => typeof n === 'string')))
         )
           fail('invalid-item', { field: `changes.files[${i}]` });
   }

@@ -384,6 +384,40 @@ describe('possivelmente quebrado pela mudança', () => {
     ]);
   });
 
+  it('nome não declarado só conta na linha alterada ou se a mudança tirou o nome', async () => {
+    setLang('en');
+    // `gtag` (global de um .d.ts fora da análise) numa função que a mudança não tocou
+    const a = 'export function a() {\n  gtag("y");\n}\n\nexport function b() {\n  return 1;\n}\n';
+    const untouched = gitProject({ 'src/a.ts': a }, ({ write }) =>
+      write('src/a.ts', a.replace('return 1', 'return 2')),
+    );
+    expect(await brokenOf(untouched)).toEqual([]);
+    // globais de um .d.ts do "include" do tsconfig (nunca importado) existem
+    const ambient = gitProject(
+      {
+        'tsconfig.json': '{"compilerOptions":{"strict":true},"include":["src","types"]}',
+        'src/globals.d.ts': 'declare function track(e: string): void;\n',
+        'types/gtag.d.ts': 'declare function gtag(...a: unknown[]): void;\n',
+        'src/a.ts': 'export function a() {\n  return 1;\n}\n',
+      },
+      ({ write }) =>
+        write('src/a.ts', 'export function a() {\n  track("x");\n  gtag("y");\n  return 2;\n}\n'),
+    );
+    expect(await brokenOf(ambient)).toEqual([]);
+    // tipos globais pedidos pelo tsconfig e não instalados: os globais deles são desconhecidos
+    const spec = (n: number) =>
+      `import { sum } from "../src/sum";\ndescribe("sum", () => {\n  it("adds", () => {\n    expect(sum(1, ${n})).toBe(${n + 1});\n  });\n});\n`;
+    const types = gitProject(
+      {
+        'tsconfig.json': '{"compilerOptions":{"types":["vitest/globals","node"]}}',
+        'src/sum.ts': 'export function sum(a: number, b: number) { return a + b; }\n',
+        'test/sum.test.ts': spec(1),
+      },
+      ({ write }) => write('test/sum.test.ts', spec(2)),
+    );
+    expect(await brokenOf(types)).toEqual([]);
+  });
+
   it('nada quebrado: nenhuma seção nova', async () => {
     setLang('en');
     const report = buildImpactReport(await graphWithChanges(changedProject()));

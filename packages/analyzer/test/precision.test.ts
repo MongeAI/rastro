@@ -891,6 +891,38 @@ describe('o que o grafo guarda para explicar e comparar mudanças', () => {
     for (const rel of ['lib/esm.js', 'src/db.ts']) expect(meta(rel)?.commonjs, rel).toBeUndefined();
   });
 
+  it('globais de .d.ts do include existem; com tipos globais não instalados, nada é "não declarado"', async () => {
+    const ambient = await analyzeProject(
+      makeProject({
+        'tsconfig.json': '{"compilerOptions":{"strict":true},"include":["src","types"]}',
+        'src/globals.d.ts': 'declare function track(e: string): void;\n',
+        'types/gtag.d.ts': 'export {};\ndeclare global {\n  function gtag(): void;\n}\n',
+        'types/mod.d.ts': 'export declare function naoGlobal(): void;\n',
+        'src/a.ts': 'export function a() {\n  track("x");\n  gtag();\n  naoGlobal();\n}\n',
+      }),
+    );
+    expectValid(ambient);
+    // declarados num arquivo do projeto fora da análise (o .d.ts), não "não declarados"
+    for (const name of ['track', 'gtag'])
+      expect(node(ambient, `unresolved:src/a.ts#call:${name}`)?.meta).toEqual({
+        reason: 'not-analyzed',
+        reference: name,
+      });
+    expect(node(ambient, 'unresolved:src/a.ts#call:naoGlobal')?.meta?.undeclared).toBe(true);
+    // os .d.ts não viram arquivos do grafo
+    expect(ambient.nodes.some((n) => n.id.endsWith('.d.ts'))).toBe(false);
+
+    for (const files of [
+      { 'tsconfig.json': '{"compilerOptions":{"types":["vitest/globals"]}}' },
+      { 'package.json': '{"devDependencies":{"@types/jest":"^29.0.0"}}' },
+    ]) {
+      const g = await analyzeProject(
+        makeProject({ ...files, 'test/a.test.ts': 'describe("x", () => {});\n' }),
+      );
+      expect(node(g, 'unresolved:test/a.test.ts#call:describe')?.meta?.undeclared).toBeUndefined();
+    }
+  });
+
   it('rota com handler inline fica marcada; com handler referenciado, não', async () => {
     const g = await analyzeProject(fixture('express-api'));
     const routes = g.nodes.filter((n) => n.kind === 'route');
