@@ -55,6 +55,13 @@
     "local-first",
     "code-graph",
     "codebase-visualization",
-    "dependency-analysis"
+    "dependency-analysis",
+    "architecture",
+    "architecture-rules",
+    "impact-analysis",
+    "code-review",
+    "github-action",
+    "mcp",
+    "mcp-server"
   ]
 }

@@ -21,11 +21,12 @@
 <p align="center">
   <b>Understand code you have never seen in minutes, not days.</b><br />
   Rastro reads a JavaScript/TypeScript repository and opens an <b>interactive map</b> of its folders, files, functions and classes in your browser,<br />
-  where <b>every connection points to the file and line that proves it</b>. Everything runs on your machine: no cloud, no mandatory AI.
+  where <b>every connection points to the file and line that proves it</b>. Everything runs on your machine: no cloud, no mandatory AI.<br />
+  New in 0.2: <b>architecture rules</b> checked on every pull request, the <b>impact</b> of a change, and a server your <b>AI agent</b> can query (MCP).
 </p>
 
 <p align="center">
-  <img src="docs/assets/en/demo.gif" alt="Demo: the impact of a change, the command palette and the path from main to the changed function" width="900" />
+  <img src="docs/assets/en/demo.gif" alt="Demo: the Changes tab of a pull request, the Rules tab drawing in red the dependency that breaks a rule, and the path from computeInsights to the forbidden analyzer function" width="900" />
 </p>
 
 > _Rastro_ is Portuguese for “trail” or “trace”: the tool lets you follow the trail of any relationship in your code back to the exact line that creates it.
@@ -159,6 +160,10 @@ Any other MCP client: a stdio server started with `npx -y @mongeai/rastro@0.2.0 
 | `rastro_path`       | How A reaches B (entities, files, folders, or an external package as destination): the shortest proven chains with evidence, or a clear "no proven path" (with the reverse, file-level or possible paths when they exist)                                                                       |
 | `rastro_routes`     | HTTP routes with method, full path (or why it is unknown), framework, handler and `file:line`                                                                                                                                                                                                   |
 
+A real Claude Code session, asked to review uncommitted changes: it calls `rastro_check`, finds the import that breaks a rule and proposes the fix.
+
+<p align="center"><img src="docs/assets/en/mcp.png" alt="Claude Code session: the agent runs git diff and rastro_check with changes true, finds that src/ui/userList.ts:1 imports from src/db against the rule 'The UI never touches the database', and suggests using the service instead" width="860" /></p>
+
 An answer looks like this (a method only reachable through an interface):
 
 ```text
@@ -200,24 +205,15 @@ Write down who may depend on whom in `rastro.rules.json`, and Rastro proves ever
 }
 ```
 
-```text
-$ rastro check
-Architecture rules rastro.rules.json · 3 rules
-
-✗ The UI does not touch the database · 1 violation
-    Go through src/services.
-    src/ui/page.ts → src/db/client.ts (import, call) src/ui/page.ts:2 (2 times)
-✓ Pure domain
-✓ No import cycles
-
-✗ 1 violation
-```
+<p align="center"><img src="docs/assets/en/check.png" alt="rastro check --since main: three rules pass; 'graph runs in the browser' has 1 new violation, packages/graph/src/insights.ts imports and calls packages/analyzer/src/discover.ts at line 2" width="900" /></p>
 
 **`rastro check --init` writes the rules your code already follows** (the layering between the main folders, no import cycles, production code not importing tests), so today's architecture is locked in with one command. From then on:
 
 - in **CI**, the Action comments the violations a pull request **introduces** and fails the job: debt that already exists never blocks anyone;
 - the map gets a **Rules** tab that draws the offending dependencies in red;
 - **your AI agent** calls `rastro_check` with `changes: true` before saying it is done, and fixes what it broke.
+
+<p align="center"><img src="docs/assets/en/rules.png" alt="Rules tab: 'graph runs in the browser' has 1 new violation, and the map draws in red the dependency from insights.ts to the analyzer folder" width="900" /></p>
 
 Only proven relationships (resolved imports, calls and inheritance) violate a rule; calls that only _may_ reach a forbidden place (through an interface) are shown apart and never fail. Details in [Architecture rules](#architecture-rules).
 
@@ -250,6 +246,8 @@ jobs:
       - uses: MongeAI/rastro@v0.2.0
 ```
 
+<p align="center"><img src="docs/assets/en/pr-comment.png" alt="The Rastro comment on a pull request: what changed, 1 new architecture rule violation with its file and line, the 10 test files to run and the 37 entities that could be affected" width="820" /></p>
+
 The same report is available anywhere with `rastro impact`:
 
 ```bash
@@ -265,7 +263,7 @@ Running only the affected tests is great for fast feedback, but keep the full su
 
 `rastro . --since main` (or `--changes` for uncommitted work) reads `git diff` and marks the **functions, methods and files** whose lines changed. The **Changes** tab shows what changed, **who depends on it** (by distance, through proven calls, imports and inheritance), the **HTTP routes** involved and the **test files to run**. The map highlights the blast radius.
 
-<p align="center"><img src="docs/assets/en/changes.png" alt="Changes tab: parseUnifiedDiff changed, 4 entities could be affected and git.test.ts should run" width="900" /></p>
+<p align="center"><img src="docs/assets/en/changes.png" alt="Changes tab: parseUnifiedDiff and computeInsights changed, 37 entities could be affected and 10 test files should run" width="900" /></p>
 
 ### How does A reach B?
 

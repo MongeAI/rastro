@@ -96,5 +96,7 @@ Outras linguagens (Python/Go) e extensões de editor ficam para a 0.3, para a 0.
 - [ ] Rodar tudo numa máquina limpa: `npm ci && npm run build && npm test && npm run test:e2e`.
 - [ ] Testar o pacote empacotado: `npm pack -w apps/cli` e `npx ./mongeai-rastro-0.2.0.tgz` num projeto real.
 - [ ] `npm publish` (feito pelo dono do pacote, com 2FA) **antes** da tag: a GitHub Action usa `@mongeai/rastro@0.2.0` do npm.
-- [ ] Merge de `next` em `main`, tag `v0.2.0` (é ela que `uses: MongeAI/rastro@v0.2.0` usa), release no GitHub com o CHANGELOG.
+- [ ] Merge de `next` em `main`, tag `v0.2.0` (é ela que `uses: MongeAI/rastro@v0.2.0` usa) e envio da tag: as imagens do README no npm apontam para a tag (`raw.githubusercontent.com/MongeAI/rastro/v0.2.0/...`) e aparecem assim que ela chega ao GitHub.
+- [ ] Release no GitHub com as notas de `docs/releases/v0.2.0.md` e o `.tgz` anexado (acrescentar o shasum do `npm publish` no fim das notas): `gh release create v0.2.0 mongeai-rastro-0.2.0.tgz --title "Rastro 0.2.0" --notes-file docs/releases/v0.2.0.md`.
+- [ ] Prévia do repositório no GitHub (Settings → Social preview): `docs/assets/social-preview.png`.
 - [ ] Depois do lançamento: workflow do próprio repositório usando a action em cada PR (dogfooding).

@@ -21,11 +21,12 @@
 <p align="center">
   <b>Entenda um código que você nunca viu em minutos, não em dias.</b><br />
   O Rastro lê um repositório JavaScript/TypeScript e abre no seu navegador um <b>mapa interativo</b> de pastas, arquivos, funções e classes,<br />
-  em que <b>cada ligação aponta para o arquivo e a linha que a comprovam</b>. Tudo na sua máquina, sem nuvem e sem IA obrigatória.
+  em que <b>cada ligação aponta para o arquivo e a linha que a comprovam</b>. Tudo na sua máquina, sem nuvem e sem IA obrigatória.<br />
+  Novo na 0.2: <b>regras de arquitetura</b> conferidas em cada pull request, o <b>impacto</b> de uma mudança e um servidor que o seu <b>agente de IA</b> consulta (MCP).
 </p>
 
 <p align="center">
-  <img src="docs/assets/pt/demo.gif" alt="Demonstração: o impacto de uma mudança, a paleta de comandos e o caminho do main até a função alterada" width="900" />
+  <img src="docs/assets/pt/demo.gif" alt="Demonstração: a aba Mudanças de um pull request, a aba Regras desenhando em vermelho a dependência que quebra uma regra e o caminho de computeInsights até a função proibida do analisador" width="900" />
 </p>
 
 ---
@@ -157,6 +158,10 @@ Qualquer outro cliente MCP: um servidor stdio iniciado com `npx -y @mongeai/rast
 | `rastro_path`       | Como A chega em B (entidades, arquivos, pastas, ou um pacote externo como destino): as menores cadeias comprovadas com evidência, ou um "não há caminho comprovado" claro (com o inverso, o de arquivos ou o possível, quando existem)                                                  |
 | `rastro_routes`     | Rotas HTTP com método, caminho completo (ou por que ele não é conhecido), framework, handler e `arquivo:linha`                                                                                                                                                                          |
 
+Uma sessão real do Claude Code, com o pedido de revisar as mudanças antes do commit: ele chama o `rastro_check`, encontra o import que quebra uma regra e propõe a correção.
+
+<p align="center"><img src="docs/assets/pt/mcp.png" alt="Sessão do Claude Code: o agente roda git diff e rastro_check, descobre que src/ui/userList.ts:1 importa de src/db contra a regra 'A interface não acessa o banco' e sugere usar o serviço" width="860" /></p>
+
 Uma resposta é assim (um método só alcançado por uma interface):
 
 ```text
@@ -198,24 +203,15 @@ Escreva no `rastro.rules.json` quem pode depender de quem, e o Rastro prova cada
 }
 ```
 
-```text
-$ rastro check
-Regras de arquitetura rastro.rules.json · 3 regras
-
-✗ A interface não acessa o banco · 1 violação
-    Passe pelos serviços em src/services.
-    src/ui/page.ts → src/db/client.ts (import, chamada) src/ui/page.ts:2 (2 vezes)
-✓ Domínio puro
-✓ Sem ciclos de importação
-
-✗ 1 violação
-```
+<p align="center"><img src="docs/assets/pt/check.png" alt="rastro check --since main: três regras passam; 'graph roda no navegador' tem 1 violação nova, packages/graph/src/insights.ts importa e chama packages/analyzer/src/discover.ts na linha 2" width="900" /></p>
 
 **`rastro check --init` escreve as regras que o seu código já cumpre** (as camadas entre as pastas principais, nenhum ciclo de importação, código de produção sem importar testes): a arquitetura de hoje fica travada com um comando. A partir daí:
 
 - no **CI**, a Action comenta as violações que um pull request **introduz** e reprova o job: a dívida que já existe nunca bloqueia ninguém;
 - o mapa ganha a aba **Regras**, que desenha em vermelho as dependências proibidas;
 - **seu agente de IA** chama o `rastro_check` com `changes: true` antes de dizer que terminou, e corrige o que quebrou.
+
+<p align="center"><img src="docs/assets/pt/rules.png" alt="Aba Regras: 'graph roda no navegador' tem 1 violação nova, e o mapa desenha em vermelho a dependência de insights.ts para a pasta do analisador" width="900" /></p>
 
 Só relações comprovadas (imports, chamadas e herança resolvidos) violam uma regra; chamadas que só _podem_ chegar a um lugar proibido (por uma interface) aparecem à parte e nunca reprovam. Detalhes em [Regras de arquitetura](#regras-de-arquitetura).
 
@@ -250,6 +246,8 @@ jobs:
           lang: pt
 ```
 
+<p align="center"><img src="docs/assets/pt/pr-comment.png" alt="O comentário do Rastro num pull request: o que mudou, 1 violação nova de regra de arquitetura com arquivo e linha, os 10 arquivos de teste para rodar e as 37 entidades que podem ser afetadas" width="820" /></p>
+
 O mesmo relatório está disponível em qualquer lugar com `rastro impact`:
 
 ```bash
@@ -265,7 +263,7 @@ Rodar só os testes afetados é ótimo para um retorno rápido, mas mantenha a s
 
 `rastro . --since main` (ou `--changes` para o que ainda não foi commitado) lê o `git diff` e marca as **funções, métodos e arquivos** cujas linhas mudaram. A aba **Mudanças** mostra o que mudou, **quem depende disso** (por distância, por chamadas, imports e herança comprovados), as **rotas HTTP** envolvidas e os **arquivos de teste para rodar**. O mapa destaca o alcance do impacto.
 
-<p align="center"><img src="docs/assets/pt/changes.png" alt="Aba Mudanças: parseUnifiedDiff mudou, 4 entidades podem ser afetadas e git.test.ts deve rodar" width="900" /></p>
+<p align="center"><img src="docs/assets/pt/changes.png" alt="Aba Mudanças: parseUnifiedDiff e computeInsights mudaram, 37 entidades podem ser afetadas e 10 arquivos de teste devem rodar" width="900" /></p>
 
 ### Como A chega em B?
 
