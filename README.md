@@ -103,7 +103,7 @@ To use this build as a global command: `npm link -w apps/cli` (undo with `npm un
 **Claude Code**
 
 ```bash
-claude mcp add --transport stdio rastro -- npx -y @mongeai/rastro@0.2.0 mcp
+claude mcp add --transport stdio rastro -- npx -y @mongeai/rastro@0.2.1 mcp
 ```
 
 Without a path, `rastro mcp` analyzes the project Claude Code is working on (Claude Code passes it in `CLAUDE_PROJECT_DIR`) and otherwise the current folder. Add `--scope project` to share the server with your team through a `.mcp.json` at the root of the repository:
@@ -113,7 +113,7 @@ Without a path, `rastro mcp` analyzes the project Claude Code is working on (Cla
   "mcpServers": {
     "rastro": {
       "command": "npx",
-      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp"]
+      "args": ["-y", "@mongeai/rastro@0.2.1", "mcp"]
     }
   }
 }
@@ -127,7 +127,7 @@ Without a path, `rastro mcp` analyzes the project Claude Code is working on (Cla
     "rastro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+      "args": ["-y", "@mongeai/rastro@0.2.1", "mcp", "${workspaceFolder}"]
     }
   }
 }
@@ -141,13 +141,13 @@ Without a path, `rastro mcp` analyzes the project Claude Code is working on (Cla
     "rastro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+      "args": ["-y", "@mongeai/rastro@0.2.1", "mcp", "${workspaceFolder}"]
     }
   }
 }
 ```
 
-Any other MCP client: a stdio server started with `npx -y @mongeai/rastro@0.2.0 mcp /path/to/project`.
+Any other MCP client: a stdio server started with `npx -y @mongeai/rastro@0.2.1 mcp /path/to/project`.
 
 | Tool                | What the agent gets                                                                                                                                                                                                                                                                             |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -191,7 +191,7 @@ Write down who may depend on whom in `rastro.rules.json`, and Rastro proves ever
 
 ```json
 {
-  "$schema": "https://unpkg.com/@mongeai/rastro@0.2.0/schema/rastro-rules.schema.json",
+  "$schema": "https://unpkg.com/@mongeai/rastro@0.2.1/schema/rastro-rules.schema.json",
   "rules": [
     {
       "name": "The UI does not touch the database",
@@ -243,7 +243,7 @@ jobs:
         with:
           fetch-depth: 0 # the history is needed to find where the branch started
           ref: ${{ github.event.pull_request.head.sha }} # links and line numbers point to the pull request's own commit
-      - uses: MongeAI/rastro@v0.2.0
+      - uses: MongeAI/rastro@v0.2.1
 ```
 
 <p align="center"><img src="docs/assets/en/pr-comment.png" alt="The Rastro comment on a pull request: what changed, 1 new architecture rule violation with its file and line, the 10 test files to run and the 37 entities that could be affected" width="820" /></p>
@@ -487,7 +487,7 @@ The rules file is plain JSON: nothing from the project is executed. In CI it com
 
 ### GitHub Action
 
-`uses: MongeAI/rastro@v0.2.0` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment per analyzed `path`, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact. In a monorepo, call it once per package with a different `path` and `artifact-name`: each call gets its own comment, outputs and report. Links in the comment point to the analyzed commit and to the file's path in the repository. When the analyzed folder has a `rastro.rules.json`, the comment also lists the [architecture rule](#architecture-rules) violations the pull request introduces, and the job fails on them after commenting (`fail-on-violations: false` to only report).
+`uses: MongeAI/rastro@v0.2.1` analyzes the pull request, writes the report to the job summary, comments on the pull request (one comment per analyzed `path`, updated on every push) and uploads the offline HTML map as the `rastro-report` artifact. In a monorepo, call it once per package with a different `path` and `artifact-name`: each call gets its own comment, outputs and report. Links in the comment point to the analyzed commit and to the file's path in the repository. When the analyzed folder has a `rastro.rules.json`, the comment also lists the [architecture rule](#architecture-rules) violations the pull request introduces, and the job fails on them after commenting (`fail-on-violations: false` to only report).
 
 | Input                | Default                 | Purpose                                                                                                                                                   |
 | -------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -501,13 +501,13 @@ The rules file is plain JSON: nothing from the project is executed. In CI it com
 | `artifact-name`      | `rastro-report`         | Artifact name (one per call when running the action more than once)                                                                                       |
 | `fail-on-violations` | `true`                  | Fail the job when the pull request introduces a violation of an `error` rule in `rastro.rules.json` (or the file is invalid); the comment is posted first |
 | `lang`               | `en`                    | `en` or `pt`                                                                                                                                              |
-| `version`            | `0.2.0`                 | Version of `@mongeai/rastro` to run                                                                                                                       |
+| `version`            | `0.2.1`                 | Version of `@mongeai/rastro` to run                                                                                                                       |
 
 Outputs: `tests` (affected test files, one per line), `changed`, `impacted`, `broken` (references possibly broken by the change), `violations` (architecture rule violations the pull request introduces), `markdown` and `json` (paths of the reports). To run only the affected tests in a later step, pass the output through an environment variable (never straight into `run:`):
 
 ```yaml
 - id: rastro
-  uses: MongeAI/rastro@v0.2.0
+  uses: MongeAI/rastro@v0.2.1
 - name: Affected tests first
   if: steps.rastro.outputs.tests != ''
   env:

@@ -1,6 +1,6 @@
 {
   "name": "@rastro/web",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Interface web local do Rastro (React + Cytoscape.js).",
   "license": "MIT",
@@ -12,8 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@rastro/core": "0.2.0",
-    "@rastro/graph": "0.2.0",
+    "@rastro/core": "0.2.1",
+    "@rastro/graph": "0.2.1",
     "cytoscape": "3.34.4",
     "cytoscape-fcose": "^2.2.0",
     "cytoscape-layout-utilities": "^1.1.1",

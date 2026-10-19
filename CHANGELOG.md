@@ -2,7 +2,7 @@
 
 All notable changes to Rastro. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.1]
 
 ### Fixed
 
@@ -79,7 +79,7 @@ The map now answers **what matters**: what a change affects, how one part reache
 
 - First public release: static analysis of JS/TS projects into an evidence-backed graph and an interactive local map.
 
-[Unreleased]: https://github.com/MongeAI/rastro/compare/v0.2.0...HEAD
+[0.2.1]: https://github.com/MongeAI/rastro/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MongeAI/rastro/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/MongeAI/rastro/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/MongeAI/rastro/releases/tag/v0.1.0

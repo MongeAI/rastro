@@ -40,7 +40,7 @@ inputs:
     default: en
   version:
     description: Version of @mongeai/rastro to run.
-    default: 0.2.0
+    default: 0.2.1
   github-token:
     description: Token used to comment on the pull request.
     default: ${{ github.token }}

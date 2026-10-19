@@ -1,6 +1,6 @@
 {
   "name": "@mongeai/rastro",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Follow the trail of your code: a local-first, explorable map of JavaScript/TypeScript projects where every relationship links to the line that proves it.",
   "license": "MIT",
   "author": "MongeAI",
@@ -30,9 +30,9 @@
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
-    "@rastro/analyzer": "0.2.0",
-    "@rastro/core": "0.2.0",
-    "@rastro/graph": "0.2.0"
+    "@rastro/analyzer": "0.2.1",
+    "@rastro/core": "0.2.1",
+    "@rastro/graph": "0.2.1"
   },
   "repository": {
     "type": "git",

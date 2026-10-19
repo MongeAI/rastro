@@ -101,7 +101,7 @@ Para usar esse build como comando global: `npm link -w apps/cli` (para desfazer,
 **Claude Code**
 
 ```bash
-claude mcp add --transport stdio rastro -- npx -y @mongeai/rastro@0.2.0 mcp
+claude mcp add --transport stdio rastro -- npx -y @mongeai/rastro@0.2.1 mcp
 ```
 
 Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalhando (o Claude Code o informa em `CLAUDE_PROJECT_DIR`) e, fora dele, a pasta atual. Acrescente `--scope project` para compartilhar o servidor com o time por um `.mcp.json` na raiz do repositório:
@@ -111,7 +111,7 @@ Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalh
   "mcpServers": {
     "rastro": {
       "command": "npx",
-      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp"]
+      "args": ["-y", "@mongeai/rastro@0.2.1", "mcp"]
     }
   }
 }
@@ -125,7 +125,7 @@ Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalh
     "rastro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+      "args": ["-y", "@mongeai/rastro@0.2.1", "mcp", "${workspaceFolder}"]
     }
   }
 }
@@ -139,13 +139,13 @@ Sem caminho, o `rastro mcp` analisa o projeto em que o Claude Code está trabalh
     "rastro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@mongeai/rastro@0.2.0", "mcp", "${workspaceFolder}"]
+      "args": ["-y", "@mongeai/rastro@0.2.1", "mcp", "${workspaceFolder}"]
     }
   }
 }
 ```
 
-Qualquer outro cliente MCP: um servidor stdio iniciado com `npx -y @mongeai/rastro@0.2.0 mcp /caminho/do/projeto`.
+Qualquer outro cliente MCP: um servidor stdio iniciado com `npx -y @mongeai/rastro@0.2.1 mcp /caminho/do/projeto`.
 
 | Ferramenta          | O que o agente recebe                                                                                                                                                                                                                                                                   |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -189,7 +189,7 @@ Escreva no `rastro.rules.json` quem pode depender de quem, e o Rastro prova cada
 
 ```json
 {
-  "$schema": "https://unpkg.com/@mongeai/rastro@0.2.0/schema/rastro-rules.schema.json",
+  "$schema": "https://unpkg.com/@mongeai/rastro@0.2.1/schema/rastro-rules.schema.json",
   "rules": [
     {
       "name": "A interface não acessa o banco",
@@ -241,7 +241,7 @@ jobs:
         with:
           fetch-depth: 0 # o histórico é necessário para achar onde a branch começou
           ref: ${{ github.event.pull_request.head.sha }} # links e linhas apontam para o próprio commit do pull request
-      - uses: MongeAI/rastro@v0.2.0
+      - uses: MongeAI/rastro@v0.2.1
         with:
           lang: pt
 ```
@@ -487,7 +487,7 @@ O arquivo de regras é JSON puro: nada do projeto é executado. No CI ele vem do
 
 ### GitHub Action
 
-`uses: MongeAI/rastro@v0.2.0` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário por `path` analisado, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`. Num monorepo, chame a action uma vez por pacote, com `path` e `artifact-name` diferentes: cada chamada tem o seu comentário, as suas saídas e o seu relatório. Os links do comentário apontam para o commit analisado e para o caminho do arquivo no repositório. Quando a pasta analisada tem um `rastro.rules.json`, o comentário também lista as violações de [regras de arquitetura](#regras-de-arquitetura) que o pull request introduz, e o job reprova depois de comentar (`fail-on-violations: false` para só avisar).
+`uses: MongeAI/rastro@v0.2.1` analisa o pull request, escreve o relatório no resumo do job, comenta no pull request (um comentário por `path` analisado, atualizado a cada push) e envia o mapa HTML offline como o artefato `rastro-report`. Num monorepo, chame a action uma vez por pacote, com `path` e `artifact-name` diferentes: cada chamada tem o seu comentário, as suas saídas e o seu relatório. Os links do comentário apontam para o commit analisado e para o caminho do arquivo no repositório. Quando a pasta analisada tem um `rastro.rules.json`, o comentário também lista as violações de [regras de arquitetura](#regras-de-arquitetura) que o pull request introduz, e o job reprova depois de comentar (`fail-on-violations: false` para só avisar).
 
 | Entrada              | Padrão                 | Para que serve                                                                                                                                          |
 | -------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -501,13 +501,13 @@ O arquivo de regras é JSON puro: nada do projeto é executado. No CI ele vem do
 | `artifact-name`      | `rastro-report`        | Nome do artefato (um por chamada, se usar a action mais de uma vez)                                                                                     |
 | `fail-on-violations` | `true`                 | Reprova o job quando o pull request introduz uma violação de uma regra `error` do `rastro.rules.json` (ou o arquivo é inválido); o comentário sai antes |
 | `lang`               | `en`                   | `en` ou `pt`                                                                                                                                            |
-| `version`            | `0.2.0`                | Versão do `@mongeai/rastro` a rodar                                                                                                                     |
+| `version`            | `0.2.1`                | Versão do `@mongeai/rastro` a rodar                                                                                                                     |
 
 Saídas: `tests` (arquivos de teste afetados, um por linha), `changed`, `impacted`, `broken` (referências possivelmente quebradas pela mudança), `violations` (violações de regras de arquitetura que o pull request introduz), `markdown` e `json` (caminhos dos relatórios). Para rodar só os testes afetados num passo seguinte, passe a saída por uma variável de ambiente (nunca direto no `run:`):
 
 ```yaml
 - id: rastro
-  uses: MongeAI/rastro@v0.2.0
+  uses: MongeAI/rastro@v0.2.1
 - name: Testes afetados primeiro
   if: steps.rastro.outputs.tests != ''
   env:
