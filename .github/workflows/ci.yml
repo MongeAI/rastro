@@ -22,6 +22,8 @@ jobs:
       - run: npm run format:check
       - run: npm run build
       - run: npm test
+      # o Rastro confere a própria arquitetura (rastro.rules.json)
+      - run: node apps/cli/bin/rastro.js check
       # interface de ponta a ponta no Chrome que já vem no ubuntu-latest
       - run: npm run test:e2e
         env:

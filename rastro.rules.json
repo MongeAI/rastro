@@ -1,0 +1,38 @@
+{
+  "$schema": "./packages/core/schema/rastro-rules.schema.json",
+  "rules": [
+    {
+      "name": "Packages never depend on the apps",
+      "from": "packages",
+      "except": "**/test/**",
+      "deny": "apps"
+    },
+    {
+      "name": "core is the foundation",
+      "from": "packages/core",
+      "except": "**/test/**",
+      "deny": ["packages/graph", "packages/analyzer"],
+      "because": "Every other package builds on @rastro/core."
+    },
+    {
+      "name": "graph runs in the browser",
+      "from": "packages/graph",
+      "except": "**/test/**",
+      "deny": ["packages/analyzer", "pkg:node:*"],
+      "because": "The web map bundles @rastro/graph; the analyzer needs Node.js and the TypeScript compiler."
+    },
+    {
+      "name": "The web map stays in the browser",
+      "from": "apps/web",
+      "except": ["apps/web/test/**", "apps/web/*.config.ts"],
+      "deny": ["packages/analyzer", "apps/cli", "pkg:node:*"],
+      "because": "apps/web is served as static files and embedded in the offline HTML report."
+    },
+    {
+      "name": "Code does not import tests",
+      "from": "**",
+      "except": ["**/test/**", "e2e/**", "fixtures/**"],
+      "deny": ["**/test/**", "e2e/**"]
+    }
+  ]
+}
