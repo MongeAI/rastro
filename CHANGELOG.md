@@ -2,6 +2,12 @@
 
 All notable changes to Rastro. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `--changes`/`--since` (and `rastro impact`/`rastro check` run directly in a GitHub Actions workflow) no longer refuse a repository just because its config has an `include.path` or `includeIf` (the current `actions/checkout` stores credentials that way). The keys of included files are still checked, so an included file that defines a command is still refused.
+
 ## [0.2.0]
 
 The map now answers **what matters**: what a change affects, how one part reaches another, where to look first, in English or Portuguese. And your AI coding agent can ask the same questions.
@@ -73,6 +79,7 @@ The map now answers **what matters**: what a change affects, how one part reache
 
 - First public release: static analysis of JS/TS projects into an evidence-backed graph and an interactive local map.
 
+[Unreleased]: https://github.com/MongeAI/rastro/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/MongeAI/rastro/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/MongeAI/rastro/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/MongeAI/rastro/releases/tag/v0.1.0

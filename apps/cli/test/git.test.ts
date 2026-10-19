@@ -275,12 +275,34 @@ describe('collectChanges + impacto', () => {
     expect(fs.existsSync(path.join(root, 'PWNED'))).toBe(true);
   });
 
-  it('recusa include.path no config.worktree e chaves vindas de GIT_CONFIG_*', () => {
+  it('segue include.path/includeIf: recusa o que o arquivo incluído define, não o include', () => {
     const root = repo(base);
     run(root, 'config', 'extensions.worktreeConfig', 'true');
-    run(root, 'config', '--worktree', 'include.path', '../outro.config');
-    expect(riskyGitConfig(root)).toEqual(['include.path']);
+    fs.writeFileSync(
+      path.join(root, '.git', 'outro.config'),
+      '[core]\n\tpager = touch PAGER_RODOU\n',
+    );
+    run(root, 'config', '--worktree', 'include.path', 'outro.config');
+    expect(riskyGitConfig(root)).toEqual(['core.pager']);
     expect(() => collectChanges(root)).toThrow(GitError);
+
+    // como o actions/checkout v6+: as credenciais num arquivo incluído por includeIf.gitdir
+    const ci = repo(base);
+    const creds = path.join(ci, '..', `${path.basename(ci)}-credenciais.config`);
+    fs.writeFileSync(
+      creds,
+      '[http "https://github.com/"]\n\textraheader = AUTHORIZATION: basic xyz\n',
+    );
+    run(ci, 'config', `includeIf.gitdir:${ci}/.git.path`, creds);
+    run(ci, 'config', 'include.path', '/nao/existe.config');
+    expect(riskyGitConfig(ci)).toEqual([]);
+    fs.appendFileSync(path.join(ci, 'src/main.ts'), '// mudança\n');
+    expect(collectChanges(ci).files.map((f) => f.file)).toEqual(['src/main.ts']);
+    // o mesmo includeIf com um comando dentro: recusado
+    fs.appendFileSync(creds, '[diff]\n\texternal = touch DIFF_RODOU\n');
+    expect(riskyGitConfig(ci)).toEqual(['diff.external']);
+    expect(() => collectChanges(ci)).toThrow(/diff\.external/);
+    expect(fs.existsSync(path.join(ci, 'DIFF_RODOU'))).toBe(false);
 
     const clean = repo(base);
     expect(riskyGitConfig(clean)).toEqual([]);

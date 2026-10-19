@@ -12,7 +12,10 @@ const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
  * Configurações do repositório que fazem o git EXECUTAR comandos ao gerar um diff. Um
  * repositório baixado de fonte não confiável (ex.: um .zip com a pasta .git) pode trazê-las
  * no `.git/config` ou no `.git/config.worktree` (lido quando `extensions.worktreeConfig` está
- * ligado), direto ou por `include.path`.
+ * ligado), direto ou por `include.path`/`includeIf`. O include em si não executa nada, e a
+ * listagem (`git config --list`) já segue os includes, com as mesmas condições do diff no
+ * mesmo repositório: uma chave perigosa num arquivo incluído aparece nela e é recusada. Por
+ * isso o include não é recusado (o `actions/checkout` guarda as credenciais num `includeIf`).
  */
 const RISKY_CONFIG = [
   /^filter\..+\.(clean|smudge|process)$/,
@@ -22,8 +25,6 @@ const RISKY_CONFIG = [
   /^core\.hookspath$/,
   /^core\.pager$/,
   /^core\.sshcommand$/,
-  /^include\.path$/,
-  /^includeif\..+\.path$/,
 ];
 
 /** Opções que neutralizam extensões do git que poderiam executar código. */
