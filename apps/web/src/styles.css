@@ -1412,8 +1412,31 @@ kbd {
   align-items: center;
   gap: 7px;
 }
+.rule-title {
+  /* o nome da regra é texto de quem a escreveu: aparece como foi escrito */
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
 .rule-name {
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rule-violation {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.rule-violation .rel-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+.rule-violation .rel-loc {
+  flex-basis: 100%;
+  margin-left: 0;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 .rule-mark {

@@ -907,12 +907,10 @@ function Explorer({
     if (frameRequest?.tab !== 'rules' || frameRequest.seq === rulesFramed.current) return;
     rulesFramed.current = frameRequest.seq;
     if (!showRules || !rulesState?.check || panelMode !== 'overview') return;
-    const ids = rulesState.check.outcomes
-      .flatMap((o) => o.violations.map((v) => nodeId.file(v.from)))
-      .filter((id) => index.node(id))
-      .slice(0, 60);
+    // os dois lados de cada violação (quem depende e de quem), como aparecem no mapa agora
+    const ids = (ruleHighlight?.nodes ?? []).slice(0, 60);
     if (ids.length) setCenterRequest((r) => ({ id: ids[0]!, seq: (r?.seq ?? 0) + 1, fitIds: ids }));
-  }, [frameRequest, showRules, rulesState, index, panelMode]);
+  }, [frameRequest, showRules, rulesState, ruleHighlight, panelMode]);
   /** Abre a entidade onde a violação aparece (a origem da primeira relação). */
   const openViolation = (v: RuleViolation) => {
     const edge = v.edges.length ? index.edges.get(v.edges[0]!) : undefined;

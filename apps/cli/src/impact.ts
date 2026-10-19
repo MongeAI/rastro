@@ -362,21 +362,6 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
     out.push('');
   }
 
-  out.push(`#### ${m.impacted}`, '');
-  if (!report.impacted.length) out.push(m.nothingDepends, '');
-  else {
-    out.push(
-      `| ${m.distance} | ${m.entity} | ${m.kind} | ${m.via} | ${m.where} |`,
-      '| ---: | --- | --- | --- | --- |',
-    );
-    for (const i of report.impacted.slice(0, limit))
-      out.push(
-        `| ${i.depth} | ${mdCode(i.name, true)} | ${kind(i.kind)} | ${viaMd(i)} | ${fileLink(i.file, i.line, options, true)} |`,
-      );
-    more(report.impacted.length);
-    out.push('');
-  }
-
   if (report.routes.length) {
     out.push(`#### ${m.routes}`, '');
     for (const i of report.routes.slice(0, limit))
@@ -391,6 +376,27 @@ function renderMarkdown(report: ImpactReport, options: RenderOptions): string {
     more(report.tests.length);
     out.push('');
   }
+
+  // a lista mais longa por último, recolhida quando passa de 10 (o resumo já dá o número)
+  out.push(
+    report.impacted.length > 10 ? '<details>' : '<details open>',
+    `<summary><b>${m.impacted} (${report.impacted.length})</b></summary>`,
+    '',
+  );
+  if (!report.impacted.length) out.push(m.nothingDepends, '');
+  else {
+    out.push(
+      `| ${m.distance} | ${m.entity} | ${m.kind} | ${m.via} | ${m.where} |`,
+      '| ---: | --- | --- | --- | --- |',
+    );
+    for (const i of report.impacted.slice(0, limit))
+      out.push(
+        `| ${i.depth} | ${mdCode(i.name, true)} | ${kind(i.kind)} | ${viaMd(i)} | ${fileLink(i.file, i.line, options, true)} |`,
+      );
+    more(report.impacted.length);
+    out.push('');
+  }
+  out.push('</details>', '');
 
   if (report.outsideGraph.length) {
     out.push(`#### ${m.outside}`, '');

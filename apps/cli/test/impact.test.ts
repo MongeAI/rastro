@@ -100,6 +100,11 @@ describe('relatório de impacto', () => {
     expect(md.startsWith('<!-- rastro-impact -->\n')).toBe(true);
     expect(md).toContain('[`src/math.ts:1`](https://github.com/o/r/blob/abc/src/math.ts#L1)');
     expect(md).toContain('| 1 | `total` | Function | calls `sum` |');
+    // o que dá para agir primeiro (testes), a lista longa de afetados por último, recolhível
+    expect(md.indexOf('#### Tests to run')).toBeLessThan(
+      md.indexOf('<summary><b>Could be affected'),
+    );
+    expect(md).toContain('<details open>\n<summary><b>Could be affected (2)</b></summary>');
 
     const json = JSON.parse(renderImpact(report, 'json')) as typeof report;
     expect(json.summary).toEqual(report.summary);
